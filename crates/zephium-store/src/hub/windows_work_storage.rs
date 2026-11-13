@@ -32,6 +32,7 @@ impl WindowsWorkStorage {
         let application = match identifier {
             "app.zephium" => NativeApplication::Product,
             "app.zephium.dev" => NativeApplication::Development,
+            "app.zephium.custom" => NativeApplication::Custom,
             "app.zephium.review-qa" => NativeApplication::ReviewQa,
             "app.zephium.webext-qa" => NativeApplication::ExtensionQa,
             "app.zephium.files-integration-qa" => NativeApplication::FilesIntegrationQa,
