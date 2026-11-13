@@ -88,8 +88,6 @@ Last ID: T-0046
   - `mail.enabled`, `calendar.enabled`; turning one off while in its mode returns to Browse (like `operations.rs` does for Work).
 - [ ] T-0018 · Modes: texts and the onboarding mock switch · area: frame/messages (13 locales), frame/src/features/onboarding/components/Window.svelte · owner: - · updated: 2026-11-13
   - `mode_mail`, `mode_calendar`, update `ui_mode_work_hint`; the onboarding window draws a fake two-tab switch.
-- [ ] T-0019 · Mail: check the company server type in Thunderbird · area: (user) · owner: user · updated: 2026-11-13
-  - Thunderbird → Account Settings → Server Settings: IMAP / POP / Exchange, and the server names; also whether the work calendar is CalDAV or Exchange. Decides T-0034 and T-0040.
 - [ ] T-0020 · Mail: crate `zephium-mail` with IMAP over TLS · area: new crates/zephium-mail · owner: - · updated: 2026-11-13
   - `async-imap` + rustls; IDLE for push; bounded reads; all server data is untrusted input. Unit tests against a fake IMAP server.
 - [ ] T-0021 · Mail: MIME parsing · area: crates/zephium-mail · owner: - · updated: 2026-11-13
@@ -120,8 +118,6 @@ Last ID: T-0046
   - Windows toast; unread count on the Mail mode button.
 - [ ] T-0034 · Mail: Microsoft 365 / Gmail sign-in (OAuth2, XOAUTH2) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
   - Needs app registrations with Microsoft and Google (client IDs), done by the user. Only if T-0019 shows it is needed, or for personal accounts.
-- [ ] T-0035 · Mail: Exchange support (EWS or Microsoft Graph) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
-  - Only if the company server is Exchange without IMAP (see T-0019).
 - [ ] T-0036 · Mail: extras · area: crates/zephium-mail, frame/src/features/mail · owner: - · updated: 2026-11-13
   - POP3 (optional), offline mode, rules/filters, contact suggestions from sent mail, `mailto:` links opening Zephium's compose.
 - [ ] T-0037 · Calendar: crate and iCalendar parsing · area: new crates/zephium-calendar · owner: - · updated: 2026-11-13
@@ -148,16 +144,22 @@ Last ID: T-0046
 - [ ] T-0004 · Decide on fork releases for colleague updates · area: .github, desktop · owner: - · updated: 2026-11-13
   - Today the custom updater endpoint points at this fork's releases, and none exist, so no automatic updates happen.
   - Automatic updates would need a minisign key pair, a `pubkey` in `tauri.custom.conf.json` and published `latest.json` and installers.
+  - 2026-11-13: skipped by user for this batch.
 - [ ] T-0006 · Remove macOS-specific code (Windows-only fork) · area: crates, desktop, frame, xtask, scripts, .github · owner: - · updated: 2026-11-13
   - Scope today: 158 macOS-named `.rs` files (about 83k lines), `zephium-webext-macos` (11k) and `zephium-terra-macos-probe` (23k), 1,895 `target_os = "macos"` sites in 188 files, 29 frame files, Swift, plist and macOS CI jobs.
   - Decide the scope first: whole files and crates only, or also the `cfg` blocks. The `cfg` edits in shared files cause conflicts on every upstream merge.
   - Acceptance: Windows `cargo clippy --workspace --all-targets --locked -- -D warnings`, the Windows nextest set and `pnpm --dir frame run check` pass, and `pnpm build:custom` works.
-- [ ] T-0005 · Remove stale feature exceptions `focus`/`activity`/`resources` · area: frame/architecture.config.js · owner: - · updated: 2026-11-13
-  - These folders do not exist in `frame/src/features`. Low priority; consider reporting it upstream instead.
 
 ## Blocked
 
 ## Done
+
+- [x] T-0005 · Remove stale feature exceptions `focus`/`activity`/`resources` · area: frame/architecture.config.js · owner: orca w4-stale · updated: 2026-11-13
+  - `c7b3ecd28`: dropped the three names. `pnpm --dir frame run lint` exit 0, vitest `architecture.config` 9/9 (Windows).
+- [x] T-0019 · Mail: check the company server type in Thunderbird · area: (user) · owner: user · updated: 2026-11-13
+  - User confirmed the company mail is IMAP.
+- [x] T-0035 · Mail: Exchange support (EWS or Microsoft Graph) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
+  - Not needed (IMAP), per T-0019.
 
 - [x] T-0008 · Replace built-in AI providers with Claude CLI, Antigravity CLI, OpenCode CLI and a custom BYOK backup · area: zephium-agentic, zephium-app work_*, desktop work_*, frame work/assist/settings · owner: claude-main (+ subagents) · updated: 2026-11-13
   - Needs a design decision first: (a) a CLI as the model behind Work's own tool loop, (b) handing whole tasks to the CLI (`work_computer/delegate.rs` already knows Codex and Claude, but it is gated off), or (c) Zephium exposing the browser as an MCP server that the CLI drives. Also decide what happens to the Ask Zephium sidebar and voice dictation.
