@@ -88,10 +88,6 @@ Last ID: T-0046
   - POP3 (optional), offline mode, rules/filters, contact suggestions from sent mail, `mailto:` links opening Zephium's compose.
 - [ ] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
   - Shares sign-in with T-0034; only if needed (see T-0019).
-- [ ] T-0043 · Calendar: create, edit, move and delete events · area: frame/src/features/calendar, crates/zephium-calendar · owner: - · updated: 2026-11-13
-  - Writable CalDAV calendars; title, time, all-day, location, notes, recurrence, reminders; drag to move.
-  - 2026-11-13: UI for create/edit/move/delete done (`6727a4639`); recurring events are view/delete-only until the backend exposes series info and `calendar_update_occurrence` (calendar-store worker). All-day banner drag not done.
-  - 2026-11-13: backend done (`bd4f38c12`, `b57438c3d`): `calendar_update_occurrence`/`calendar_delete_occurrence`, overrides/EXDATEs kept, VTIMEZONE per TZID, series fields + `CalendarRecurrenceV1` on occurrences. Open: wire the UI to them (recurring edit), all-day drag.
 - [ ] T-0044 · Calendar: reminders as Windows notifications · area: desktop/src/focus_alerts.rs, crates/zephium-calendar · owner: - · updated: 2026-11-13
 - [ ] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: - · updated: 2026-11-13
   - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
@@ -112,6 +108,11 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0043 · Calendar: create, edit, move and delete events · area: frame/src/features/calendar, crates/zephium-calendar · owner: orca w2-calendar-ui + w2-calendar-store · updated: 2026-11-13
+  - Writable CalDAV calendars; title, time, all-day, location, notes, recurrence, reminders; drag to move.
+  - 2026-11-13: UI for create/edit/move/delete done (`6727a4639`); recurring events are view/delete-only until the backend exposes series info and `calendar_update_occurrence` (calendar-store worker). All-day banner drag not done.
+  - 2026-11-13: backend done (`bd4f38c12`, `b57438c3d`): `calendar_update_occurrence`/`calendar_delete_occurrence`, overrides/EXDATEs kept, VTIMEZONE per TZID, series fields + `CalendarRecurrenceV1` on occurrences. Open: wire the UI to them (recurring edit), all-day drag.
+  - `e92295f2b`: "This event / All events" for edit, move, delete; structured recurrence editor; all-day banner drag. Frame typecheck/lint/stylelint/knip/build pass, 375 unit + 20 component tests (Chromium, Windows). Limits: monthly/yearly day selectors read-only; not run in the native app.
 - [x] T-0041 · Calendar: local cache and sync · area: crates/zephium-store (calendar tables + migration), crates/zephium-calendar · owner: orca w2-calendar-store · updated: 2026-11-13
   - Sync tokens / ETags; periodic and manual refresh.
   - 2026-11-13: in-memory cache done in `zephium-calendar` (`ccf74bf31`); persistent zephium-store tables still open (wave 2).
