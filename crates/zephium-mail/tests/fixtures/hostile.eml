@@ -1,0 +1,18 @@
+From: "Evil" <evil@example.com>
+To: bob@example.com
+Subject: line one
+ =?UTF-8?B?CkJjYzogYXR0YWNrZXJAZXZpbC5jb20=?=
+Date: Wed, 13 Nov 2024 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="B"
+
+--B
+Content-Type: text/plain
+
+body
+--B
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="../../.ssh/CON:evil.exe"
+
+AAAA
+--B--

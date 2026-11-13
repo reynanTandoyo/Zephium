@@ -42,6 +42,8 @@ zephium-work-composition = { path = "crates/zephium-work-composition", version =
 zephium-page-assist = { path = "crates/zephium-page-assist", version = "=0.1.0" }
 # Fork (T-0008): AI apps on this computer as model backends.
 zephium-cli-models = { path = "crates/zephium-cli-models", version = "=0.1.0" }
+# Fork (T-0020): IMAP/SMTP mail engine.
+zephium-mail = { path = "crates/zephium-mail", version = "=0.1.0" }
 
 tauri = { version = "=2.11.3", features = ["macos-private-api"] }
 tauri-build = "2"

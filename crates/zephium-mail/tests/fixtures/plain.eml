@@ -1,0 +1,15 @@
+From: =?UTF-8?Q?Ann_Beispiel?= <ann@example.com>
+To: Bob <bob@example.com>, carol@example.com
+Cc: cc@example.com
+Subject: =?UTF-8?Q?Gr=C3=BC=C3=9Fe_aus_K=C3=B6ln?=
+Date: Wed, 13 Nov 2024 12:00:00 +0000
+Message-ID: <m1@example.com>
+In-Reply-To: <m0@example.com>
+References: <m-1@example.com> <m0@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+Hallo Bob,
+
+sch=C3=B6ne Gr=C3=BC=C3=9Fe aus K=C3=B6ln.
