@@ -83,6 +83,7 @@ Last ID: T-0046
   - POP3 (optional), offline mode, rules/filters, contact suggestions from sent mail, `mailto:` links opening Zephium's compose.
 - [ ] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
   - Shares sign-in with T-0034; only if needed (see T-0019).
+  - 2026-11-13: backend done (`2e9d71508`..`0e618bca7` + META v31 `oauth` account kind): Google Calendar API v3 and Microsoft Graph (calendarView/delta) providers, `calendar_add_oauth_account(grant, name)`, guide updated. Tests: calendar 87, oauth 39, store calendar 9 + migrations 61 pass, clippy clean (Windows, fakes only). Open: `oauth_sign_in` `purposes` argument (mail follow-ups worker), the UI fields in Calendar accounts, occurrence edits on Microsoft unsupported.
 - [ ] T-0044 · Calendar: reminders as Windows notifications · area: desktop/src/focus_alerts.rs, crates/zephium-calendar · owner: - · updated: 2026-11-13
 - [ ] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: - · updated: 2026-11-13
   - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
