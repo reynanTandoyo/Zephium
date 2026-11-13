@@ -51,26 +51,69 @@ test("http, https and mailto links are listed, never given an href", () => {
   expect(out.html).toContain('data-zephium-link="0"');
 });
 
-test("remote images are removed and counted until allowed", () => {
+test("remote images are removed and counted until the backend has fetched them", () => {
   const html = '<img src="https://tracker.example/p.gif" width=1 height=1 alt="x">';
   const blocked = clean(html);
   expect(blocked.remoteImages).toBe(1);
+  expect(blocked.remoteLoaded).toBe(0);
+  expect(blocked.remoteUrls).toEqual(["https://tracker.example/p.gif"]);
   expect(blocked.html).not.toContain("tracker.example");
   expect(blocked.html).toContain("data-zephium-blocked");
-  const allowed = clean(html, { allowRemoteImages: true });
-  expect(allowed.html).toContain('src="https://tracker.example/p.gif"');
-  expect(
-    clean('<img src="http://x.example/a.png">', { allowRemoteImages: true }).remoteImages,
-  ).toBe(1);
+});
+
+test("a fetched remote image is shown as its data url, never as the remote address", () => {
+  const html = '<img src="https://img.example/p.png?a=1&amp;b=2" alt="x">';
+  const data = "data:image/png;base64,iVBORw0KGgo=";
+  const out = clean(html, { remoteImages: new Map([["https://img.example/p.png?a=1&b=2", data]]) });
+  expect(out.remoteLoaded).toBe(1);
+  expect(out.html).toContain(`src="${data}"`);
+  expect(out.html).not.toContain("img.example");
+  expect(out.html).not.toContain("data-zephium-blocked");
+});
+
+test("a fetched answer is checked again: svg, other types and oversized data stay blocked", () => {
+  const html = '<img src="https://img.example/a">';
+  for (const bad of [
+    "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+    "data:text/html;base64,PGI+",
+    "https://img.example/a",
+    "javascript:alert(1)",
+    `data:image/png;base64,${"A".repeat(3 * 1024 * 1024)}`,
+  ]) {
+    const out = clean(html, { remoteImages: new Map([["https://img.example/a", bad]]) });
+    expect(out.remoteLoaded).toBe(0);
+    expect(out.html).toContain("data-zephium-blocked");
+    expect(out.html).not.toContain("src=");
+  }
+});
+
+test("only https images can be fetched: http is counted and stays blocked", () => {
+  const out = clean('<img src="http://x.example/a.png"><img src="https://x.example/a.png">', {
+    remoteImages: new Map([
+      ["http://x.example/a.png", "data:image/png;base64,iVBORw0KGgo="],
+      ["https://x.example/a.png", "data:image/png;base64,iVBORw0KGgo="],
+    ]),
+  });
+  expect(out.remoteImages).toBe(2);
+  expect(out.remoteLoaded).toBe(1);
+  expect(out.remoteUrls).toEqual(["https://x.example/a.png"]);
+  expect(out.html).not.toContain("x.example");
+});
+
+test("the same image is asked for once", () => {
+  const out = clean('<img src="https://x.example/a.png"><img src="https://x.example/a.png">');
+  expect(out.remoteImages).toBe(2);
+  expect(out.remoteUrls).toEqual(["https://x.example/a.png"]);
 });
 
 test("other image sources never load: srcset, background, file, ftp, protocol-relative", () => {
   const out = clean(
     '<img src="//x.example/a.png"><img src="file:///c:/a.png"><img srcset="https://x.example/a.png 2x" src="ftp://x/a">' +
       '<table background="https://x.example/b.png"><tr><td background="https://x.example/c">z</td></tr></table>',
-    { allowRemoteImages: true },
+    { remoteImages: new Map([["https://x.example/a.png", "data:image/png;base64,iVBORw0KGgo="]]) },
   );
   expect(out.html).not.toMatch(/x\.example|file:|ftp:|srcset|background=/iu);
+  expect(out.remoteUrls).toEqual([]);
 });
 
 test("cid images resolve from attachments; unknown ones are dropped", () => {
@@ -182,11 +225,11 @@ test("link targets are validated", () => {
 });
 
 test("the frame document carries a CSP that allows no network or script", () => {
-  const document = mailFrameDocument("<p>x</p>", false);
+  const document = mailFrameDocument("<p>x</p>");
   expect(document).toContain("default-src 'none'; img-src data:; style-src 'unsafe-inline'");
   expect(document).not.toMatch(/<script|<base|<link/iu);
-  expect(mailFrameCsp(true)).toContain("img-src data: https:");
-  expect(mailFrameCsp(true)).not.toContain("script-src");
+  expect(mailFrameCsp()).toBe("default-src 'none'; img-src data:; style-src 'unsafe-inline'");
+  expect(mailFrameCsp()).not.toMatch(/https:|http:|script-src/u);
 });
 
 test("plain text is split into text and link segments without markup", () => {

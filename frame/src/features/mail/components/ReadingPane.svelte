@@ -2,8 +2,11 @@
   The reading pane. Plain text is drawn as text. HTML is sanitised first and
   then shown in a sandboxed frame with no scripts, no same-origin access and a
   CSP that allows no network, so it cannot run code or call out. Remote images
-  wait for "Load images", per message. Links never navigate here: their real
-  target is shown and opened as a browser tab on confirmation.
+  wait for "Load images", per message: the backend fetches the https ones and
+  they are shown as data URLs, so the frame still never touches the network.
+  Links never navigate here (the frame has no script to report a click): they
+  are listed below the message, and their real target is shown and opened as a
+  browser tab on confirmation.
 -->
 <script lang="ts">
   import Attachment01Icon from "@hugeicons/core-free-icons/Attachment01Icon";
@@ -29,8 +32,6 @@
   const body = $derived(open?.body ?? null);
   const header = $derived(body?.header ?? open?.row.message ?? null);
 
-  /** Messages whose remote images the person chose to load. */
-  let loaded = $state.raw<ReadonlySet<string>>(new Set());
   /** A link the person clicked, waiting to be opened or dismissed. */
   let target = $state<string | null>(null);
   let saved = $state<Record<number, "saved" | "failed">>({});
@@ -43,7 +44,7 @@
     linksOpen = false;
   });
 
-  const allowImages = $derived(open ? loaded.has(open.row.key) : false);
+  const remote = $derived(open?.remote ?? null);
   const inline = $derived(
     new Map(
       (body?.inline_images ?? []).flatMap((image) => {
@@ -53,9 +54,16 @@
     ),
   );
   const rendered = $derived(
-    body?.html ? sanitizeMailHtml(body.html, { inline, allowRemoteImages: allowImages }) : null,
+    body?.html
+      ? sanitizeMailHtml(body.html, {
+          inline,
+          remoteImages: new Map(Object.entries(remote?.images ?? {})),
+        })
+      : null,
   );
-  const frame = $derived(rendered ? mailFrameDocument(rendered.html, allowImages) : null);
+  const frame = $derived(rendered ? mailFrameDocument(rendered.html) : null);
+  /** Remote images that are still not shown (not asked for, refused, or not https). */
+  const imagesLeft = $derived(rendered ? rendered.remoteImages - rendered.remoteLoaded : 0);
   const segments = $derived(!rendered && body?.text ? linkify(body.text) : null);
   const links = $derived(
     rendered
@@ -68,8 +76,7 @@
   );
 
   function loadImages() {
-    if (!open) return;
-    loaded = new Set([...loaded, open.row.key]);
+    if (rendered) void store.loadRemoteImages(rendered.remoteUrls);
   }
 
   /** Opens the shown target as a browser tab; the pane itself never navigates. */
@@ -124,10 +131,20 @@
       {/if}
     </header>
 
-    {#if rendered && rendered.remoteImages > 0 && !allowImages}
+    {#if rendered && imagesLeft > 0}
       <div class="banner" role="status">
-        <span>{m.mail_images_blocked()}</span>
-        <Button size="compact" onclick={loadImages}>{m.mail_load_images()}</Button>
+        {#if remote?.state === "failed"}
+          <span>{m.mail_images_failed({ reason: reasonText(remote.error ?? "internal") })}</span>
+        {:else if remote?.state === "ready"}
+          <span>{m.mail_images_partial()}</span>
+        {:else}
+          <span>{m.mail_images_blocked()}</span>
+        {/if}
+        {#if remote?.state !== "ready" && rendered.remoteUrls.length > 0}
+          <Button size="compact" pending={remote?.state === "loading"} onclick={loadImages}>
+            {m.mail_load_images()}
+          </Button>
+        {/if}
       </div>
     {/if}
     {#if body.truncated}<p class="banner" role="status">{m.mail_truncated()}</p>{/if}

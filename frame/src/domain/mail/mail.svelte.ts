@@ -9,7 +9,7 @@ import type {
   MailFolderV1,
 } from "$shared/ipc/bindings";
 import { events } from "$shared/ipc/native-events";
-import { callMail, READ_TIMEOUT, WRITE_TIMEOUT, type MailFailure } from "./call";
+import { callMail, IMAGES_TIMEOUT, READ_TIMEOUT, WRITE_TIMEOUT, type MailFailure } from "./call";
 import { composeFor, type ComposeMode } from "./compose";
 import { ComposeSession } from "./compose.svelte";
 import { buildThreads, rowKey, type MailRow } from "./thread";
@@ -22,16 +22,30 @@ type Load = "idle" | "loading" | "ready" | "failed";
 
 type MailSelection = { account: string; folder: string };
 
+/** The remote images of the open message: fetched by the backend on request. */
+type RemoteImages = {
+  state: Load;
+  /** Address as the message wrote it → `data:` URL. */
+  images: Readonly<Record<string, string>>;
+  error: MailFailure | null;
+};
+
 type OpenMessage = {
   row: MailRow;
   state: Load;
   body: MailBodyV1 | null;
   error: MailFailure | null;
+  remote: RemoteImages;
 };
+
+/** At most this many images are requested per message (the backend's bound). */
+const MAX_REMOTE_IMAGES = 24;
+
+const noRemote = (): RemoteImages => ({ state: "idle", images: {}, error: null });
 
 /** An action that could not be completed, shown until dismissed. */
 type MailNotice = {
-  action: "flag" | "move" | "delete" | "archive" | "junk" | "sync" | "open" | "account";
+  action: "flag" | "move" | "delete" | "archive" | "junk" | "sync" | "open" | "account" | "order";
   error: MailFailure | "no_folder";
 };
 
@@ -415,7 +429,7 @@ export class MailStore {
   async openRow(row: MailRow) {
     const sequence = ++this.openSequence;
     const generation = this.generation;
-    this.open = { row, state: "loading", body: null, error: null };
+    this.open = { row, state: "loading", body: null, error: null, remote: noRemote() };
     const outcome = await callMail(
       () => commands.mailMessage(row.account, row.folder, row.message.uid),
       READ_TIMEOUT,
@@ -428,10 +442,10 @@ export class MailStore {
     )
       return;
     if (!outcome.ok) {
-      this.open = { row, state: "failed", body: null, error: outcome.error };
+      this.open = { row, state: "failed", body: null, error: outcome.error, remote: noRemote() };
       return;
     }
-    this.open = { row, state: "ready", body: outcome.value, error: null };
+    this.open = { row, state: "ready", body: outcome.value, error: null, remote: noRemote() };
     // Reading marks the message seen on the server; the row follows the answer.
     if (!row.message.flags.seen) void this.setSeen([row], true);
   }
@@ -439,6 +453,42 @@ export class MailStore {
   close() {
     this.openSequence++;
     this.open = null;
+  }
+
+  /**
+   * "Load images": asks the backend to fetch the `https:` images of the open
+   * message. They come back as `data:` URLs; nothing remote is loaded here.
+   * Returns whether the images arrived (some may still be left out).
+   */
+  async loadRemoteImages(urls: readonly string[]) {
+    const current = this.open;
+    if (!current || current.state !== "ready" || current.remote.state === "loading") return false;
+    const { row } = current;
+    const wanted = urls.filter((url, at) => urls.indexOf(url) === at).slice(0, MAX_REMOTE_IMAGES);
+    if (!wanted.length) return false;
+    const sequence = this.openSequence;
+    const generation = this.generation;
+    this.open = { ...current, remote: { ...current.remote, state: "loading", error: null } };
+    const outcome = await callMail(
+      () => commands.mailFetchRemoteImages(row.account, row.folder, row.message.uid, wanted),
+      IMAGES_TIMEOUT,
+      this.lifetime.signal,
+    );
+    // Only the message that asked may receive the answer.
+    if (
+      generation !== this.generation ||
+      sequence !== this.openSequence ||
+      outcome.ok === "aborted" ||
+      this.open?.row.key !== row.key
+    )
+      return false;
+    if (!outcome.ok) {
+      this.open = { ...this.open, remote: { state: "failed", images: {}, error: outcome.error } };
+      return false;
+    }
+    const images = Object.fromEntries(outcome.value.map((image) => [image.url, image.data_url]));
+    this.open = { ...this.open, remote: { state: "ready", images, error: null } };
+    return true;
   }
 
   async saveAttachment(row: MailRow, part: number) {
@@ -646,6 +696,33 @@ export class MailStore {
     this.accounts = this.accounts.map((account) =>
       account.id === outcome.value.id ? outcome.value : account,
     );
+    return true;
+  }
+
+  /**
+   * Moves an account one place up (`-1`) or down (`1`) in the list. The
+   * order is saved natively first; the list follows the answer.
+   */
+  async moveAccount(id: string, step: -1 | 1) {
+    const ids = this.accounts.map((account) => account.id);
+    const from = ids.indexOf(id);
+    const to = from + step;
+    if (from < 0 || to < 0 || to >= ids.length) return false;
+    const order = ids.toSpliced(from, 1).toSpliced(to, 0, id);
+    const outcome = await callMail(
+      () => commands.mailSetAccountOrder(order),
+      WRITE_TIMEOUT,
+      this.lifetime.signal,
+    );
+    if (outcome.ok === "aborted") return false;
+    if (!outcome.ok) {
+      this.notice = { action: "order", error: outcome.error };
+      return false;
+    }
+    this.accounts = order.flatMap((key) => {
+      const account = this.accounts.find((candidate) => candidate.id === key);
+      return account ? [account] : [];
+    });
     return true;
   }
 

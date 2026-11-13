@@ -1,7 +1,9 @@
 <!--
-  Adding a mail account: address and password, servers found or typed by
-  hand, a test of both servers, then the account. The password stays in the
-  setup object only until it is submitted and is never shown again.
+  Adding a mail account: address and password (or a sign-in with Microsoft or
+  Google in the system browser, with the client ID the person registered),
+  servers found or typed by hand, a test of both servers, then the account.
+  The password and a client secret stay in the setup object only until they
+  are submitted and are never shown again.
 -->
 <script lang="ts">
   import { onDestroy } from "svelte";
@@ -11,7 +13,7 @@
   import Button from "$shared/ui/Button";
   import Field from "$shared/ui/Field";
   import Select from "$shared/ui/Select";
-  import { reasonText } from "../lib/text";
+  import { oauthReasonText, reasonText } from "../lib/text";
 
   let {
     colourSeed = 0,
@@ -33,6 +35,13 @@
     { value: "start_tls", label: m.mail_setup_starttls() },
   ];
 
+  const methods = $derived([
+    { value: null, label: m.mail_setup_method_password() },
+    { value: "microsoft" as const, label: m.mail_oauth_microsoft() },
+    { value: "google" as const, label: m.mail_oauth_google() },
+  ]);
+  const oauth = $derived(setup.oauthProvider !== null);
+
   async function add() {
     const account = await setup.add();
     if (account) onadded(account);
@@ -46,15 +55,25 @@
     event.preventDefault();
     if (setup.canAdd) void add();
     else if (setup.canTest && !setup.tested) void setup.runTest();
-    else if (setup.canDetect && !setup.serversReady) void setup.detect();
+    else if (oauth && setup.canSignIn && !setup.grant) void setup.signIn();
+    else if (!oauth && setup.canDetect && !setup.serversReady) void setup.detect();
   }}
 >
   <h2 id="mail-setup-title">{m.mail_setup_title()}</h2>
   <p class="intro">{m.mail_setup_intro()}</p>
 
-  <!-- A later "Sign in with Microsoft or Google (client ID)" option goes here,
-       above the password form; it adds an account without a typed password. -->
-  <div class="oauth-slot" data-slot="oauth"></div>
+  <div class="methods" role="group" aria-label={m.mail_setup_method()}>
+    {#each methods as method (method.value)}
+      <Button
+        type="button"
+        size="compact"
+        variant={setup.oauthProvider === method.value ? "primary" : "ghost"}
+        aria-pressed={setup.oauthProvider === method.value}
+        disabled={setup.busy}
+        onclick={() => setup.chooseProvider(method.value)}>{method.label}</Button
+      >
+    {/each}
+  </div>
 
   <div class="fields">
     <Field
@@ -65,21 +84,88 @@
       bind:value={setup.email}
       oninput={() => setup.touched()}
     />
-    <Field
-      label={m.mail_setup_password()}
-      type="password"
-      autocomplete="off"
-      hint={setup.passwordCleared ? m.mail_setup_password_cleared() : m.mail_setup_password_hint()}
-      bind:value={setup.password}
-      oninput={() => {
-        setup.touched();
-        setup.passwordCleared = false;
-      }}
-    />
+    {#if !oauth}
+      <Field
+        label={m.mail_setup_password()}
+        type="password"
+        autocomplete="off"
+        hint={setup.passwordCleared
+          ? m.mail_setup_password_cleared()
+          : m.mail_setup_password_hint()}
+        bind:value={setup.password}
+        oninput={() => {
+          setup.touched();
+          setup.passwordCleared = false;
+        }}
+      />
+    {/if}
     <Field label={m.mail_setup_name()} autocomplete="name" bind:value={setup.displayName} />
   </div>
 
-  {#if !setup.serversReady && !setup.manual}
+  {#if setup.oauthProvider}
+    <section class="oauth" aria-label={m.mail_oauth_section()}>
+      <p class="note">{m.mail_oauth_help()}</p>
+      <Field
+        label={m.mail_oauth_client_id()}
+        hint={m.mail_oauth_client_id_hint()}
+        autocomplete="off"
+        spellcheck={false}
+        disabled={setup.busy}
+        bind:value={setup.clientId}
+        oninput={() => setup.touched()}
+      />
+      {#if setup.oauthProvider === "microsoft"}
+        <Field
+          label={m.mail_oauth_tenant()}
+          hint={m.mail_oauth_tenant_hint()}
+          autocomplete="off"
+          spellcheck={false}
+          disabled={setup.busy}
+          bind:value={setup.tenant}
+        />
+      {:else}
+        <Field
+          label={m.mail_oauth_secret()}
+          type="password"
+          autocomplete="off"
+          hint={setup.secretCleared ? m.mail_oauth_secret_cleared() : m.mail_oauth_secret_hint()}
+          disabled={setup.busy}
+          bind:value={setup.clientSecret}
+          oninput={() => (setup.secretCleared = false)}
+        />
+      {/if}
+      <div class="row">
+        <Button
+          variant="primary"
+          type="button"
+          disabled={!setup.canSignIn}
+          pending={setup.phase === "signing_in"}
+          onclick={() => void setup.signIn()}
+        >
+          {setup.phase === "signing_in"
+            ? m.mail_oauth_signing_in()
+            : setup.oauthProvider === "microsoft"
+              ? m.mail_oauth_sign_in_microsoft()
+              : m.mail_oauth_sign_in_google()}
+        </Button>
+        {#if setup.phase === "signing_in"}
+          <Button variant="ghost" type="button" onclick={() => setup.cancelSignIn()}>
+            {m.mail_oauth_cancel()}
+          </Button>
+        {/if}
+      </div>
+      {#if setup.oauthFailure}
+        <p class="problem" role="alert">
+          {m.mail_oauth_failed({ reason: oauthReasonText(setup.oauthFailure) })}
+        </p>
+      {:else if setup.grant}
+        <p class="good" role="status">{m.mail_oauth_signed_in()}</p>
+      {/if}
+      <p class="note">{m.mail_oauth_servers()}</p>
+    </section>
+  {/if}
+
+  {#if !oauth && !setup.serversReady && !setup.manual}
     <div class="row">
       <Button
         variant="primary"
@@ -101,7 +187,9 @@
     </div>
   {/if}
 
-  {#if setup.detected && !setup.detected.found}
+  {#if oauth}
+    <!-- The provider fixes the servers: nothing to find or type. -->
+  {:else if setup.detected && !setup.detected.found}
     <p class="note" role="status">{m.mail_setup_not_found()}</p>
   {:else if setup.detected?.found && !setup.manual}
     <p class="note" role="status">
@@ -109,7 +197,7 @@
     </p>
   {/if}
 
-  {#if setup.serversReady || setup.manual}
+  {#if !oauth && (setup.serversReady || setup.manual)}
     <fieldset class="servers" disabled={setup.busy}>
       <legend>{m.mail_setup_incoming()}</legend>
       <Field
@@ -189,7 +277,7 @@
     {/if}
   </div>
 
-  {#if setup.serversReady || setup.manual}
+  {#if oauth || setup.serversReady || setup.manual}
     <div class="row">
       <Button
         type="button"
@@ -254,6 +342,28 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .methods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .oauth {
+    display: grid;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+  }
+
+  .oauth .note,
+  .oauth .problem,
+  .oauth .good {
+    margin: 0;
+    font-size: var(--text-body);
+    line-height: 1.5;
   }
 
   .servers {

@@ -15,6 +15,8 @@ const host = vi.hoisted(() => ({
   search: vi.fn(),
   removeAccount: vi.fn(),
   watch: vi.fn(),
+  images: vi.fn(),
+  order: vi.fn(),
 }));
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
@@ -30,6 +32,8 @@ vi.mock("$shared/ipc/bindings", async () => {
     mailSearch: host.search,
     mailRemoveAccount: host.removeAccount,
     mailWatch: host.watch,
+    mailFetchRemoteImages: host.images,
+    mailSetAccountOrder: host.order,
   });
 });
 vi.mock("$shared/ipc/native-events", () => ({
@@ -309,5 +313,106 @@ test("a reply needs an open message; a new message uses the selected account", a
   expect(store.compose?.account).toBe("a2");
   store.closeCompose();
   expect(store.compose).toBeNull();
+  store.dispose();
+});
+
+async function openFirst() {
+  twoAccounts();
+  host.message.mockImplementation((_id: string, _folder: string, uid: number) =>
+    ok({
+      header: message(uid),
+      reply_to: [],
+      text: null,
+      html: '<img src="https://img.example/a.png">',
+      truncated: false,
+      attachments: [],
+      inline_images: [],
+    }),
+  );
+  const store = new MailStore();
+  await store.start();
+  await store.openRow(store.rows[0]!);
+  return store;
+}
+
+const pixel = "data:image/png;base64,iVBORw0KGgo=";
+
+test("remote images are asked for once per message and arrive as data urls", async () => {
+  const store = await openFirst();
+  expect(store.open?.remote.state).toBe("idle");
+  host.images.mockReturnValue(ok([{ url: "https://img.example/a.png", data_url: pixel }]));
+  expect(
+    await store.loadRemoteImages(["https://img.example/a.png", "https://img.example/a.png"]),
+  ).toBe(true);
+  expect(host.images).toHaveBeenCalledExactlyOnceWith("a1", "INBOX", 2, [
+    "https://img.example/a.png",
+  ]);
+  expect(store.open?.remote.state).toBe("ready");
+  expect(store.open?.remote.images["https://img.example/a.png"]).toBe(pixel);
+  store.dispose();
+});
+
+test("at most 24 images are requested, and nothing is asked when there are none", async () => {
+  const store = await openFirst();
+  host.images.mockReturnValue(ok([]));
+  expect(await store.loadRemoteImages([])).toBe(false);
+  expect(host.images).not.toHaveBeenCalled();
+  const many = Array.from({ length: 40 }, (_, n) => `https://img.example/${n}.png`);
+  await store.loadRemoteImages(many);
+  expect(host.images.mock.calls[0]![3]).toHaveLength(24);
+  store.dispose();
+});
+
+test("a failed image fetch is recorded with its cause and can be retried", async () => {
+  const store = await openFirst();
+  host.images.mockReturnValueOnce(err("offline"));
+  expect(await store.loadRemoteImages(["https://img.example/a.png"])).toBe(false);
+  expect(store.open?.remote).toMatchObject({ state: "failed", error: "offline" });
+  host.images.mockReturnValueOnce(ok([{ url: "https://img.example/a.png", data_url: pixel }]));
+  expect(await store.loadRemoteImages(["https://img.example/a.png"])).toBe(true);
+  expect(store.open?.remote.state).toBe("ready");
+  store.dispose();
+});
+
+test("images that arrive after another message was opened are dropped", async () => {
+  const store = await openFirst();
+  let release: (value: unknown) => void = () => {};
+  host.images.mockReturnValue(new Promise((resolve) => (release = resolve)));
+  const pending = store.loadRemoteImages(["https://img.example/a.png"]);
+  await store.openRow(store.rows[1]!);
+  release(ok([{ url: "https://img.example/a.png", data_url: pixel }]));
+  expect(await pending).toBe(false);
+  expect(store.open?.row.key).toBe(store.rows[1]!.key);
+  expect(store.open?.remote.state).toBe("idle");
+  store.dispose();
+});
+
+test("moving an account saves the whole order first and the list follows the answer", async () => {
+  host.accounts.mockReturnValue(ok([account("a1"), account("a2"), account("a3")]));
+  host.folders.mockReturnValue(ok([folder("INBOX", "inbox")]));
+  host.messages.mockReturnValue(page([]));
+  const store = new MailStore();
+  await store.start();
+  host.order.mockReturnValue(ok(null));
+  expect(await store.moveAccount("a3", -1)).toBe(true);
+  expect(host.order).toHaveBeenCalledWith(["a1", "a3", "a2"]);
+  expect(store.accounts.map((a) => a.id)).toEqual(["a1", "a3", "a2"]);
+  expect(await store.moveAccount("a1", -1)).toBe(false);
+  expect(await store.moveAccount("a2", 1)).toBe(false);
+  expect(await store.moveAccount("nope", 1)).toBe(false);
+  expect(host.order).toHaveBeenCalledTimes(1);
+  store.dispose();
+});
+
+test("a refused reorder leaves the list as it was and says so", async () => {
+  host.accounts.mockReturnValue(ok([account("a1"), account("a2")]));
+  host.folders.mockReturnValue(ok([folder("INBOX", "inbox")]));
+  host.messages.mockReturnValue(page([]));
+  const store = new MailStore();
+  await store.start();
+  host.order.mockReturnValue(err("busy"));
+  expect(await store.moveAccount("a2", -1)).toBe(false);
+  expect(store.accounts.map((a) => a.id)).toEqual(["a1", "a2"]);
+  expect(store.notice).toEqual({ action: "order", error: "busy" });
   store.dispose();
 });

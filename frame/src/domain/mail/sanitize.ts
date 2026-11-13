@@ -105,8 +105,12 @@ const NAMED_ENTITIES: Record<string, string> = {
 export type SanitizeOptions = {
   /** Inline images by Content-ID (without angle brackets), as `data:` URLs. */
   inline?: ReadonlyMap<string, string>;
-  /** Keep `http(s):` image addresses; otherwise they are counted and removed. */
-  allowRemoteImages?: boolean;
+  /**
+   * Remote images the backend fetched, by the address the message wrote, as
+   * `data:` URLs. Only these are shown: the frame never loads a remote image
+   * itself, so its CSP stays closed to the network.
+   */
+  remoteImages?: ReadonlyMap<string, string>;
 };
 
 type SanitizedMail = {
@@ -114,8 +118,12 @@ type SanitizedMail = {
   html: string;
   /** Link targets in order of appearance; `data-zephium-link` indexes this list. */
   links: string[];
-  /** Remote images that were removed (or kept, when allowed). */
+  /** `http(s):` images in the message, shown or not. */
   remoteImages: number;
+  /** Of those, how many are shown from the fetched `remoteImages` map. */
+  remoteLoaded: number;
+  /** `https:` image addresses the backend may be asked to fetch, in order, without repeats. */
+  remoteUrls: string[];
   /** Images removed because they could not be shown safely. */
   droppedImages: number;
 };
@@ -324,7 +332,9 @@ export function sanitizeMailHtml(input: string, options: SanitizeOptions = {}): 
   const out: string[] = [];
   const links: string[] = [];
   const open: string[] = [];
+  const remoteUrls: string[] = [];
   let remoteImages = 0;
+  let remoteLoaded = 0;
   let droppedImages = 0;
   let skipDepth = 0;
   let at = 0;
@@ -355,7 +365,13 @@ export function sanitizeMailHtml(input: string, options: SanitizeOptions = {}): 
       remoteImages += 1;
       kind = "remote";
       const target = safeLinkTarget(src);
-      shown = options.allowRemoteImages && target ? target : null;
+      // Only an `https:` address can be fetched; the answer is re-checked as a raster `data:` URL.
+      if (target !== null && schemeOf(target) === "https") {
+        if (!remoteUrls.includes(target)) remoteUrls.push(target);
+        const fetched = options.remoteImages?.get(target);
+        shown = fetched === undefined ? null : safeImageDataUrl(fetched);
+        if (shown !== null) remoteLoaded += 1;
+      }
     }
     if (shown === null && kind !== "remote") droppedImages += 1;
     if (shown !== null) parts.push(`src="${escapeAttribute(shown)}"`);
@@ -460,12 +476,12 @@ export function sanitizeMailHtml(input: string, options: SanitizeOptions = {}): 
     open.push(name);
   }
   while (open.length) out.push(`</${open.pop()}>`);
-  return { html: out.join(""), links, remoteImages, droppedImages };
+  return { html: out.join(""), links, remoteImages, remoteLoaded, remoteUrls, droppedImages };
 }
 
 /** The Content-Security-Policy of the reading pane's document. */
-export function mailFrameCsp(allowRemoteImages: boolean): string {
-  return `default-src 'none'; img-src data:${allowRemoteImages ? " https:" : ""}; style-src 'unsafe-inline'`;
+export function mailFrameCsp(): string {
+  return "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
 }
 
 const FRAME_STYLE =
@@ -476,10 +492,10 @@ const FRAME_STYLE =
   "blockquote{margin:8px 0;padding-left:12px;border-left:3px solid #c9c9d1}pre{white-space:pre-wrap}";
 
 /** A complete `srcdoc` for a sandboxed frame around already sanitised markup. */
-export function mailFrameDocument(sanitizedBody: string, allowRemoteImages: boolean): string {
+export function mailFrameDocument(sanitizedBody: string): string {
   return (
     `<!doctype html><html><head><meta charset="utf-8">` +
-    `<meta http-equiv="Content-Security-Policy" content="${mailFrameCsp(allowRemoteImages)}">` +
+    `<meta http-equiv="Content-Security-Policy" content="${mailFrameCsp()}">` +
     `<style>${FRAME_STYLE}</style></head><body>${sanitizedBody}</body></html>`
   );
 }
