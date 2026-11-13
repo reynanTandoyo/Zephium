@@ -20,6 +20,8 @@ type Layer = { d: string; fill?: string | Gradient; evenOdd?: boolean };
 type VectorMark = { layers: Layer[]; scale: number };
 const GEMINI =
   "M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z";
+const ANTIGRAVITY =
+  "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z";
 export const MARKS: Readonly<Partial<Record<string, VectorMark>>> = {
   anthropic: {
     scale: 0.84,
@@ -143,5 +145,61 @@ export const MARKS: Readonly<Partial<Record<string, VectorMark>>> = {
         evenOdd: true,
       },
     ],
+  },
+  // Fork (T-0008): the AI apps on this PC, from Lobe Icons 1.102.0 (same MIT
+  // licence as above): claudecode-color, antigravity (in Antigravity's colours,
+  // as gradients over its arch), opencode.
+  claude_code: {
+    scale: 0.86,
+    layers: [
+      {
+        d: "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z",
+        fill: "#D97757",
+        evenOdd: true,
+      },
+    ],
+  },
+  antigravity: {
+    scale: 0.9,
+    layers: [
+      { d: ANTIGRAVITY, fill: "#3186FF" },
+      {
+        d: ANTIGRAVITY,
+        fill: {
+          from: [2, 22],
+          to: [9, 12],
+          stops: [
+            [0, "#00B95C"],
+            [1, "#00B95C", 0],
+          ],
+        },
+      },
+      {
+        d: ANTIGRAVITY,
+        fill: {
+          from: [22, 6],
+          to: [15, 14],
+          stops: [
+            [0, "#FC413D"],
+            [1, "#FC413D", 0],
+          ],
+        },
+      },
+      {
+        d: ANTIGRAVITY,
+        fill: {
+          from: [8, 1],
+          to: [12, 9],
+          stops: [
+            [0, "#FFE432"],
+            [1, "#FBBC04", 0],
+          ],
+        },
+      },
+    ],
+  },
+  open_code: {
+    scale: 0.8,
+    layers: [{ d: "M16 6H8v12h8V6zm4 16H4V2h16v20z", evenOdd: true }],
   },
 };
