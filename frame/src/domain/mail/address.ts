@@ -54,3 +54,22 @@ export function parseAddresses(text: string): ParsedAddresses {
 
 export const formatAddresses = (addresses: readonly MailAddressV1[]) =>
   addresses.map(formatAddress).join(", ");
+
+/** Where the entry being typed starts: after the last comma, semicolon or line break. */
+const entryStart = (text: string) => text.search(/[^,;\n]*$/u);
+
+/**
+ * The entry being typed in a recipient field: what follows the last comma,
+ * semicolon or line break. Empty once it is a complete `Name <address>`.
+ */
+export function typedEntry(text: string): string {
+  const entry = text.slice(entryStart(text)).trim();
+  return entry.includes("<") || entry.includes(">") ? "" : entry;
+}
+
+/** The field text with the entry being typed replaced by the chosen contact. */
+export function completeEntry(text: string, contact: MailAddressV1): string {
+  const head = text.slice(0, entryStart(text));
+  const spaced = head && !/\s$/u.test(head) ? `${head} ` : head;
+  return `${spaced}${formatAddress(contact)}, `;
+}

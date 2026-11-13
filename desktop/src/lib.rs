@@ -1823,6 +1823,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             mail::mail_save_draft,
             mail::mail_search,
             mail::mail_watch,
+            mail::mail_contacts,
+            mail::mail_rules,
+            mail::mail_set_rules,
+            mail::mail_parse_mailto,
             focus_alerts::mail_notify_new,
             oauth::oauth_sign_in,
             oauth::oauth_cancel_sign_in,
@@ -2048,6 +2052,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             work_models::WorkModelsChanged,
             calendar::CalendarChanged,
             mail::MailChanged,
+            mail::MailComposeRequested,
             voice::VoiceChanged,
             voice::VoiceLevels,
             page_assist::PageAssistChanged,
@@ -7345,6 +7350,17 @@ pub fn run() {
                     } = &event
                     {
                         let _ = execute_command(&sink_app, command);
+                        return;
+                    }
+                    // Fork (T-0036): a clicked `mailto:` link opens Mail's compose when an
+                    // account exists; otherwise the event goes on to the shell unchanged.
+                    if mail::is_mailto_request(&event) {
+                        let fallback_slot = sink_slot.clone();
+                        mail::route_mailto(sink_app.clone(), event, move |event| {
+                            if let Some(shell) = fallback_slot.get() {
+                                shell.dispatch(Command::Engine(event));
+                            }
+                        });
                         return;
                     }
                     if let Some(shell) = sink_slot.get() {

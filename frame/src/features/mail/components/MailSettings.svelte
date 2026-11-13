@@ -9,6 +9,7 @@
   import Button from "$shared/ui/Button";
   import { reasonText } from "../lib/text";
   import AccountEditor from "./AccountEditor.svelte";
+  import RuleEditor from "./RuleEditor.svelte";
 
   let { store, onadd, onback }: { store: MailStore; onadd: () => void; onback: () => void } =
     $props();
@@ -34,6 +35,8 @@
       <AccountEditor {store} {account} {index} count={store.accounts.length} />
     {/each}
   </ul>
+
+  {#if store.accounts.length}<RuleEditor {store} />{/if}
 </section>
 
 <style>

@@ -1,8 +1,12 @@
 export { MailStore, ALL_INBOXES } from "./mail.svelte";
 export { mailUnread, badgeText } from "./unread.svelte";
 export { AccountSetup } from "./setup.svelte";
+export { ContactSuggester } from "./contacts.svelte";
+export { MailRules, MAX_NEEDLE, MAX_RULES, ruleProblem } from "./rules.svelte";
+export type { RuleDraft } from "./rules.svelte";
+export { mailtoInbox } from "./mailto.svelte";
 export type { ComposeSession } from "./compose.svelte";
 export type { MailFailure, OAuthFailure } from "./call";
 export type { MailRow, MailThread } from "./thread";
-export { displayName, formatAddresses } from "./address";
+export { completeEntry, displayName, formatAddresses, parseAddresses, typedEntry } from "./address";
 export { inlineImageUrl, linkify, mailFrameDocument, sanitizeMailHtml } from "./sanitize";

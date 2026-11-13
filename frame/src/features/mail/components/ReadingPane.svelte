@@ -81,7 +81,9 @@
 
   /** Opens the shown target as a browser tab; the pane itself never navigates. */
   function openTarget() {
-    if (target) void commands.browserOpenUrl(target, true);
+    // A mail address opens Mail's own compose, never another application.
+    if (target && /^mailto:/iu.test(target)) void store.composeFromLink(target);
+    else if (target) void commands.browserOpenUrl(target, true);
     target = null;
   }
 

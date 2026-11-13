@@ -15,6 +15,7 @@
   import Select from "$shared/ui/Select";
   import TextArea from "$shared/ui/TextArea";
   import { formatSize, reasonText } from "../lib/text";
+  import AddressField from "./AddressField.svelte";
 
   let {
     store,
@@ -105,27 +106,21 @@
             disabled={compose.busy}
           />
         {/if}
-        <Field
+        <AddressField
           label={m.mail_compose_to()}
-          spellcheck={false}
-          autocomplete="off"
           bind:value={compose.to}
           oninput={() => compose.edited()}
           disabled={compose.busy}
         />
         {#if copiesShown}
-          <Field
+          <AddressField
             label={m.mail_compose_cc()}
-            spellcheck={false}
-            autocomplete="off"
             bind:value={compose.cc}
             oninput={() => compose.edited()}
             disabled={compose.busy}
           />
-          <Field
+          <AddressField
             label={m.mail_compose_bcc()}
-            spellcheck={false}
-            autocomplete="off"
             bind:value={compose.bcc}
             oninput={() => compose.edited()}
             disabled={compose.busy}
