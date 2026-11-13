@@ -25,9 +25,17 @@
       ? m.model_key_refused({ provider: name })
       : standing === "server"
         ? m.model_server_needed()
-        : m.model_key_needed({ provider: name }),
+        : standing === "app"
+          ? m.model_app_needed({ provider: name })
+          : m.model_key_needed({ provider: name }),
   );
-  const action = $derived(standing === "server" ? m.model_add_server() : m.model_add_key());
+  const action = $derived(
+    standing === "server"
+      ? m.model_add_server()
+      : standing === "app"
+        ? m.model_app_open()
+        : m.model_add_key(),
+  );
 </script>
 
 <div class="ask">

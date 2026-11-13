@@ -74,8 +74,8 @@ vi.mock("$shared/ipc/bindings", async () => {
     pageAssistDelete: native.remove,
     browserOpenUrl: native.url,
     workModels: async () => {
-      const view = models({ keys: { open_ai: "valid" }, lead: "openai/gpt-6-luna" });
-      return { ...view, effective: { ...view.effective, page: "openai/gpt-6-luna" } };
+      const view = models({ apps: { claude_code: "ready" }, lead: "claude-code/sonnet" });
+      return { ...view, effective: { ...view.effective, page: "claude-code/sonnet" } };
     },
     settingGet: async () => null,
     runCommand: async () => ({ accepted: true, operation_id: null }),

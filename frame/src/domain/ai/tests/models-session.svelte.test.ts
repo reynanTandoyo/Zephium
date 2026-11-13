@@ -30,7 +30,7 @@ afterEach(() => {
   host.read = null;
 });
 
-const answer = () => ({ ...models({ keys: { anthropic: "valid" } }), profile });
+const answer = () => ({ ...models({ apps: { claude_code: "ready" } }), profile });
 
 test("changes that arrive during a read are answered by one more read, not one each", async () => {
   let reads = 0;

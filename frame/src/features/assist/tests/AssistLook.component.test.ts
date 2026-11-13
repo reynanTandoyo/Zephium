@@ -40,11 +40,11 @@ vi.mock("$shared/ipc/bindings", async () => {
     }),
     workModels: async () => {
       const view = models({
-        keys: { open_ai: "valid" },
-        lead: "openai/gpt-6-luna",
+        apps: { claude_code: "ready" },
+        lead: "claude-code/sonnet",
         effort: "high",
       });
-      return { ...view, effective: { ...view.effective, page: "openai/gpt-6-luna" } };
+      return { ...view, effective: { ...view.effective, page: "claude-code/sonnet" } };
     },
     settingGet: async () => null,
     runCommand: async () => ({ accepted: true, operation_id: null }),
@@ -121,7 +121,9 @@ test("empty: a greeting for the page in front and at most four starts", async ()
   await expect
     .element(screen.getByRole("button", { name: "Make it darker" }))
     .not.toBeInTheDocument();
-  await expect.element(screen.getByRole("button", { name: /Model: GPT-6 Luna/u })).toBeVisible();
+  await expect
+    .element(screen.getByRole("button", { name: /Model: Claude Code · Sonnet/u }))
+    .toBeVisible();
   await expect.element(screen.getByRole("button", { name: "Dictate" })).toBeVisible();
   await capture(screen.container, "empty");
   await screen.getByRole("button", { name: "Worth opening" }).hover();

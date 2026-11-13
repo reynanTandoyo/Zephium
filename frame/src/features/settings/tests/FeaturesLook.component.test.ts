@@ -43,19 +43,9 @@ vi.mock("$shared/ipc/bindings", async () => {
     }),
     workModels: async () =>
       models({
-        keys: {
-          anthropic: "valid",
-          open_ai: "valid",
-          google: "set",
-          deep_seek: "valid",
-          open_router: "set",
-          xai: "set",
-          mistral: "invalid",
-          groq: "set",
-          cerebras: "set",
-        },
+        apps: { claude_code: "ready", antigravity: "sign_in_needed" },
         base: "http://localhost:11434/v1",
-        lead: "anthropic/claude-opus-5-5",
+        lead: "claude-code/opus",
       }),
   };
   return {

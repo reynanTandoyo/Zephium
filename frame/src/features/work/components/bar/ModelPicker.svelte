@@ -7,10 +7,12 @@
     ModelsSession,
     effortLevels,
     effortName,
+    entryLabel,
     entryOf,
     favourites,
+    isApp,
     keyState,
-    keyedProviders,
+    offeredProviders,
     pickerGroups,
     providerName,
     searchEntries,
@@ -83,14 +85,15 @@
   const seats = $derived.by<Seat[]>(() => {
     const ready: Seat[] = [];
     const rest: Seat[] = [];
-    for (const provider of keyedProviders) {
+    for (const provider of offeredProviders) {
       if (usable(models, provider)) ready.push({ provider, standing: "ready" });
       else
         rest.push({
           provider,
-          standing:
-            provider === "compatible" &&
-            !models?.providers.find((row) => row.provider === provider)?.base
+          standing: isApp(provider)
+            ? "app"
+            : provider === "compatible" &&
+                !models?.providers.find((row) => row.provider === provider)?.base
               ? "server"
               : keyState(models, provider) === "invalid"
                 ? "refused"
@@ -525,8 +528,8 @@
   const triggerLabel = $derived(
     current
       ? effort
-        ? m.model_trigger_effort({ model: current.display_name, effort: effortName(effort) })
-        : m.work_model_trigger({ model: current.display_name })
+        ? m.model_trigger_effort({ model: entryLabel(current), effort: effortName(effort) })
+        : m.work_model_trigger({ model: entryLabel(current) })
       : m.work_model_label(),
   );
   const title = $derived(
@@ -728,7 +731,7 @@
                       aria-selected={item.id === chosen}
                       aria-disabled={(!!session?.busy && session.busy !== "effort") || undefined}
                     >
-                      <span class="option-name">{item.entry.display_name}</span>
+                      <span class="option-name">{entryLabel(item.entry)}</span>
                       <span class="slot">
                         <span class="check" aria-hidden="true"
                           >{#if item.id === chosen}<Icon
@@ -744,8 +747,8 @@
                           tabindex="-1"
                           aria-pressed={starry}
                           aria-label={starry
-                            ? m.model_unfavourite({ model: item.entry.display_name })
-                            : m.model_favourite({ model: item.entry.display_name })}
+                            ? m.model_unfavourite({ model: entryLabel(item.entry) })
+                            : m.model_favourite({ model: entryLabel(item.entry) })}
                           ><Icon icon={StarIcon} size={14} strokeWidth={1.8} /></button
                         >
                       </span>

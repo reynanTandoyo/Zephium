@@ -11,7 +11,7 @@ vi.mock("$shared/ipc/bindings", async () => {
   const { models } = await import("$shared/testing/work-models");
   return mockBindings({
     workModels: vi.fn(async (profile: string) => ({
-      ...models({ keys: { anthropic: "valid" }, lead: "anthropic/claude-opus-5-5" }),
+      ...models({ apps: { claude_code: "ready" }, lead: "claude-code/opus" }),
       profile,
     })),
     faviconProbe: async () => true,

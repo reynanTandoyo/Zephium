@@ -50,13 +50,7 @@ const shots = "../../../../../target/look/model-picker";
 const settle = (ms = 450) => new Promise((done) => setTimeout(done, ms));
 const keyed = (lead: string) =>
   models({
-    keys: {
-      anthropic: "valid",
-      open_ai: "valid",
-      deep_seek: "valid",
-      open_router: "valid",
-      google: "invalid",
-    },
+    apps: { claude_code: "ready", antigravity: "ready", open_code: "sign_in_needed" },
     lead,
   });
 
@@ -86,18 +80,18 @@ afterEach(() => {
 const rail = (name: RegExp) => page.getByRole("tab", { name });
 
 test(
-  "the chip, the card, a row's star, favourites, search, and the providers that wait on a step",
+  "the chip, the card, a row's star, favourites, search, and the apps that wait on a step",
   { timeout: 60_000 },
   async () => {
     await page.viewport(1100, 700);
-    native.view = keyed("anthropic/claude-opus-5-5");
-    native.settings["work.favourite-models"] = "anthropic/claude-sonnet-5-5\nopenai/gpt-6-sol";
+    native.view = keyed("claude-code/opus");
+    native.settings["work.favourite-models"] = "claude-code/sonnet\nantigravity/gemini-3-pro";
     await preferences.init();
     const screen = await render(ModelPickerStage, { profile: PROFILE });
     await shoot("rest");
-    await screen.getByRole("button", { name: /Model: Claude Opus 5\.5/u }).click();
+    await screen.getByRole("button", { name: /Model: Claude Code · Opus/u }).click();
     await shoot("card", ["glass", "solid"]);
-    await userEvent.hover(page.getByRole("option", { name: /Claude Fable 5\.1/u }));
+    await userEvent.hover(page.getByRole("option", { name: /Claude Code · Sonnet/u }));
     await shoot("hover-row");
     await userEvent.unhover(page.getByRole("listbox"));
     await page.getByRole("button", { name: /^Effort: Medium/u }).click();
@@ -105,15 +99,13 @@ test(
     await userEvent.keyboard("{Escape}");
     await page.getByRole("button", { name: "Favourites", exact: true }).click();
     await shoot("favourites");
-    await rail(/^OpenAI/u).click();
-    await shoot("openai");
-    await rail(/^DeepSeek/u).click();
-    await shoot("deepseek-key");
-    await rail(/^Google/u).click();
-    await shoot("google-refused");
+    await rail(/^Antigravity/u).click();
+    await shoot("antigravity");
+    await rail(/^OpenCode/u).click();
+    await shoot("opencode-sign-in");
     await rail(/^Custom/u).click();
     await shoot("server");
-    await rail(/^OpenRouter/u).click();
+    await rail(/^Claude Code/u).click();
     await userEvent.keyboard("son");
     await shoot("search");
     await userEvent.keyboard("zzz");
@@ -123,9 +115,9 @@ test(
 
 test("the effort at every level, from the slider's keys", async () => {
   await page.viewport(1100, 700);
-  native.view = { ...keyed("openai/gpt-6-luna"), effort: "low" };
+  native.view = { ...keyed("claude-code/sonnet"), effort: "low" };
   const screen = await render(ModelPickerStage, { profile: PROFILE });
-  await screen.getByRole("button", { name: /Model: GPT-6 Luna/u }).click();
+  await screen.getByRole("button", { name: /Model: Claude Code · Sonnet/u }).click();
   await page.getByRole("button", { name: /^Effort: Low/u }).click();
   const levels = ["low", "medium", "high", "xhigh", "max"];
   for (const [index, level] of levels.entries()) {
@@ -136,11 +128,11 @@ test("the effort at every level, from the slider's keys", async () => {
   await shoot("rest-max");
 });
 
-test("a model with two efforts, and one with none", async () => {
+test("a model with three efforts, and one with none", async () => {
   await page.viewport(1100, 700);
-  native.view = keyed("deepseek/deepseek-v4-pro");
+  native.view = keyed("antigravity/gemini-3-pro");
   const screen = await render(ModelPickerStage, { profile: PROFILE });
-  await screen.getByRole("button", { name: /Model: DeepSeek V4 Pro/u }).click();
+  await screen.getByRole("button", { name: /Model: Antigravity · Gemini 3 Pro/u }).click();
   await shoot("two-levels");
   await page.getByRole("button", { name: /^Effort:/u }).click();
   await userEvent.keyboard("{ArrowRight}");
@@ -149,17 +141,17 @@ test("a model with two efforts, and one with none", async () => {
   await screen.unmount();
 
   native.view = models({
-    keys: { mistral: "valid" },
-    lead: "mistral/mistral-medium-3-5",
+    apps: { open_code: "ready" },
+    lead: "opencode/big-pickle",
   });
   native.view.entries.push({
     ...native.view.entries[0]!,
-    id: "mistral/mistral-medium-3-5",
-    model: { provider: "mistral", wire: "chat_completions", model: "mistral-medium-3-5" },
-    display_name: "Mistral Medium 3.5",
+    id: "opencode/big-pickle",
+    model: { provider: "open_code", wire: "cli", model: "big-pickle" },
+    display_name: "Big Pickle",
   });
   const plain = await render(ModelPickerStage, { profile: PROFILE });
-  await plain.getByRole("button", { name: /Model: Mistral Medium 3\.5/u }).click();
+  await plain.getByRole("button", { name: /Model: OpenCode · Big Pickle/u }).click();
   await shoot("no-effort");
 });
 

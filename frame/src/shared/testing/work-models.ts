@@ -1,4 +1,7 @@
 import type {
+  WorkAiAppIdV1,
+  WorkAiAppStateV1,
+  WorkAiAppV1,
   WorkKeyStateV1,
   WorkModelEntry,
   WorkModelProvider,
@@ -18,6 +21,9 @@ const WIRE = {
   groq: "chat_completions",
   cerebras: "chat_completions",
   compatible: "chat_completions",
+  claude_code: "cli",
+  antigravity: "cli",
+  open_code: "cli",
   cloud: "anthropic_messages",
 } as const;
 
@@ -32,6 +38,9 @@ const SLUG = {
   groq: "groq",
   cerebras: "cerebras",
   compatible: "compatible",
+  claude_code: "claude-code",
+  antigravity: "antigravity",
+  open_code: "opencode",
   cloud: "zephium",
 } as const;
 
@@ -76,6 +85,16 @@ const blind = {
   native_search: false,
 };
 
+/** What an AI app's models support: it is a model, not an agent, and sees no images. */
+const subscription = {
+  tools: true,
+  vision: false,
+  prompt_cache: false,
+  reasoning: true,
+  native_search: false,
+};
+const free = { input: 0, cached_input: 0, output: 0 };
+
 const builtin: WorkModelEntry[] = [
   entry("anthropic", "claude-opus-5-5", "Claude Opus 5.5", true, ["lead"], { price: usd(4, 20) }),
   entry("anthropic", "claude-sonnet-5-5", "Claude Sonnet 5.5", true, ["lead", "page"]),
@@ -110,6 +129,26 @@ const builtin: WorkModelEntry[] = [
   entry("open_router", "anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", true, ["lead", "page"], {
     supports: { ...blind, vision: true },
   }),
+  entry("claude_code", "opus", "Claude Opus", false, ["lead"], {
+    supports: subscription,
+    price: free,
+  }),
+  entry("claude_code", "sonnet", "Claude Sonnet", true, ["lead", "page"], {
+    supports: subscription,
+    price: free,
+  }),
+  entry("claude_code", "haiku", "Claude Haiku", true, ["page", "light"], {
+    supports: subscription,
+    price: free,
+  }),
+  entry("antigravity", "gemini-3-pro", "Gemini 3 Pro", true, ["lead", "page"], {
+    supports: subscription,
+    price: free,
+  }),
+  entry("antigravity", "gemini-3-flash", "Gemini 3 Flash", true, ["page", "light"], {
+    supports: subscription,
+    price: free,
+  }),
 ];
 
 const ALL: WorkModelReasoning[] = ["low", "medium", "high", "xhigh", "max"];
@@ -122,14 +161,48 @@ function levels(item: WorkModelEntry): WorkModelReasoning[] {
       return model.startsWith("claude-haiku-4") ? ["low", "medium", "high"] : ALL;
     case "open_ai":
       return model.startsWith("gpt-6") ? ALL : ["low", "medium", "high"];
+    case "claude_code":
+      return ALL;
     case "google":
     case "open_router":
+    case "antigravity":
       return ["low", "medium", "high"];
     case "deep_seek":
       return ["low", "high"];
     default:
       return [];
   }
+}
+
+const APPS: Record<WorkAiAppIdV1, { provider: WorkModelProvider; name: string; command: string }> =
+  {
+    claude_code: {
+      provider: "claude_code",
+      name: "Claude Code",
+      command: "irm https://claude.ai/install.ps1 | iex",
+    },
+    antigravity: { provider: "antigravity", name: "Antigravity", command: "" },
+    open_code: { provider: "open_code", name: "OpenCode", command: "npm install -g opencode-ai" },
+  };
+
+/** An AI app as the native scan reports it; Antigravity has no install command, only a page. */
+export function aiApp(
+  app: WorkAiAppIdV1,
+  state: WorkAiAppStateV1,
+  version: string | null = state === "ready" || state === "sign_in_needed" ? "1.0.0" : null,
+): WorkAiAppV1 {
+  const row = APPS[app];
+  return {
+    app,
+    provider: row.provider,
+    name: row.name,
+    state,
+    version,
+    install: {
+      command: row.command || null,
+      url: `https://example.test/${app}`,
+    },
+  };
 }
 
 export const PROFILE = "00000000000000000000000001";
@@ -140,6 +213,8 @@ export function models(options: {
   lead?: string | null;
   chosen?: string | null;
   effort?: WorkModelReasoning;
+  /** The AI apps' scan; an app left out is not installed. */
+  apps?: Partial<Record<WorkAiAppIdV1, WorkAiAppStateV1>>;
 }): WorkModelsV1 {
   const efforts = builtin
     .map((item) => ({ id: item.id, levels: levels(item) }))
@@ -154,6 +229,9 @@ export function models(options: {
     effective: { lead: options.lead ?? null, page: null, light: null },
     providers: (
       [
+        "claude_code",
+        "antigravity",
+        "open_code",
         "anthropic",
         "open_ai",
         "google",
@@ -169,6 +247,10 @@ export function models(options: {
       provider,
       key: options.keys?.[provider] ?? "missing",
       base: provider === "compatible" ? (options.base ?? null) : null,
+      app:
+        provider === "claude_code" || provider === "antigravity" || provider === "open_code"
+          ? aiApp(provider, options.apps?.[provider] ?? "missing")
+          : null,
     })),
     fault: null,
     efforts,

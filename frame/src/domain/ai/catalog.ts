@@ -10,19 +10,20 @@ import type {
 /** A provider the person can use: the retired hosted one is not among them. */
 export type KeyedProvider = Exclude<WorkModelProvider, "cloud">;
 
-/** Providers that take the person's own key, in the order they are shown. */
-export const keyedProviders: readonly KeyedProvider[] = [
-  "anthropic",
-  "open_ai",
-  "google",
-  "xai",
-  "mistral",
-  "deep_seek",
-  "groq",
-  "cerebras",
-  "open_router",
-  "compatible",
-];
+/** The AI apps on this PC that models can come from, in the order they are shown. */
+export type AppProvider = Extract<WorkModelProvider, "claude_code" | "antigravity" | "open_code">;
+export const appProviders: readonly AppProvider[] = ["claude_code", "antigravity", "open_code"];
+
+export function isApp(provider: WorkModelProvider): provider is AppProvider {
+  return (appProviders as readonly WorkModelProvider[]).includes(provider);
+}
+
+/**
+ * The providers Settings, the model picker and onboarding offer, in the order
+ * they are shown: the AI apps, then the person's own endpoint. The built-in key
+ * providers (Anthropic, OpenAI, …) keep working in Rust but are not offered.
+ */
+export const offeredProviders: readonly KeyedProvider[] = [...appProviders, "compatible"];
 
 const names: Record<WorkModelProvider, string> = {
   anthropic: "Anthropic",
@@ -35,6 +36,9 @@ const names: Record<WorkModelProvider, string> = {
   groq: "Groq",
   cerebras: "Cerebras",
   compatible: "Custom",
+  claude_code: "Claude Code",
+  antigravity: "Antigravity",
+  open_code: "OpenCode",
   // Deprecated: the hosted provider is gone and never produced; kept so stored data still parses.
   cloud: "Unavailable",
 };
@@ -45,6 +49,7 @@ export function providerName(provider: WorkModelProvider): string {
 
 /** The model's name as the trigger shows it: the mark beside it says the family. */
 export function shortName(entry: WorkModelEntry): string {
+  if (isApp(entry.model.provider)) return entryLabel(entry);
   const name = entry.display_name;
   for (const family of ["Claude ", "DeepSeek "]) {
     if (name.startsWith(family) && name.length > family.length) return name.slice(family.length);
@@ -52,15 +57,26 @@ export function shortName(entry: WorkModelEntry): string {
   return name;
 }
 
+/** A model as a list shows it: an app's models name the app, as in "Claude Code · Sonnet". */
+export function entryLabel(entry: WorkModelEntry): string {
+  const provider = entry.model.provider;
+  if (!isApp(provider)) return entry.display_name;
+  const app = providerName(provider);
+  const name = entry.display_name.replace(/^Claude (?=\S)/u, "");
+  return name.startsWith(app) ? name : `${app} · ${name}`;
+}
+
 export function keyState(models: WorkModelsV1 | null, provider: WorkModelProvider): WorkKeyStateV1 {
   return models?.providers.find((row) => row.provider === provider)?.key ?? "missing";
 }
 
-/** A provider can run calls now: its key is set and not refused. */
+/** A provider can run calls now: an app is installed and signed in, a key is set and not refused. */
 export function usable(models: WorkModelsV1 | null, provider: WorkModelProvider): boolean {
   if (!models) return false;
   // The hosted provider is deprecated and never usable.
   if (provider === "cloud") return false;
+  if (isApp(provider))
+    return models.providers.find((row) => row.provider === provider)?.app?.state === "ready";
   if (provider === "compatible")
     return (
       !!models.providers.find((row) => row.provider === "compatible")?.base &&
@@ -72,14 +88,14 @@ export function usable(models: WorkModelsV1 | null, provider: WorkModelProvider)
 
 type ModelGroup = { provider: WorkModelProvider; entries: WorkModelEntry[] };
 
-/** Without a key, only these appear in the picker; Settings → AI offers every provider. */
-const suggested: readonly WorkModelProvider[] = ["anthropic", "open_ai", "google"];
+/** Until they are set up, these appear in the picker as needing it. */
+const suggested: readonly WorkModelProvider[] = appProviders;
 
 /**
  * The picker's list for a role: every curated model of usable providers,
  * recommended first, grouped by provider. The person's own server adds the
  * models it serves.
- * The best-known providers without a key are listed apart, as needing one.
+ * The AI apps that are not ready are listed apart, as needing set-up.
  */
 export function pickerGroups(
   models: WorkModelsV1 | null,
@@ -89,7 +105,7 @@ export function pickerGroups(
   const entries = [...(models?.entries ?? []), ...endpoint];
   const ready: ModelGroup[] = [];
   const needsKey: WorkModelProvider[] = [];
-  for (const provider of keyedProviders) {
+  for (const provider of offeredProviders) {
     const seen = new Set<string>();
     const offered = entries
       .filter((entry) => {

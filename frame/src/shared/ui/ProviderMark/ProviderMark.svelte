@@ -4,7 +4,7 @@
   import { MARKS } from "./marks";
 
   /** Every provider a model can come from; mirrors `WorkModelProvider`. The retired
-   *  hosted one has no mark and takes the generic server icon. */
+   *  hosted one and OpenCode have no mark and takes the generic server icon. */
   type Provider =
     | "anthropic"
     | "open_ai"
@@ -16,13 +16,18 @@
     | "groq"
     | "cerebras"
     | "compatible"
+    | "claude_code"
+    | "antigravity"
+    | "open_code"
     | "cloud";
 
   /** A provider's own mark in its own colours; a monochrome mark takes the
    *  surrounding ink, so it holds on a light tile and a dark one. */
   let { provider, size = 16 }: { provider: Provider; size?: number } = $props();
   const uid = $props.id();
-  let mark = $derived(MARKS[provider] ?? null);
+  /** An app wears the mark of the models it runs; OpenCode has none and takes the generic icon. */
+  const OF: Partial<Record<Provider, string>> = { claude_code: "anthropic", antigravity: "google" };
+  let mark = $derived(MARKS[OF[provider] ?? provider] ?? null);
 </script>
 
 {#if mark}<svg

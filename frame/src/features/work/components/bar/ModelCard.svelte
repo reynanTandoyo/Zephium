@@ -11,7 +11,7 @@
 </script>
 
 <script lang="ts">
-  import { contextSize, dollars, effortName } from "$domain/ai";
+  import { contextSize, dollars, effortName, entryLabel, isApp, providerName } from "$domain/ai";
   import Icon from "$shared/ui/Icon";
   import ProviderMark from "$shared/ui/ProviderMark";
   import * as m from "$shared/i18n/messages";
@@ -48,13 +48,15 @@
     flagship: m.model_character_flagship,
   };
 
-  const name = $derived(subject.entry.display_name);
+  const name = $derived(entryLabel(subject.entry));
 
   /** What the model is like, then only what limits it. */
   const character = $derived.by(() => {
     const { entry, tier } = subject;
     const words: string[] = [];
     if (tier) words.push(CHARACTERS[tier]());
+    else if (isApp(entry.model.provider))
+      words.push(m.model_character_app({ app: providerName(entry.model.provider) }));
     else if (entry.model.provider === "compatible") words.push(m.model_character_own());
     if (entry.context_window < 500_000)
       words.push(m.model_context({ size: contextSize(entry.context_window) }));
@@ -63,7 +65,7 @@
   });
 
   const price = $derived(
-    subject.entry.price
+    subject.entry.price && subject.entry.price.output > 0
       ? m.model_price({
           input: dollars(subject.entry.price.input),
           output: dollars(subject.entry.price.output),

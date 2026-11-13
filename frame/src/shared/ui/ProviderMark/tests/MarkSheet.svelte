@@ -13,6 +13,9 @@
     "cerebras",
     "open_router",
     "compatible",
+    "claude_code",
+    "antigravity",
+    "open_code",
   ] as const;
 </script>
 

@@ -1,9 +1,14 @@
 import "$styles/global.css";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { render } from "vitest-browser-svelte";
-import { page, userEvent } from "vitest/browser";
-import type { WorkLocalServerV1, WorkMoreModelsV1_Serialize } from "$shared/ipc/bindings";
-import { PROFILE, models } from "$shared/testing/work-models";
+import { page } from "vitest/browser";
+import type {
+  WorkAiAppStateV1,
+  WorkAiAppsV1,
+  WorkLocalServerV1,
+  WorkMoreModelsV1_Serialize,
+} from "$shared/ipc/bindings";
+import { PROFILE, aiApp, models } from "$shared/testing/work-models";
 import { emitNativeEvent } from "$shared/testing/native-events";
 import AiPage from "../components/sections/AiPage.svelte";
 
@@ -15,6 +20,9 @@ const native = vi.hoisted(() => ({
   set: vi.fn(),
   test: vi.fn(),
   choose: vi.fn(),
+  scan: vi.fn(),
+  install: vi.fn(),
+  signIn: vi.fn(),
   local: vi.fn(async () => [] as WorkLocalServerV1[]),
   endpoint: vi.fn(),
   more: vi.fn(async (): Promise<WorkMoreModelsV1_Serialize> => ({
@@ -30,6 +38,9 @@ vi.mock("$shared/ipc/bindings", async () => {
     workSetProviderKey: native.set,
     workTestProviderKey: native.test,
     workChooseModel: native.choose,
+    workAiApps: native.scan,
+    workAiAppInstall: native.install,
+    workAiAppSignIn: native.signIn,
     workLocalServers: native.local,
     workSetModelEndpoint: native.endpoint,
     workMoreModels: native.more,
@@ -54,81 +65,175 @@ vi.mock("$shared/ipc/bindings", async () => {
   });
 });
 
-test("a refused key is explained and acceptance makes no billing promise", async () => {
-  await page.viewport(1100, 1200);
-  native.read.mockResolvedValue(models({ keys: { open_ai: "set" }, lead: "openai/gpt-6-sol" }));
+const apps = (
+  states: Partial<Record<"claude_code" | "antigravity" | "open_code", WorkAiAppStateV1>>,
+): WorkAiAppsV1 => ({
+  apps: (["claude_code", "antigravity", "open_code"] as const).map((app) =>
+    aiApp(app, states[app] ?? "missing"),
+  ),
+});
+
+beforeEach(() => {
+  native.scan.mockReset().mockResolvedValue(apps({}));
+});
+
+test("each AI app on this PC shows its state, and the scan runs when the page opens", async () => {
+  await page.viewport(1100, 1400);
+  native.read.mockResolvedValue(models({ apps: { claude_code: "ready" } }));
+  native.scan.mockResolvedValue(
+    apps({ claude_code: "ready", antigravity: "sign_in_needed", open_code: "missing" }),
+  );
+  const screen = await render(AiPage);
+  await expect.element(screen.getByRole("heading", { name: "AI apps on this PC" })).toBeVisible();
+  await expect.element(screen.getByText("Installed · signed in")).toBeVisible();
+  await expect.element(screen.getByText("1.0.0")).toBeVisible();
+  await expect.element(screen.getByText("Installed · sign in needed")).toBeVisible();
+  await expect.element(screen.getByText("Not installed")).toBeVisible();
+  expect(native.scan).toHaveBeenCalledWith(false);
+  // Only the apps and the person's own endpoint are offered.
+  await expect.element(screen.getByRole("heading", { name: "Your own endpoint" })).toBeVisible();
+  for (const name of ["Anthropic", "OpenAI", "Google", "DeepSeek", "OpenRouter", "xAI"])
+    await expect.element(screen.getByText(name, { exact: true })).not.toBeInTheDocument();
+});
+
+test("an app that needs a sign-in opens its sign-in", async () => {
+  await page.viewport(1100, 1400);
+  native.read.mockResolvedValue(models({ apps: { antigravity: "sign_in_needed" } }));
+  native.scan.mockResolvedValue(apps({ antigravity: "sign_in_needed" }));
+  native.signIn.mockResolvedValue({ status: "ok", data: null });
+  const screen = await render(AiPage);
+  await screen.getByRole("button", { name: "Sign in" }).click();
+  expect(native.signIn).toHaveBeenCalledWith("antigravity");
+});
+
+test("a missing app is installed only after its command is shown and confirmed", async () => {
+  await page.viewport(1100, 1400);
+  native.read.mockResolvedValue(models({}));
+  native.scan.mockResolvedValue(apps({}));
+  native.install.mockReset().mockResolvedValue({ status: "ok", data: null });
+  const screen = await render(AiPage);
+  const installs = screen.getByRole("button", { name: "Install", exact: true });
+  await installs.first().click();
+  const confirm = screen.getByRole("group", { name: "Install Claude Code?" });
+  await expect.element(confirm).toBeVisible();
+  await expect.element(confirm.getByText("irm https://claude.ai/install.ps1 | iex")).toBeVisible();
+  expect(native.install).not.toHaveBeenCalled();
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect.element(confirm).not.toBeInTheDocument();
+  expect(native.install).not.toHaveBeenCalled();
+
+  await installs.first().click();
+  await confirm.getByRole("button", { name: "Install" }).click();
+  expect(native.install).toHaveBeenCalledWith("claude_code");
+});
+
+test("an app with no install command opens its download page instead", async () => {
+  await page.viewport(1100, 1400);
+  native.read.mockResolvedValue(models({}));
+  native.scan.mockResolvedValue(apps({}));
+  native.install.mockReset().mockResolvedValue({ status: "ok", data: null });
+  const screen = await render(AiPage);
+  await screen.getByRole("button", { name: "Install", exact: true }).nth(1).click();
+  const confirm = screen.getByRole("group", { name: "Install Antigravity?" });
+  await expect.element(confirm).toHaveTextContent("download page");
+  await confirm.getByRole("button", { name: "Install" }).click();
+  expect(native.install).toHaveBeenCalledWith("antigravity");
+});
+
+test("Check again scans the apps again and shows what changed", async () => {
+  await page.viewport(1100, 1400);
+  native.read.mockResolvedValue(models({}));
+  native.scan
+    .mockReset()
+    .mockResolvedValueOnce(apps({}))
+    .mockResolvedValueOnce(apps({ claude_code: "ready" }));
+  const screen = await render(AiPage);
+  await expect.element(screen.getByText("Not installed").first()).toBeVisible();
+  await screen.getByRole("button", { name: "Check again" }).click();
+  expect(native.scan).toHaveBeenLastCalledWith(true);
+  await expect.element(screen.getByText("Installed · signed in")).toBeVisible();
+});
+
+test("an app that could not be checked says so", async () => {
+  await page.viewport(1100, 1400);
+  native.read.mockResolvedValue(models({}));
+  native.scan.mockReset().mockRejectedValue(new Error("unavailable"));
+  const screen = await render(AiPage);
+  await expect.element(screen.getByText("Couldn’t check").first()).toBeVisible();
+});
+
+test("a refused endpoint key is explained and saving a working one closes the form", async () => {
+  await page.viewport(1100, 1400);
+  native.read.mockResolvedValue(models({}));
+  native.scan.mockResolvedValue(apps({}));
+  native.endpoint.mockResolvedValue(models({ base: "http://localhost:11434/v1" }));
   native.set
-    .mockResolvedValueOnce({ ...models({ keys: { open_ai: "set" } }), fault: "key_refused" })
-    .mockResolvedValueOnce(models({ keys: { open_ai: "set", anthropic: "valid" } }));
+    .mockResolvedValueOnce({
+      ...models({ base: "http://localhost:11434/v1" }),
+      fault: "key_refused",
+    })
+    .mockResolvedValueOnce(
+      models({ base: "http://localhost:11434/v1", keys: { compatible: "set" } }),
+    );
   const screen = await render(AiPage);
 
-  await screen.getByRole("button", { name: "Add key" }).first().click();
-  await userEvent.keyboard("sk-ant-wrong");
+  await screen.getByRole("button", { name: "Set up" }).click();
+  await screen.getByLabelText("Server address").fill("http://localhost:11434/v1");
+  await screen.getByLabelText("API key, if the server needs one").fill("wrong");
   await screen.getByRole("button", { name: "Save" }).click();
-  expect(native.set).toHaveBeenCalledWith(PROFILE, "anthropic", "sk-ant-wrong");
-  await expect.element(screen.getByText("Anthropic didn’t accept this key.")).toBeVisible();
+  expect(native.set).toHaveBeenCalledWith(PROFILE, "compatible", "wrong");
+  await expect.element(screen.getByText("Custom server didn’t accept this key.")).toBeVisible();
 
-  await screen.getByLabelText("Anthropic API key").fill("sk-ant-right");
+  await screen.getByLabelText("API key, if the server needs one").fill("right");
   await screen.getByRole("button", { name: "Save" }).click();
-  await expect.element(screen.getByText("Key accepted")).toBeVisible();
   await expect.element(screen.getByRole("button", { name: "Save" })).not.toBeInTheDocument();
 });
 
-test("testing a stored key reports what the provider said", async () => {
-  await page.viewport(1100, 1200);
-  native.read.mockResolvedValue(models({ keys: { open_ai: "set" } }));
-  native.test.mockResolvedValue({ ...models({ keys: { open_ai: "set" } }), fault: "unreachable" });
-  const screen = await render(AiPage);
-  await screen.getByRole("button", { name: "Test" }).click();
-  expect(native.test).toHaveBeenCalledWith(PROFILE, "open_ai");
-  await expect
-    .element(screen.getByText("Couldn’t reach OpenAI. Check your connection and try again."))
-    .toBeVisible();
-});
-
 test("a role follows Automatic until the person chooses a model", async () => {
-  await page.viewport(1100, 1200);
+  await page.viewport(1100, 1400);
+  native.scan.mockResolvedValue(apps({ claude_code: "ready" }));
   native.read.mockResolvedValue(
-    models({ keys: { anthropic: "valid" }, lead: "anthropic/claude-opus-5-5" }),
+    models({ apps: { claude_code: "ready" }, lead: "claude-code/opus" }),
   );
   native.choose.mockResolvedValue(
     models({
-      keys: { anthropic: "valid" },
-      lead: "anthropic/claude-sonnet-5-5",
-      chosen: "anthropic/claude-sonnet-5-5",
+      apps: { claude_code: "ready" },
+      lead: "claude-code/sonnet",
+      chosen: "claude-code/sonnet",
     }),
   );
   const screen = await render(AiPage);
-  await expect.element(screen.getByText("Automatic · Claude Opus 5.5")).toBeVisible();
-  await screen.getByText("Automatic · Claude Opus 5.5").click();
-  await page.getByRole("option", { name: /Claude Sonnet 5.5/ }).click();
-  expect(native.choose).toHaveBeenCalledWith(PROFILE, "lead", "anthropic/claude-sonnet-5-5");
+  await expect.element(screen.getByText("Automatic · Claude Code · Opus")).toBeVisible();
+  await screen.getByText("Automatic · Claude Code · Opus").click();
+  await page.getByRole("option", { name: /Claude Code · Sonnet/ }).click();
+  expect(native.choose).toHaveBeenCalledWith(PROFILE, "lead", "claude-code/sonnet");
 });
 
 test("a refused model change restores the stored choice and reports the failure", async () => {
-  await page.viewport(1100, 1200);
-  const view = models({ keys: { anthropic: "valid" }, lead: "anthropic/claude-opus-5-5" });
+  await page.viewport(1100, 1400);
+  native.scan.mockResolvedValue(apps({ claude_code: "ready" }));
+  const view = models({ apps: { claude_code: "ready" }, lead: "claude-code/opus" });
   native.read.mockResolvedValue(view);
   native.choose.mockReset().mockResolvedValue({ ...view, fault: "request" });
   const screen = await render(AiPage);
   const control = screen.getByLabelText("Work", { exact: true });
   await control.click();
-  await page.getByRole("option", { name: /Claude Sonnet 5.5/u }).click();
+  await page.getByRole("option", { name: /Claude Code · Sonnet/u }).click();
   await expect
     .element(screen.getByRole("alert"))
     .toHaveTextContent("The model couldn’t be changed");
-  await expect.element(control).toHaveTextContent("Automatic · Claude Opus 5.5");
+  await expect.element(control).toHaveTextContent("Automatic · Claude Code · Opus");
 });
 
-test("billing trouble preserves acceptance", async () => {
-  await page.viewport(1100, 1200);
-  const view = models({ keys: { open_ai: "valid" } });
+test("billing trouble with the custom endpoint is explained", async () => {
+  await page.viewport(1100, 1400);
+  native.scan.mockResolvedValue(apps({}));
+  const view = models({ base: "http://localhost:11434/v1" });
   view.providers = view.providers.map((provider) =>
-    provider.provider === "open_ai" ? { ...provider, fault: "billing" } : provider,
+    provider.provider === "compatible" ? { ...provider, fault: "billing" } : provider,
   );
   native.read.mockResolvedValue(view);
   const screen = await render(AiPage);
-  await expect.element(screen.getByText("Key accepted")).toBeVisible();
   await expect
     .element(
       screen.getByText("Check your provider’s billing or available credits, then try again."),
@@ -138,8 +243,11 @@ test("billing trouble preserves acceptance", async () => {
 });
 
 test("Settings AI exposes Jev setup beside the regular model controls with honest fallback", async () => {
-  await page.viewport(1100, 1200);
-  native.read.mockResolvedValue(models({ keys: { open_ai: "set" }, lead: "openai/gpt-6-sol" }));
+  await page.viewport(1100, 1400);
+  native.scan.mockResolvedValue(apps({ claude_code: "ready" }));
+  native.read.mockResolvedValue(
+    models({ apps: { claude_code: "ready" }, lead: "claude-code/sonnet" }),
+  );
   const screen = await render(AiPage);
   await expect.element(screen.getByRole("button", { name: "Add Jev key" })).toBeVisible();
   await expect.element(screen.getByRole("radio", { name: "Recommended" })).toBeChecked();
@@ -147,11 +255,16 @@ test("Settings AI exposes Jev setup beside the regular model controls with hones
   await expect.element(screen.getByRole("heading", { name: "Work", exact: true })).toBeVisible();
 });
 
-test("no hosted group or sign-in is offered", async () => {
-  await page.viewport(1100, 1200);
+test("no hosted group or sign-in is offered, and nothing is set up yet", async () => {
+  await page.viewport(1100, 1400);
+  native.scan.mockResolvedValue(apps({}));
   native.read.mockResolvedValue(models({}));
   const screen = await render(AiPage);
-  await expect.element(screen.getByText("Add a provider key", { exact: false })).toBeVisible();
+  await expect
+    .element(
+      screen.getByText("Set up an AI app on this PC, or your own endpoint", { exact: false }),
+    )
+    .toBeVisible();
   await expect.element(screen.getByText("Zephium Cloud", { exact: true })).not.toBeInTheDocument();
   await expect.element(screen.getByRole("button", { name: "Sign in…" })).not.toBeInTheDocument();
 });

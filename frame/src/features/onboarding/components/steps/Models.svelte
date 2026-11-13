@@ -1,9 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { CpuIcon, Key01Icon } from "@hugeicons/core-free-icons";
+  import { CommandLineIcon, CpuIcon, Key01Icon } from "@hugeicons/core-free-icons";
   import type { IconSvgElement } from "@hugeicons/svelte";
   import * as m from "$shared/i18n/messages";
   import { commands, type WorkLocalServerV1 } from "$shared/ipc/bindings";
+  import { AiApps, appProviders, providerName } from "$domain/ai";
+  import AiAppRow, { type AiAppView } from "$shared/ui/AiAppRow";
+  import Button from "$shared/ui/Button";
   import Icon from "$shared/ui/Icon";
   import type { Mind } from "../../lib/minds";
 
@@ -19,6 +22,26 @@
     discovering?: boolean;
     onsubmit: () => void;
   } = $props();
+
+  const apps = new AiApps();
+  /** The scan found an app that is signed in, so Work can open ready. */
+  const ready = $derived(apps.apps?.find((app) => app.state === "ready") ?? null);
+  const COULD_NOT_CHECK: AiAppView = {
+    state: "unknown",
+    version: null,
+    install: { command: null, url: "" },
+  };
+  const rows = $derived(
+    appProviders.map((provider) => {
+      const app = apps.apps?.find((row) => row.provider === provider) ?? null;
+      return { provider, app, view: app ?? (apps.unavailable ? COULD_NOT_CHECK : null) };
+    }),
+  );
+
+  onMount(() => {
+    void apps.scan(false);
+    return () => apps.dispose();
+  });
 
   onMount(() => {
     let live = true;
@@ -48,7 +71,20 @@
 
   const options = $derived.by<Option[]>(() => {
     return [
-      { id: "key", icon: Key01Icon, title: m.onb_ai_key(), body: m.onb_ai_key_body(), found: null },
+      {
+        id: "app",
+        icon: CommandLineIcon,
+        title: m.onb_ai_app(),
+        body: m.onb_ai_app_body(),
+        found: ready ? m.onb_ai_app_found({ app: providerName(ready.provider) }) : null,
+      },
+      {
+        id: "endpoint",
+        icon: Key01Icon,
+        title: m.onb_ai_endpoint(),
+        body: m.onb_ai_endpoint_body(),
+        found: null,
+      },
       {
         id: "local",
         icon: CpuIcon,
@@ -65,6 +101,8 @@
     onsubmit();
   }
 </script>
+
+<svelte:window onfocus={() => apps.returned()} />
 
 <div class="options" role="radiogroup" aria-label={m.onb_ai_options()}>
   {#each options as option, index (option.id)}
@@ -86,10 +124,49 @@
   {/each}
 </div>
 
+{#if mind === "app"}
+  <div class="apps">
+    {#each rows as row (row.provider)}<AiAppRow
+        provider={row.provider}
+        name={providerName(row.provider)}
+        app={row.view}
+        busy={!!row.app && apps.busy === row.app.app}
+        failed={!!row.app && apps.failed === row.app.app}
+        oninstall={() => row.app && void apps.install(row.app.app)}
+        onsignin={() => row.app && void apps.signIn(row.app.app)}
+      />{/each}
+    <div class="check">
+      <Button size="compact" pending={apps.scanning} onclick={() => void apps.scan(true)}
+        >{m.ai_apps_check_again()}</Button
+      >
+    </div>
+  </div>
+{/if}
+
 <style>
   .options {
     display: flex;
     gap: 16px;
+  }
+
+  .apps {
+    box-sizing: border-box;
+
+    /* As wide as the three cards above it and the gaps between them. */
+    inline-size: calc(3 * 248px + 2 * 16px);
+    margin-block-start: 16px;
+    overflow: hidden;
+    border-radius: var(--radius-card);
+    background: var(--color-card);
+    box-shadow: var(--shadow-raise);
+    animation: lift 420ms var(--ease-emphasized) backwards;
+  }
+
+  .check {
+    display: flex;
+    justify-content: flex-end;
+    padding: 10px 14px;
+    border-block-start: 1px solid var(--color-border);
   }
 
   .option {
@@ -195,7 +272,8 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .option {
+    .option,
+    .apps {
       animation: none;
     }
   }

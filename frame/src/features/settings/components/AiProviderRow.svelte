@@ -11,7 +11,14 @@
   import MoreHorizontalIcon from "@hugeicons/core-free-icons/MoreHorizontalIcon";
   import * as m from "$shared/i18n/messages";
 
-  let { session, provider }: { session: ModelsSession; provider: KeyedProvider } = $props();
+  // AI apps have their own rows (AiAppRow); this row is for key and endpoint providers.
+  let {
+    session,
+    provider,
+  }: {
+    session: ModelsSession;
+    provider: Exclude<KeyedProvider, "claude_code" | "antigravity" | "open_code">;
+  } = $props();
 
   const custom = $derived(provider === "compatible");
   const name = $derived(custom ? m.ai_custom_name() : providerName(provider));

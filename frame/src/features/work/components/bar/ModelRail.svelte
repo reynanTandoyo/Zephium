@@ -2,7 +2,7 @@
   import type { WorkModelProvider } from "$shared/ipc/bindings";
 
   /** What the person can do with a provider now: choose its models, or the one step that opens them. */
-  export type Standing = "ready" | "key" | "refused" | "server";
+  export type Standing = "ready" | "key" | "refused" | "server" | "app";
   export type Seat = { provider: WorkModelProvider; standing: Standing };
   /** What the picker shows: one provider's models, or the ones the person starred from all of them. */
   export type View = "favourites" | WorkModelProvider;
@@ -50,6 +50,8 @@
         return m.model_rail_refused({ provider: name });
       case "server":
         return m.model_rail_server({ provider: name });
+      case "app":
+        return m.model_rail_app({ provider: name });
       default:
         return m.model_rail_key({ provider: name });
     }

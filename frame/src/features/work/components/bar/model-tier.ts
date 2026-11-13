@@ -10,7 +10,8 @@ export type Tier = "light" | "balanced" | "flagship";
 export function tiers(groups: readonly { entries: readonly WorkModelEntry[] }[]) {
   const out: Record<string, Tier> = {};
   for (const group of groups) {
-    const priced = group.entries.filter((entry) => entry.price);
+    // A model that costs nothing per token, such as an AI app's, has no class by price.
+    const priced = group.entries.filter((entry) => entry.price && entry.price.output > 0);
     const top = Math.max(...priced.map((entry) => entry.price!.output));
     for (const entry of priced) {
       const output = entry.price!.output / 1_000_000;
