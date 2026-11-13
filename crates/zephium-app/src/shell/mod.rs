@@ -906,6 +906,7 @@ impl Shell {
             Command::ReleaseSite(id) => {
                 let _ = self.operation_release_site(&id);
             }
+            Command::SeedDefaultEssentials => self.seed_default_essentials(),
             Command::RenameFocusedProfile(name) => {
                 let _ = self.operation_rename_focused_profile(&name);
             }

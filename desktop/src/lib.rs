@@ -2715,6 +2715,8 @@ fn tabs_bootstrap(caller: WebviewWindow, shell: State<'_, Handle>) {
         return;
     }
     shell.dispatch(Command::Bootstrap);
+    // Fork: the default Essentials, once per install (a no-op afterwards).
+    shell.dispatch(Command::SeedDefaultEssentials);
 }
 
 static BLOCKER_STATS_QUERY_IN_FLIGHT: AtomicBool = AtomicBool::new(false);

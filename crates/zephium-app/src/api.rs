@@ -419,6 +419,9 @@ pub enum Command {
     KeepSite(String),
     /// Lets go of a catalog site onboarding kept, named by its catalog id.
     ReleaseSite(String),
+    /// Fork: once per install, keeps the default catalog sites in the focused
+    /// space's Essentials when it has none.
+    SeedDefaultEssentials,
     RenameFocusedProfile(String),
     /// A named profile with its own space, engine store and content policy.
     CreateProfile {

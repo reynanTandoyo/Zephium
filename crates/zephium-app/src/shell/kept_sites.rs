@@ -45,11 +45,41 @@ pub(super) const KEPT_SITES: &[KeptSite] = &[
     site!("whatsapp", "WhatsApp", "https://web.whatsapp.com/"),
 ];
 
+/// Fork: the catalog sites kept once per install, in dock order, when the
+/// focused space has no Essentials yet. The person can let any of them go,
+/// and they are not kept again: the app setting below records the one time.
+/// Onboarding pre-selects the same list (`DEFAULT_ESSENTIALS` in
+/// `frame/src/features/onboarding/lib/catalog.ts`); keep the two equal.
+pub(super) const DEFAULT_ESSENTIALS: &[&str] = &[
+    "whatsapp", "github", "youtube", "claude", "gemini", "spotify",
+];
+const DEFAULT_ESSENTIALS_SETTING: &str = "fork.default_essentials";
+
 pub(super) fn kept_site(id: &str) -> Option<&'static KeptSite> {
     KEPT_SITES.iter().find(|site| site.id == id)
 }
 
 impl Shell {
+    /// Keeps [`DEFAULT_ESSENTIALS`] in the focused space once per install, if
+    /// that space has no Essentials. Recorded whether or not anything was
+    /// kept, so Essentials the person lets go never come back on their own.
+    pub(super) fn seed_default_essentials(&mut self) {
+        if self.store.app_setting(DEFAULT_ESSENTIALS_SETTING).is_some() {
+            return;
+        }
+        let Some(space) = self.windows.focused().map(|window| window.space) else {
+            return;
+        };
+        if self.items.roots(Placement::Favorites { space }).is_empty() {
+            for id in DEFAULT_ESSENTIALS {
+                let _ = self.operation_keep_site(id);
+            }
+        }
+        let _ = self
+            .store
+            .set_app_setting(DEFAULT_ESSENTIALS_SETTING.into(), "done".into());
+    }
+
     /// Keeps one catalog site in the focused space's Essentials, unloaded,
     /// with its mark already in place. A site already kept is left as it is,
     /// so a repeated request cannot stack duplicates.

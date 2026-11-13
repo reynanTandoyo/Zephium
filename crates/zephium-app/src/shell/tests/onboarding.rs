@@ -462,3 +462,58 @@ fn all_queued_import_kinds_and_icons_keep_one_destination_after_focus_moves() {
         .favicon_raster_with_age(other, "https://import.example")
         .is_none());
 }
+
+/// Fork: the default Essentials are kept once per install, in order, only
+/// into a space that has none, and never come back once let go.
+#[test]
+fn default_essentials_are_kept_once_into_an_empty_space() {
+    let store = Arc::new(FakeStore::default());
+    let (mut shell, _engine, _screen) = setup_with(store.clone());
+    shell.handle(Command::Bootstrap);
+    assert!(kept(&shell).is_empty());
+
+    shell.handle(Command::SeedDefaultEssentials);
+    let urls: Vec<String> = kept(&shell).into_iter().map(|(_, url)| url).collect();
+    let expected: Vec<String> = crate::shell::kept_sites::DEFAULT_ESSENTIALS
+        .iter()
+        .map(|id| {
+            crate::shell::kept_sites::kept_site(id)
+                .expect("a default is a catalog site")
+                .url
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(urls, expected);
+    assert_eq!(
+        store.app_setting("fork.default_essentials").as_deref(),
+        Some("done")
+    );
+
+    // Once is once: letting one go and seeding again keeps it gone.
+    let released = shell.handle_operation(Command::ReleaseSite("gemini".into()));
+    assert!(matches!(
+        released.outcome,
+        OperationOutcome::Applied | OperationOutcome::Deferred
+    ));
+    shell.handle(Command::SeedDefaultEssentials);
+    assert_eq!(kept(&shell).len(), expected.len() - 1);
+}
+
+#[test]
+fn default_essentials_leave_a_space_that_already_has_essentials() {
+    let store = Arc::new(FakeStore::default());
+    let (mut shell, _engine, _screen) = setup_with(store.clone());
+    shell.handle(Command::Bootstrap);
+    let kept_one = shell.handle_operation(Command::KeepSite("slack".into()));
+    assert!(matches!(
+        kept_one.outcome,
+        OperationOutcome::Applied | OperationOutcome::Deferred
+    ));
+
+    shell.handle(Command::SeedDefaultEssentials);
+    assert_eq!(kept(&shell).len(), 1);
+    assert_eq!(
+        store.app_setting("fork.default_essentials").as_deref(),
+        Some("done")
+    );
+}

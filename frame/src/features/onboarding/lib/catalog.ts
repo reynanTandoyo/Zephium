@@ -42,7 +42,9 @@ export const SITES: readonly Site[] = [
 
 /** Fork: the sites already kept when the Essentials step first opens on a
  *  run that has none yet, in dock order. The person can let any of them go
- *  there, keep more, or drag tabs into Essentials later. */
+ *  there, keep more, or drag tabs into Essentials later. Native keeps the
+ *  same list once for a profile that never had any (`DEFAULT_ESSENTIALS` in
+ *  `crates/zephium-app/src/shell/kept_sites.rs`); keep the two equal. */
 export const DEFAULT_ESSENTIALS: readonly string[] = [
   "whatsapp",
   "github",
