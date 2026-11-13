@@ -95,6 +95,7 @@ Last ID: T-0046
   - Windows toast; unread count on the Mail mode button.
 - [ ] T-0034 · Mail: Microsoft 365 / Gmail sign-in (OAuth2, XOAUTH2) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
   - Needs app registrations with Microsoft and Google (client IDs), done by the user. Only if T-0019 shows it is needed, or for personal accounts.
+  - 2026-11-13: backend done (`87203452b`..`87d55badd`): `zephium-oauth` (PKCE, loopback redirect, refresh tokens + optional user-pasted client secret only in the OS vault), XOAUTH2 for IMAP/SMTP, IPC `oauth_sign_in`/`oauth_cancel_sign_in`/`oauth_discard_grant`/`oauth_sign_out`, guide `docs/fork-oauth.md`. Tests: oauth 38, mail 53, desktop 13 pass; clippy clean (Windows, fakes only). Open: the sign-in fields in the Mail account setup UI (wave 3, after mail-ui).
 - [ ] T-0036 · Mail: extras · area: crates/zephium-mail, frame/src/features/mail · owner: - · updated: 2026-11-13
   - POP3 (optional), offline mode, rules/filters, contact suggestions from sent mail, `mailto:` links opening Zephium's compose.
 - [ ] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
