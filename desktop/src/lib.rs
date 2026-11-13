@@ -89,6 +89,8 @@ mod intro_sound;
 mod keymap;
 mod launcher_trigger;
 mod legacy_vault;
+// Fork (T-0008): AI apps on this computer as model backends.
+mod ai_apps;
 #[cfg(target_os = "linux")]
 mod linux_global_shortcuts;
 #[cfg(any(target_os = "linux", test))]
@@ -1780,6 +1782,9 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             work_models::work_set_model_endpoint,
             work_models::work_more_models,
             work_models::work_local_servers,
+            ai_apps::work_ai_apps,
+            ai_apps::work_ai_app_install,
+            ai_apps::work_ai_app_sign_in,
             voice::voice_status,
             voice::voice_choose_engine,
             voice::voice_choose_language,

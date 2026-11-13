@@ -864,6 +864,7 @@ fn every_offered_effort_reaches_its_wire_request() {
             WorkModelWire::AnthropicMessages => anthropic::body(&call, &target),
             WorkModelWire::Gemini => gemini::body(&call, &google()),
             WorkModelWire::ChatCompletions => chat::body(&call, &target),
+            WorkModelWire::Cli => unreachable!("no network target speaks the app wire"),
         }
         .unwrap()
     };

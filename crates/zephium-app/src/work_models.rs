@@ -16,9 +16,17 @@ use zephium_core::work::model::*;
 
 use WorkModelProvider as P;
 
-/// The order a role falls back to a provider when nothing is chosen: the
-/// person's own keys, in this order.
-const FALLBACK_ORDER: [WorkModelProvider; 10] = [
+/// Fork (T-0008): the AI apps on this computer as providers.
+#[path = "work_models_cli.rs"]
+pub mod cli;
+
+/// The order a role falls back to a provider when nothing is chosen: the AI
+/// apps on this computer (fork), then the person's own keys, in this order.
+const FALLBACK_ORDER: [WorkModelProvider; 13] = [
+    P::ClaudeCode,
+    P::Antigravity,
+    P::OpenCode,
+    P::Compatible,
     P::Anthropic,
     P::OpenAi,
     P::Google,
@@ -28,7 +36,6 @@ const FALLBACK_ORDER: [WorkModelProvider; 10] = [
     P::Groq,
     P::Cerebras,
     P::OpenRouter,
-    P::Compatible,
 ];
 /// Providers that take a key in Settings, in display order.
 pub const KEYED_PROVIDERS: [WorkModelProvider; 10] = [
@@ -242,6 +249,7 @@ pub(crate) async fn blocking<T: Send + 'static>(
 
 /// Reads which keys exist, from Keychain attributes only, once per process.
 pub(crate) async fn ensure_presence() {
+    cli::ensure_scanned().await;
     let missing: Vec<_> = {
         let state = state();
         KEYED_PROVIDERS
@@ -295,6 +303,7 @@ fn usable(state: &State, provider: WorkModelProvider) -> bool {
         P::Compatible => {
             compatible_base().is_some() && key_status(state, provider) != WorkKeyStatus::Invalid
         }
+        provider if provider.is_cli_app() => cli::ready(provider),
         provider => {
             state.presence.get(&provider).copied().unwrap_or(false)
                 && key_status(state, provider) != WorkKeyStatus::Invalid
@@ -317,6 +326,11 @@ fn entries(state: &State) -> Vec<WorkModelEntry> {
             if !all.iter().any(|known| known.id == entry.id) {
                 all.push(priced_locally(entry.clone(), local));
             }
+        }
+    }
+    for entry in cli::entries() {
+        if !all.iter().any(|known| known.id == entry.id) {
+            all.push(entry);
         }
     }
     all
@@ -406,6 +420,9 @@ fn family_entry(
     provider: WorkModelProvider,
     role: WorkModelRole,
 ) -> Option<WorkModelEntry> {
+    if provider.is_cli_app() {
+        return cli::family_entry(provider, role);
+    }
     let offered = |entry: &&WorkModelEntry| {
         entry.model.provider == provider
             && state
@@ -701,6 +718,7 @@ fn client(
     let (target, credential): (LeadTarget, Arc<dyn LeadCredential>) = match provider {
         // The deprecated hosted provider has no client.
         P::Cloud => return Err(WorkModelError::BadRequest),
+        provider if provider.is_cli_app() => return cli::client(entry),
         P::Compatible => (
             LeadTarget::compatible(&compatible_base().ok_or(WorkModelError::MissingKey)?)?,
             Arc::new(CompatibleCredential {
@@ -794,6 +812,7 @@ pub async fn view(profile: ProfileId) -> WorkModelsView {
         .collect();
     let providers = KEYED_PROVIDERS
         .into_iter()
+        .chain(cli::APP_PROVIDERS)
         .map(|provider| WorkProviderView {
             provider,
             key: key_status(&state, provider),
@@ -1090,6 +1109,9 @@ pub async fn set_compatible_base(base: Option<&str>) -> Result<(), WorkModelErro
 pub async fn more_models(
     provider: WorkModelProvider,
 ) -> Result<Vec<WorkModelEntry>, WorkModelError> {
+    if provider.is_cli_app() {
+        return Ok(cli::models(provider));
+    }
     let _guard = mutations().lock().await;
     let current_generation = generation(provider);
     if let Some(listed) = state().listed.get(&provider) {
@@ -1884,6 +1906,78 @@ mod tests {
         assert_eq!(
             super::view(tuned).await.effort,
             Some(WorkModelReasoning::Medium)
+        );
+        set_effort(tuned, None).unwrap();
+        choose(tuned, WorkModelRole::Lead, None).unwrap();
+
+        // Fork: a signed-in AI app on this computer comes first, free, with
+        // its own client; one that needs sign-in is listed but not used.
+        let apps = profile_id(45);
+        with_keys(&[P::Anthropic]);
+        let program = std::env::current_exe().unwrap();
+        cli::install_for_tests(vec![
+            zephium_cli_models::CliAppStatus {
+                app: zephium_cli_models::CliApp::ClaudeCode,
+                path: Some(program.clone()),
+                version: Some("2.1.319".into()),
+                state: zephium_cli_models::CliAppState::Ready,
+                models: zephium_cli_models::static_models(zephium_cli_models::CliApp::ClaudeCode),
+            },
+            zephium_cli_models::CliAppStatus {
+                app: zephium_cli_models::CliApp::Antigravity,
+                path: Some(program),
+                version: None,
+                state: zephium_cli_models::CliAppState::SignInNeeded,
+                models: zephium_cli_models::static_models(zephium_cli_models::CliApp::Antigravity),
+            },
+        ]);
+        assert!(usable(&state(), P::ClaudeCode));
+        assert!(!usable(&state(), P::Antigravity) && !usable(&state(), P::OpenCode));
+        let lead = effective(&state(), apps, WorkModelRole::Lead).unwrap();
+        assert_eq!(lead.id, "claude-code/opus");
+        assert!(lead.is_free_compatible());
+        assert_eq!(
+            effective(&state(), apps, WorkModelRole::Light).unwrap().id,
+            "claude-code/haiku"
+        );
+        assert_eq!(
+            effective(&state(), apps, WorkModelRole::Page).unwrap().id,
+            "claude-code/sonnet"
+        );
+        assert!(client(&state(), &lead).is_ok());
+        let view = super::view(apps).await;
+        assert!(view
+            .entries
+            .iter()
+            .any(|entry| entry.id == "antigravity/gemini-3.8-flash-low"));
+        assert!(view
+            .providers
+            .iter()
+            .any(|provider| provider.provider == P::ClaudeCode
+                && provider.key == WorkKeyStatus::Missing));
+        assert_eq!(lead_effort(apps, &lead), Some(WorkModelReasoning::Medium));
+        choose(
+            apps,
+            WorkModelRole::Lead,
+            Some("antigravity/gemini-3.8-flash-low"),
+        )
+        .unwrap();
+        assert_eq!(effective(&state(), apps, WorkModelRole::Lead), None);
+        let chosen = stored_choice(&state(), apps, WorkModelRole::Lead).unwrap();
+        assert_eq!(
+            client(&state(), &chosen).err(),
+            Some(WorkModelError::MissingKey)
+        );
+        choose(apps, WorkModelRole::Lead, None).unwrap();
+        assert_eq!(more_models(P::ClaudeCode).await.unwrap().len(), 4);
+        assert!(set_key(P::ClaudeCode, "key".into()).await.is_err());
+        cli::install_for_tests(Vec::new());
+        assert_eq!(
+            effective(&state(), apps, WorkModelRole::Lead)
+                .unwrap()
+                .model
+                .provider,
+            P::Anthropic
         );
     }
 

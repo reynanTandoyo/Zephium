@@ -411,6 +411,7 @@ pub fn wire(provider: WorkModelProvider) -> WorkModelWire {
         | P::Cerebras
         | P::Compatible
         | P::Cloud => WorkModelWire::ChatCompletions,
+        P::ClaudeCode | P::Antigravity | P::OpenCode => WorkModelWire::Cli,
     }
 }
 
@@ -433,6 +434,9 @@ pub fn provider_slug(provider: WorkModelProvider) -> &'static str {
         P::Cerebras => "cerebras",
         P::Compatible => "compatible",
         P::Cloud => "zephium",
+        P::ClaudeCode => "claude-code",
+        P::Antigravity => "antigravity",
+        P::OpenCode => "opencode",
     }
 }
 
@@ -450,6 +454,9 @@ pub fn provider_from_slug(slug: &str) -> Option<WorkModelProvider> {
         "cerebras" => P::Cerebras,
         "compatible" => P::Compatible,
         "zephium" => P::Cloud,
+        "claude-code" => P::ClaudeCode,
+        "antigravity" => P::Antigravity,
+        "opencode" => P::OpenCode,
         _ => return None,
     })
 }
@@ -552,6 +559,8 @@ pub fn efforts(upstream: WorkModelProvider, model: &str) -> Vec<WorkModelReasoni
             vec![Low, Medium, High]
         }
         P::OpenRouter => vec![Low, Medium, High],
+        // Fork: Claude Code's `--effort`; its Haiku takes none.
+        P::ClaudeCode if model != "haiku" => vec![Low, Medium, High, XHigh, Max],
         _ => Vec::new(),
     }
 }

@@ -96,6 +96,15 @@ export const commands = {
 	workMoreModels: (expectedProfile: string, provider: WorkModelProvider) => __TAURI_INVOKE<WorkMoreModelsV1_Serialize>("work_more_models", { expectedProfile, provider }),
 	/**  Ollama and LM Studio on their default ports, for one-click setup. */
 	workLocalServers: () => __TAURI_INVOKE<WorkLocalServerV1[]>("work_local_servers"),
+	/**  The apps on this computer; `rescan: false` returns the last scan. */
+	workAiApps: (rescan: boolean) => __TAURI_INVOKE<WorkAiAppsV1>("work_ai_apps", { rescan }),
+	/**
+	 *  Opens a visible terminal running the app's official install command, or
+	 *  its download page in a tab when it has no scriptable installer.
+	 */
+	workAiAppInstall: (app: WorkAiAppIdV1) => typedError<null, WorkModelsFaultV1>(__TAURI_INVOKE("work_ai_app_install", { app })),
+	/**  Opens a visible terminal running the app so the person can sign in once. */
+	workAiAppSignIn: (app: WorkAiAppIdV1) => typedError<null, WorkModelsFaultV1>(__TAURI_INVOKE("work_ai_app_sign_in", { app })),
 	voiceStatus: () => __TAURI_INVOKE<VoiceStatusV1>("voice_status"),
 	voiceChooseEngine: (engine: "on_device" | "open_ai" | "groq" | null) => __TAURI_INVOKE<VoiceStatusV1>("voice_choose_engine", { engine }),
 	voiceChooseLanguage: (language: string | null) => __TAURI_INVOKE<VoiceStatusV1>("voice_choose_language", { language }),
@@ -3555,6 +3564,29 @@ export type WorkAgentGrantV1_Serialize = {
 	search_fallback?: WorkSearchFallbackV1 | null,
 };
 
+export type WorkAiAppIdV1 = "claude_code" | "antigravity" | "open_code";
+
+/**  How the app is installed: a command for a visible terminal, or a page. */
+export type WorkAiAppInstallV1 = {
+	command: string | null,
+	url: string,
+};
+
+export type WorkAiAppStateV1 = "missing" | "sign_in_needed" | "ready" | "unknown";
+
+export type WorkAiAppV1 = {
+	app: WorkAiAppIdV1,
+	provider: WorkModelProvider,
+	name: string,
+	state: WorkAiAppStateV1,
+	version: string | null,
+	install: WorkAiAppInstallV1,
+};
+
+export type WorkAiAppsV1 = {
+	apps: WorkAiAppV1[],
+};
+
 export type WorkApprovalRequestV1 = {
 	version: number,
 	work: WorkId,
@@ -5545,7 +5577,13 @@ export type WorkModelProvider = "open_ai" | "anthropic" | "google" | "deep_seek"
  *  Deprecated: the hosted Zephium AI provider was removed in this fork;
  *  kept so stored data still parses. Never produced, offered or usable.
  */
-"cloud";
+"cloud" |
+/**  Fork: the Claude Code app on this computer, run with its own sign-in. */
+"claude_code" |
+/**  Fork: the Antigravity CLI (`agy`) on this computer. */
+"antigravity" |
+/**  Fork: the OpenCode CLI on this computer. */
+"open_code";
 
 export type WorkModelReasoning = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -5573,7 +5611,9 @@ export type WorkModelSupports = {
 };
 
 /**  The wire family a model speaks. */
-export type WorkModelWire = "open_ai_responses" | "anthropic_messages" | "gemini" | "chat_completions";
+export type WorkModelWire = "open_ai_responses" | "anthropic_messages" | "gemini" | "chat_completions" |
+/**  Fork: one print-mode run of an AI app on this computer per call. */
+"cli";
 
 /**  Something in the picker or Settings → AI changed; read it again. */
 export type WorkModelsChanged = {
@@ -6477,6 +6517,8 @@ export type WorkProviderStatusV1_Deserialize = {
 	fault?: WorkModelsFaultV1 | null,
 	/**  The OpenAI-compatible endpoint's base URL. */
 	base: string | null,
+	/**  Fork (T-0008): the AI app behind an app provider; usable only when ready. */
+	app: WorkAiAppV1 | null,
 };
 
 export type WorkProviderStatusV1_Serialize = {
@@ -6485,6 +6527,8 @@ export type WorkProviderStatusV1_Serialize = {
 	fault?: WorkModelsFaultV1 | null,
 	/**  The OpenAI-compatible endpoint's base URL. */
 	base: string | null,
+	/**  Fork (T-0008): the AI app behind an app provider; usable only when ready. */
+	app: WorkAiAppV1 | null,
 };
 
 export type WorkPublicDiscoveryScope = {

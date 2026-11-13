@@ -31,6 +31,20 @@ pub enum WorkModelProvider {
     /// Deprecated: the hosted Zephium AI provider was removed in this fork;
     /// kept so stored data still parses. Never produced, offered or usable.
     Cloud,
+    /// Fork: the Claude Code app on this computer, run with its own sign-in.
+    ClaudeCode,
+    /// Fork: the Antigravity CLI (`agy`) on this computer.
+    Antigravity,
+    /// Fork: the OpenCode CLI on this computer.
+    OpenCode,
+}
+
+impl WorkModelProvider {
+    /// Fork: an AI app on this computer that Zephium runs as a plain model
+    /// through its own sign-in, rather than a keyed network provider.
+    pub fn is_cli_app(self) -> bool {
+        matches!(self, Self::ClaudeCode | Self::Antigravity | Self::OpenCode)
+    }
 }
 
 #[cfg_attr(feature = "ipc-types", derive(specta::Type))]
@@ -64,6 +78,8 @@ pub enum WorkModelWire {
     AnthropicMessages,
     Gemini,
     ChatCompletions,
+    /// Fork: one print-mode run of an AI app on this computer per call.
+    Cli,
 }
 
 #[cfg_attr(feature = "ipc-types", derive(specta::Type))]
@@ -357,9 +373,10 @@ pub struct WorkModelEntry {
 }
 
 impl WorkModelEntry {
-    /// A compatible model whose resolved price carries no usage charge.
+    /// A compatible model, or (fork) a model of an AI app on this computer,
+    /// whose resolved price carries no usage charge.
     pub fn is_free_compatible(&self) -> bool {
-        self.model.provider == WorkModelProvider::Compatible
+        (self.model.provider == WorkModelProvider::Compatible || self.model.provider.is_cli_app())
             && self.price.as_ref().is_some_and(|price| {
                 price.input == 0 && price.cached_input == 0 && price.output == 0
             })

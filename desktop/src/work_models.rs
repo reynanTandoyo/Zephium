@@ -46,6 +46,8 @@ pub(crate) struct WorkProviderStatusV1 {
     pub(crate) fault: Option<WorkModelsFaultV1>,
     /// The OpenAI-compatible endpoint's base URL.
     pub(crate) base: Option<String>,
+    /// Fork (T-0008): the AI app behind an app provider; usable only when ready.
+    pub(crate) app: Option<super::ai_apps::WorkAiAppV1>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, specta::Type)]
@@ -132,6 +134,7 @@ mod product {
 
     pub(super) fn install(app: &tauri::AppHandle) {
         models::install_settings(std::sync::Arc::new(AppSettings));
+        super::super::ai_apps::install();
         let app = app.clone();
         models::set_observer(Box::new(move || {
             emit_to_privileged(
@@ -196,22 +199,23 @@ mod product {
         let chosen = WorkModelRolesV1 { lead, page, light };
         let [lead, page, light] = view.effective;
         let effective = WorkModelRolesV1 { lead, page, light };
+        let mut providers = Vec::with_capacity(view.providers.len());
+        for provider in view.providers {
+            providers.push(WorkProviderStatusV1 {
+                provider: provider.provider,
+                key: key(provider.key),
+                fault: provider.fault.map(provider_fault),
+                base: provider.base,
+                app: super::super::ai_apps::app_of(provider.provider).await,
+            });
+        }
         WorkModelsV1 {
             version: 1,
             profile: profile.to_string(),
             entries: view.entries,
             chosen,
             effective,
-            providers: view
-                .providers
-                .into_iter()
-                .map(|provider| WorkProviderStatusV1 {
-                    provider: provider.provider,
-                    key: key(provider.key),
-                    fault: provider.fault.map(provider_fault),
-                    base: provider.base,
-                })
-                .collect(),
+            providers,
             fault,
             efforts: view
                 .efforts
@@ -612,6 +616,7 @@ mod release_tests {
             key: WorkKeyStateV1::Valid,
             fault: None,
             base: None,
+            app: None,
         };
         assert!(serde_json::to_value(&provider)
             .unwrap()

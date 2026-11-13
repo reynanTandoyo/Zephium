@@ -363,6 +363,7 @@ impl WorkAgentGrantV1 {
                 || self.search_fallback.is_some()
                 || self.lead.as_ref().is_none_or(|model| {
                     model.provider != super::model::WorkModelProvider::Compatible
+                        && !model.provider.is_cli_app()
                 }))
         {
             return Err(WorkError::Invalid);

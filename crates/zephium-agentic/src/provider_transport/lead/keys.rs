@@ -25,7 +25,11 @@ pub fn service(provider: WorkModelProvider) -> Option<&'static str> {
         WorkModelProvider::Groq => "app.zephium.agent-provider.groq",
         WorkModelProvider::Cerebras => "app.zephium.agent-provider.cerebras",
         WorkModelProvider::Compatible => "app.zephium.agent-provider.compatible",
-        WorkModelProvider::Cloud => return None,
+        // Fork: AI apps on this computer use their own sign-in, never a key.
+        WorkModelProvider::Cloud
+        | WorkModelProvider::ClaudeCode
+        | WorkModelProvider::Antigravity
+        | WorkModelProvider::OpenCode => return None,
     })
 }
 

@@ -49,6 +49,9 @@ pub(crate) fn provider_name(provider: WorkModelProvider) -> &'static str {
         WorkModelProvider::Compatible => "your server",
         // Deprecated and never offered; named only so the match stays total.
         WorkModelProvider::Cloud => "Zephium",
+        WorkModelProvider::ClaudeCode => "Claude Code",
+        WorkModelProvider::Antigravity => "Antigravity",
+        WorkModelProvider::OpenCode => "OpenCode",
     }
 }
 

@@ -146,9 +146,12 @@ impl LeadTarget {
             WorkModelProvider::Groq => (WorkModelWire::ChatCompletions, GROQ_BASE),
             WorkModelProvider::Cerebras => (WorkModelWire::ChatCompletions, CEREBRAS_BASE),
             // Cloud is a deprecated, never-produced variant: it has no endpoint.
-            WorkModelProvider::Compatible | WorkModelProvider::Cloud => {
-                return Err(WorkModelError::BadRequest)
-            }
+            // Fork: AI apps on this computer are not network endpoints.
+            WorkModelProvider::Compatible
+            | WorkModelProvider::Cloud
+            | WorkModelProvider::ClaudeCode
+            | WorkModelProvider::Antigravity
+            | WorkModelProvider::OpenCode => return Err(WorkModelError::BadRequest),
         };
         Ok(Self {
             wire,
@@ -213,6 +216,8 @@ impl LeadTarget {
                 url.set_query(Some("alt=sse"));
                 Ok(url)
             }
+            // Fork: no network target speaks the local app wire.
+            WorkModelWire::Cli => Err(WorkModelError::BadRequest),
         }
     }
 
@@ -423,6 +428,7 @@ impl LeadClient {
             WorkModelWire::AnthropicMessages => anthropic::body(request, &self.target)?,
             WorkModelWire::Gemini => gemini::body(request, &self.target)?,
             WorkModelWire::ChatCompletions => chat::body(request, &self.target)?,
+            WorkModelWire::Cli => return Err(WorkModelError::BadRequest),
         };
         serde_json::to_vec(&body).map_err(|_| WorkModelError::BadRequest)
     }
@@ -852,7 +858,8 @@ impl WireDecoder {
             WorkModelWire::OpenAiResponses => Self::OpenAi(Default::default()),
             WorkModelWire::AnthropicMessages => Self::Anthropic(Default::default()),
             WorkModelWire::Gemini => Self::Gemini(Default::default()),
-            WorkModelWire::ChatCompletions => Self::Chat(Default::default()),
+            // Fork: unreachable, as no target speaks the local app wire.
+            WorkModelWire::ChatCompletions | WorkModelWire::Cli => Self::Chat(Default::default()),
         }
     }
 
