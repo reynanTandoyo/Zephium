@@ -73,9 +73,6 @@ Last ID: T-0046
 - [ ] T-0015 · Modes: make Work-only Rust branches mode-aware · area: crates/zephium-app/src/shell/{spaces,operations,time,media,browser_pages}.rs · owner: - · updated: 2026-11-13
   - Switching space keeps the mode, typing an address returns to Browse, time tracking records the mode. Update the Rust tests in `shell/tests`.
   - 2026-11-13: `5a86ca30c` made spaces/operations/browser_pages mode-aware. Open: time tracking for Mail/Calendar (`Place` only has Site/Work; needs a store change), and media/space/address branches treat every mode like Work.
-- [ ] T-0018 · Modes: texts and the onboarding mock switch · area: frame/messages (13 locales), frame/src/features/onboarding/components/Window.svelte · owner: - · updated: 2026-11-13
-  - `mode_mail`, `mode_calendar`, update `ui_mode_work_hint`; the onboarding window draws a fake two-tab switch.
-  - 2026-11-13: texts in all 13 locales done (`d1d96ab24`). Open: onboarding `Window.svelte` mock still shows Browse/Work only.
 - [ ] T-0020 · Mail: crate `zephium-mail` with IMAP over TLS · area: new crates/zephium-mail · owner: - · updated: 2026-11-13
   - `async-imap` + rustls; IDLE for push; bounded reads; all server data is untrusted input. Unit tests against a fake IMAP server.
 - [ ] T-0021 · Mail: MIME parsing · area: crates/zephium-mail · owner: - · updated: 2026-11-13
@@ -137,6 +134,9 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0018 · Modes: texts and the onboarding mock switch · area: frame/messages (13 locales), frame/src/features/onboarding/components/Window.svelte · owner: orca w1-modes · updated: 2026-11-13
+  - `mode_mail`, `mode_calendar`, update `ui_mode_work_hint`; the onboarding window draws a fake two-tab switch.
+  - `d1d96ab24` texts in 13 locales; `8742f1cd2` onboarding mock shows Browse/Work/Mail/Calendar. Frame typecheck/lint, onboarding unit 19 + component 9 pass, frame build within unchanged budgets (Windows).
 - [x] T-0010 · Modes: define the mode list as data · area: frame/src/domain/surface, frame/src/features/sidebar · owner: orca w1-modes · updated: 2026-11-13
   - `{ page, label, icon, feature }` in order Browse, Work, Mail, Calendar; a mode is hidden when its feature is off. Today "Browse" means no full-window page and "Work" is `BrowserPage::Work`.
   - `5a86ca30c` (Rust) + `d1d96ab24` (frame): clippy -D warnings for zephium-app/core/desktop clean, new Rust mode tests pass, frame typecheck/lint/unit (305) pass, frame build within unchanged budgets (Windows).
