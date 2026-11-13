@@ -447,6 +447,13 @@ pub const REGISTRY: &[CommandSpec] = &[
         split("CmdOrCtrl+Shift+J", "Ctrl+J"),
         Group::Window,
     ),
+    command("browser.mail", "Show Mail", Keys::NONE, Group::Window),
+    command(
+        "browser.calendar",
+        "Show Calendar",
+        Keys::NONE,
+        Group::Window,
+    ),
     command("browser.tasks", "Show All Tasks", Keys::NONE, Group::Window),
     command("browser.notes", "Show All Notes", Keys::NONE, Group::Window),
     command("browser.time", "Show Time", Keys::NONE, Group::Window),
@@ -665,13 +672,15 @@ pub fn runs_as(id: &str) -> &str {
 /// Applies keymap overrides onto the defaults. An override with an empty
 /// string removes the shortcut; unknown ids, fixed commands and overrides
 /// that no longer validate fall back to the default.
-/// The feature switch a command belongs to (`ai`, `work`, `notes`, `tasks`,
-/// `time`), so a command whose feature is off is neither offered nor run.
+/// The feature switch a command belongs to (`ai`, `work`, `mail`, `calendar`,
+/// `notes`, `tasks`, `time`), so a command whose feature is off is neither offered nor run.
 /// Mirrored by `commandOffered` in the frame's preferences domain.
 pub fn feature_of(id: &str) -> Option<&'static str> {
     match id {
         "work.dictate" | "tool.ai" | "mode.choose" => Some("ai"),
         "browser.work" | "mode.work" => Some("work"),
+        "browser.mail" | "mode.mail" => Some("mail"),
+        "browser.calendar" | "mode.calendar" => Some("calendar"),
         "tool.notes" | "browser.notes" | "note.new" => Some("notes"),
         "tool.tasks" | "browser.tasks" => Some("tasks"),
         "tool.time" | "browser.time" | "settings.focus" => Some("time"),
@@ -1062,6 +1071,10 @@ mod tests {
         assert_eq!(feature_of("tool.ai"), Some("ai"));
         assert_eq!(feature_of("work.pane.close"), Some("work"));
         assert_eq!(feature_of("browser.work"), Some("work"));
+        assert_eq!(feature_of("browser.mail"), Some("mail"));
+        assert_eq!(feature_of("mode.mail"), Some("mail"));
+        assert_eq!(feature_of("browser.calendar"), Some("calendar"));
+        assert_eq!(feature_of("mode.calendar"), Some("calendar"));
         for id in ["tool.notes", "browser.notes", "note.new"] {
             assert_eq!(feature_of(id), Some("notes"));
         }

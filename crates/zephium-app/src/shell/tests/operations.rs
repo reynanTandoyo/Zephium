@@ -777,10 +777,36 @@ fn switching_work_off_refuses_work_and_returns_its_window_to_browse() {
 }
 
 #[test]
+fn mail_and_calendar_are_modes_that_hand_an_address_back_to_browse() {
+    for page in [crate::BrowserPage::Mail, crate::BrowserPage::Calendar] {
+        assert!(page.is_mode());
+        let (mut shell, _engine, chrome, screen) = setup_with_async_chrome();
+        shell.handle(Command::Bootstrap);
+        let tab = active_id(&screen);
+        navigate_and_commit(&mut shell, tab, "mode-address.example");
+        let shown = shell.handle_operation(Command::ShowBrowserPage(Some(page)));
+        assert_eq!(shown.outcome, OperationOutcome::Deferred);
+        assert_eq!(shell.active_browser_page(), Some(page));
+        let typed = shell.handle_operation(Command::OpenUrl {
+            input: "typed.example".into(),
+            new_tab: false,
+        });
+        assert_eq!(typed.outcome, OperationOutcome::Deferred, "{page:?}");
+        assert!(shell.browser_after_return.is_some(), "{page:?}");
+        let (revision, _) = chrome.complete_browser_return(true);
+        shell.browser_chrome_restored(revision, true);
+        assert_eq!(shell.active_browser_page(), None, "{page:?}");
+    }
+    assert!(!crate::BrowserPage::Settings.is_mode());
+}
+
+#[test]
 fn a_tool_switched_off_leaves_its_page_and_refuses_it_until_on() {
     let (mut shell, _engine, _screen) = setup();
     shell.handle(Command::Bootstrap);
     for (key, page) in [
+        ("mail.enabled", crate::BrowserPage::Mail),
+        ("calendar.enabled", crate::BrowserPage::Calendar),
         ("notes.enabled", crate::BrowserPage::Notes),
         ("tasks.enabled", crate::BrowserPage::Tasks),
         ("time.enabled", crate::BrowserPage::Time),

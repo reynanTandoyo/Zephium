@@ -63,6 +63,8 @@ pub const KEYS: &[&str] = &[
     "tabs.external-position",
     "tabs.close-button",
     "ui.theme-contrast",
+    "mail.enabled",
+    "calendar.enabled",
     "notes.enabled",
     "tasks.enabled",
     "time.enabled",
@@ -183,11 +185,13 @@ pub fn ai_enabled(stored: impl Fn(&str) -> Option<String>) -> bool {
     stored("ai.enabled").as_deref() != Some("false")
 }
 
-/// Whether a feature switch (`work`, `notes`, `tasks`, `time`) is on.
+/// Whether a feature switch (`work`, `mail`, `calendar`, `notes`, `tasks`, `time`) is on.
 pub fn feature_enabled(stored: impl Fn(&str) -> Option<String>, feature: &str) -> bool {
     match feature {
         "ai" => ai_enabled(stored),
         "work" => stored("work.enabled").as_deref() != Some("false"),
+        "mail" => stored("mail.enabled").as_deref() != Some("false"),
+        "calendar" => stored("calendar.enabled").as_deref() != Some("false"),
         "notes" => stored("notes.enabled").as_deref() != Some("false"),
         "tasks" => stored("tasks.enabled").as_deref() != Some("false"),
         "time" => stored("time.enabled").as_deref() != Some("false"),
@@ -324,6 +328,8 @@ pub fn value_allowed(key: &str, value: &str) -> bool {
         | "ui.newtab-focus"
         | "ai.enabled"
         | "work.enabled"
+        | "mail.enabled"
+        | "calendar.enabled"
         | "notes.enabled"
         | "tasks.enabled"
         | "time.enabled"
