@@ -7717,6 +7717,7 @@ dependencies = [
  "zephium-app",
  "zephium-blocker",
  "zephium-blocker-service",
+ "zephium-calendar",
  "zephium-core",
  "zephium-credentials",
  "zephium-engine",

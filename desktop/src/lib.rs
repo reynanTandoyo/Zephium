@@ -154,6 +154,7 @@ mod work_diagnostics;
 mod work_folders;
 mod work_memory;
 mod work_models;
+mod calendar;
 #[cfg(any(feature = "work-product", test))]
 mod work_operations;
 mod work_personal;
@@ -1785,6 +1786,18 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             ai_apps::work_ai_apps,
             ai_apps::work_ai_app_install,
             ai_apps::work_ai_app_sign_in,
+            calendar::calendar_discover,
+            calendar::calendar_add_account,
+            calendar::calendar_add_subscription,
+            calendar::calendar_accounts,
+            calendar::calendar_remove_account,
+            calendar::calendar_calendars,
+            calendar::calendar_set_visible,
+            calendar::calendar_events,
+            calendar::calendar_create_event,
+            calendar::calendar_update_event,
+            calendar::calendar_delete_event,
+            calendar::calendar_sync,
             voice::voice_status,
             voice::voice_choose_engine,
             voice::voice_choose_language,
@@ -2003,6 +2016,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             WorkHumanChanged,
             WorkDecisionPreferenceChanged,
             work_models::WorkModelsChanged,
+            calendar::CalendarChanged,
             voice::VoiceChanged,
             voice::VoiceLevels,
             page_assist::PageAssistChanged,
@@ -7014,6 +7028,7 @@ pub fn run() {
                 menu_text::set_language(store.app_setting("ui.language").as_deref());
                 updates::schedule_native_checks(app.handle());
                 work_models::install(app.handle());
+                calendar::install(app.handle(), &data_dir);
                 // The benchmark must not reach the person's keychain: the
                 // keychain asks for their password.
                 #[cfg(feature = "adblock-qa")]
