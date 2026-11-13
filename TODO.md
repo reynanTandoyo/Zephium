@@ -70,15 +70,6 @@ Last ID: T-0046
 
 ## Open
 
-- [ ] T-0024 · Mail: several accounts per profile · area: zephium-store, frame/src/features/mail · owner: - · updated: 2026-11-13
-  - Display name, colour, signature; reorder and remove accounts.
-  - 2026-11-13: several accounts, display name/colour/signature/remove done in the UI; reorder missing (no backend command). Wave 3.
-- [ ] T-0028 · Mail: safe reading pane · area: frame/src/features/mail, desktop (locked-down view) · owner: - · updated: 2026-11-13
-  - Text and HTML with no scripts; remote images blocked until "Load images"; links open as browser tabs and show their real target; attachments save/open. Follow docs/security-model.md.
-  - 2026-11-13: sanitiser + sandboxed srcdoc iframe with CSP done, links listed below the message (inert inside the iframe). Open: "Load images" cannot work because the frame CSP has no https: in img-src (fix: fetch through the backend into data: URLs, no CSP change); verify the srcdoc iframe renders natively. Wave 3.
-- [ ] T-0034 · Mail: Microsoft 365 / Gmail sign-in (OAuth2, XOAUTH2) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
-  - Needs app registrations with Microsoft and Google (client IDs), done by the user. Only if T-0019 shows it is needed, or for personal accounts.
-  - 2026-11-13: backend done (`87203452b`..`87d55badd`): `zephium-oauth` (PKCE, loopback redirect, refresh tokens + optional user-pasted client secret only in the OS vault), XOAUTH2 for IMAP/SMTP, IPC `oauth_sign_in`/`oauth_cancel_sign_in`/`oauth_discard_grant`/`oauth_sign_out`, guide `docs/fork-oauth.md`. Tests: oauth 38, mail 53, desktop 13 pass; clippy clean (Windows, fakes only). Open: the sign-in fields in the Mail account setup UI (wave 3, after mail-ui).
 - [ ] T-0036 · Mail: extras · area: crates/zephium-mail, frame/src/features/mail · owner: - · updated: 2026-11-13
   - POP3 (optional), offline mode, rules/filters, contact suggestions from sent mail, `mailto:` links opening Zephium's compose.
 - [ ] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
@@ -104,6 +95,18 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0024 · Mail: several accounts per profile · area: zephium-store, frame/src/features/mail · owner: orca w3-mail-followups · updated: 2026-11-13
+  - Display name, colour, signature; reorder and remove accounts.
+  - 2026-11-13: several accounts, display name/colour/signature/remove done in the UI; reorder missing (no backend command). Wave 3.
+  - Mail follow-ups (merged `d82c6b03e`): clippy mail/desktop clean, zephium-mail 50 unit + 20 flow, desktop mail/oauth 19, frame gates, 77 mail unit + 31 component tests, build within budgets (Windows). Account order via `mail_set_account_order` (app setting `mail.account_order`).
+- [x] T-0028 · Mail: safe reading pane · area: frame/src/features/mail, desktop (locked-down view) · owner: orca w3-mail-followups · updated: 2026-11-13
+  - Text and HTML with no scripts; remote images blocked until "Load images"; links open as browser tabs and show their real target; attachments save/open. Follow docs/security-model.md.
+  - 2026-11-13: sanitiser + sandboxed srcdoc iframe with CSP done, links listed below the message (inert inside the iframe). Open: "Load images" cannot work because the frame CSP has no https: in img-src (fix: fetch through the backend into data: URLs, no CSP change); verify the srcdoc iframe renders natively. Wave 3.
+  - Mail follow-ups (merged `d82c6b03e`): clippy mail/desktop clean, zephium-mail 50 unit + 20 flow, desktop mail/oauth 19, frame gates, 77 mail unit + 31 component tests, build within budgets (Windows). "Load images" fetches https images through the backend (`mail_fetch_remote_images`, public addresses only, bounded) into data: URLs, CSP unchanged; links stay listed below the message with their real target. `about:srcdoc` is not governed by `frame-src` per spec; native WebView2 rendering still to confirm at the final launch.
+- [x] T-0034 · Mail: Microsoft 365 / Gmail sign-in (OAuth2, XOAUTH2) · area: crates/zephium-mail · owner: orca w3-mail-followups · updated: 2026-11-13
+  - Needs app registrations with Microsoft and Google (client IDs), done by the user. Only if T-0019 shows it is needed, or for personal accounts.
+  - 2026-11-13: backend done (`87203452b`..`87d55badd`): `zephium-oauth` (PKCE, loopback redirect, refresh tokens + optional user-pasted client secret only in the OS vault), XOAUTH2 for IMAP/SMTP, IPC `oauth_sign_in`/`oauth_cancel_sign_in`/`oauth_discard_grant`/`oauth_sign_out`, guide `docs/fork-oauth.md`. Tests: oauth 38, mail 53, desktop 13 pass; clippy clean (Windows, fakes only). Open: the sign-in fields in the Mail account setup UI (wave 3, after mail-ui).
+  - Mail follow-ups (merged `d82c6b03e`): clippy mail/desktop clean, zephium-mail 50 unit + 20 flow, desktop mail/oauth 19, frame gates, 77 mail unit + 31 component tests, build within budgets (Windows). Sign-in fields (Microsoft/Google, client ID, tenant, optional secret) in account setup; `oauth_sign_in` takes `purposes`. Real provider sign-in not tested.
 - [x] T-0033 · Mail: new-mail notifications and unread badge · area: desktop/src/focus_alerts.rs, frame/src/features/sidebar · owner: orca w3-mail-notify · updated: 2026-11-13
   - Windows toast; unread count on the Mail mode button.
   - `85b6fcfcf`, `0783cfaaa`, `17d3f12bf` + app-level hold in `BrowserApp.svelte`: count-only toast via `focus_alerts` (no sender/subject/body), switch `mail.notifications`, unread badge on ModeTabs/ModeWord. clippy, focus_alerts 6 + preferences 19 tests, frame gates, 69 unit + 49 component tests pass (Windows). Not done: clicking the toast does not open Mail (no activation path). Not observed natively.
