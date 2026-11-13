@@ -1,4 +1,5 @@
 import type {
+  CalendarChanged,
   WorkEnvironmentChanged,
   WorkChanged,
   WorkHumanChanged,
@@ -56,6 +57,7 @@ function scopedEvent<T>(name: string) {
 // target, which would let the launcher panel subscribe to main-window state.
 export const nativeEventNames = {
   windowsReputationManaged: "zephium:windows-reputation-managed",
+  calendarChanged: "zephium:calendar-changed",
   workEnvironmentChanged: "zephium:work-environment-changed",
   workChanged: "zephium:work-changed",
   workHumanChanged: "zephium:work-human-changed",
@@ -101,6 +103,7 @@ export const nativeEventNames = {
 
 export const events = {
   windowsReputationManaged: scopedEvent<boolean>(nativeEventNames.windowsReputationManaged),
+  calendarChanged: scopedEvent<CalendarChanged>(nativeEventNames.calendarChanged),
   workEnvironmentChanged: scopedEvent<WorkEnvironmentChanged>(
     nativeEventNames.workEnvironmentChanged,
   ),

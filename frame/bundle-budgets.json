@@ -40,6 +40,10 @@
       "js": 21135,
       "css": 6190
     },
+    "lazy:features/calendar/components/CalendarPage.svelte": {
+      "js": 190643,
+      "css": 26807
+    },
     "lazy:features/downloads/components/DownloadsList.svelte": {
       "js": 13973,
       "css": 4459
