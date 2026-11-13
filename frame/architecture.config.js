@@ -91,7 +91,7 @@ export const architecture = {
                 element: {
                   type: "features",
                   captured: {
-                    module: ["tasks", "notes", "focus", "activity", "resources", "library"],
+                    module: ["tasks", "notes", "library"],
                   },
                 },
               },
