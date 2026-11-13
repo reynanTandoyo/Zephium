@@ -19,3 +19,4 @@ pub mod utf7;
 pub mod vault;
 
 pub use error::{MailError, Result};
+pub use futures::future::BoxFuture;

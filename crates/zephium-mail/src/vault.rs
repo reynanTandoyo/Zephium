@@ -47,6 +47,7 @@ fn checked_password(password: &str) -> Result<()> {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OsVault;
 
+#[cfg(any(windows, target_os = "macos"))]
 impl PasswordVault for OsVault {
     fn set(&self, account_id: &str, password: &str) -> Result<()> {
         let target = target(account_id).ok_or(MailError::InvalidInput)?;
@@ -71,6 +72,21 @@ impl PasswordVault for OsVault {
             Ok(()) | Err(zephium_credentials::VaultError::Missing) => Ok(()),
             Err(error) => Err(error.into()),
         }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+impl PasswordVault for OsVault {
+    fn set(&self, _account_id: &str, _password: &str) -> Result<()> {
+        Err(MailError::Unsupported)
+    }
+
+    fn get(&self, _account_id: &str) -> Result<Zeroizing<String>> {
+        Err(MailError::Unsupported)
+    }
+
+    fn remove(&self, _account_id: &str) -> Result<()> {
+        Err(MailError::Unsupported)
     }
 }
 

@@ -422,9 +422,8 @@ async fn serve(
                     .parse()
                     .unwrap_or(0);
                 let name = rest
-                    .splitn(2, ' ')
-                    .nth(1)
-                    .unwrap_or("")
+                    .split_once(' ')
+                    .map_or("", |(_, tail)| tail)
                     .rsplit_once('"')
                     .map_or(String::new(), |(head, _)| format!("{head}\""));
                 let flags: Vec<String> = rest

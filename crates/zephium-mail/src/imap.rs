@@ -380,7 +380,7 @@ impl ImapSession {
             }
         }
         self.drain_unsolicited();
-        rows.sort_by(|a, b| b.uid.cmp(&a.uid));
+        rows.sort_by_key(|row| std::cmp::Reverse(row.uid));
         rows.dedup_by_key(|row| row.uid);
         Ok(rows)
     }

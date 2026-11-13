@@ -291,10 +291,11 @@ async fn moves_with_the_move_extension_and_deletes_into_trash_then_for_good() {
         assert_eq!(state.folders[0].msgs.len(), 1);
     }
     rig.engine.delete(&a, "Trash", &[1]).await.unwrap();
-    let state = rig.server.state.lock().unwrap();
-    assert!(state.folders[3].msgs.is_empty(), "deleted for good");
-    assert!(state.log.iter().any(|l| l == "UID EXPUNGE 1"));
-    drop(state);
+    {
+        let state = rig.server.state.lock().unwrap();
+        assert!(state.folders[3].msgs.is_empty(), "deleted for good");
+        assert!(state.log.iter().any(|l| l == "UID EXPUNGE 1"));
+    }
     assert_eq!(
         rig.engine
             .move_messages(&a, "INBOX", &[3], "Nowhere")
