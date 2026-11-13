@@ -68,13 +68,6 @@ Last ID: T-0009
 
 ## In progress
 
-- [ ] T-0007 · Remove the Zephium account and the hosted "Zephium AI" (Cloud) provider · area: zephium-account, desktop/src/account*, Cloud provider code, frame account · owner: claude-main (+ subagents) · updated: 2026-11-13
-  - Branch `remove-account` (from `custom`). The account holds only identity, plan, usage, billing and avatar on `api.zephium.app`. Browser settings are local.
-  - **Keep** `zephium-app` `work_account*` and `WorkOperationV1::PrepareAccount`: these handle *website* account approvals, not the Zephium account.
-  - Keep the persisted serde variants (`WorkModelProvider::Cloud`, hosted `WorkModelFaultV1`, `PageAssistCostV1::Hosted`) as deprecated and never produced, so saved runs and conversations still load.
-  - 2026-11-13: committed on `remove-account`. Passing: `cargo clippy --workspace --all-targets --locked -- -D warnings`, tests for app/agentic/work-composition/page-assist, `pnpm --dir frame run check` (1336 tests), frame build and `check:styles`. 10 `zephium-app` Windows tests (work_files, work_personal, work_lead, export) fail identically on the baseline. Component tests were not run (no browser available).
-  - 2026-11-13: the release build launches and shows its window (see T-0009). Remaining: merge `remove-account` into `custom` once the user approves.
-
 ## Open
 
 - [ ] T-0002 · Launch `pnpm dev` and confirm "Zephium Dev" starts · area: desktop, frame · owner: - · updated: 2026-11-13
@@ -96,6 +89,13 @@ Last ID: T-0009
 ## Blocked
 
 ## Done
+
+- [x] T-0007 · Remove the Zephium account and the hosted "Zephium AI" (Cloud) provider · area: zephium-account, desktop/src/account*, Cloud provider code, frame account · owner: claude-main (+ subagents) · updated: 2026-11-13
+  - Branch `remove-account` (from `custom`). The account holds only identity, plan, usage, billing and avatar on `api.zephium.app`. Browser settings are local.
+  - **Keep** `zephium-app` `work_account*` and `WorkOperationV1::PrepareAccount`: these handle *website* account approvals, not the Zephium account.
+  - Keep the persisted serde variants (`WorkModelProvider::Cloud`, hosted `WorkModelFaultV1`, `PageAssistCostV1::Hosted`) as deprecated and never produced, so saved runs and conversations still load.
+  - 2026-11-13: committed on `remove-account`. Passing: `cargo clippy --workspace --all-targets --locked -- -D warnings`, tests for app/agentic/work-composition/page-assist, `pnpm --dir frame run check` (1336 tests), frame build and `check:styles`. 10 `zephium-app` Windows tests (work_files, work_personal, work_lead, export) fail identically on the baseline. Component tests were not run (no browser available).
+  - 2026-11-13: the release build launches and shows its window (see T-0009). Merged into `custom` (fast-forward to `beae1f006`) and pushed to `origin/custom`.
 
 - [x] T-0009 · "Zephium Custom" refused to start: "private filesystem path or node is unsafe" · area: zephium-private-fs, zephium-store · owner: claude-main · updated: 2026-11-13
   - Cause: Windows Work storage accepts only a closed list of app identities, and `app.zephium.custom` was not on it. Added `NativeApplication::Custom` (folder `app.zephium.custom`), its mapping in `WindowsWorkStorage::for_application` and its test entry. An early theory about the `S-1-15-3-…` ACE on `%USERPROFILE%\AppData` was wrong, and that ACE needs no change.
