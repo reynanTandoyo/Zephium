@@ -6,6 +6,7 @@ mod essentials;
 mod hub;
 pub use hub::media::{admit as admit_media, MediaAdmissionError, MediaStore};
 pub use hub::profile_avatars::prepare_avatar_photo;
+pub mod calendar_cache;
 mod legacy;
 pub mod mail_cache;
 mod migrations;

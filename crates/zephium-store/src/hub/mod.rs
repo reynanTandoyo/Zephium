@@ -10,6 +10,7 @@ mod agent_work;
 mod app_link_sites;
 mod blocker;
 mod bookmarks;
+mod calendar;
 mod chats;
 mod compatibility;
 mod deletion;
