@@ -1,0 +1,14 @@
+{
+  "identifier": "app.zephium.custom",
+  "productName": "Zephium Custom",
+  "bundle": {
+    "targets": ["nsis"]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/reynanTandoyo/Zephium/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

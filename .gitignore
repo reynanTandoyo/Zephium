@@ -28,3 +28,6 @@ __pycache__/
 .env
 .env.*
 *.local
+
+# Fork: TODO.md edit lock (see TODO.md)
+/.todo.lock/

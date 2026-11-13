@@ -128,3 +128,9 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
   untouched; update surviving references before deleting a document.
 - Keep documentation about stable ownership and reproducible workflows. Put
   measurements, progress and future work in review evidence/issues, not guides.
+
+## Fork addendum
+
+This checkout is the fork `reynanTandoyo/Zephium`. Every agent must also follow
+the fork rules in [CLAUDE.md](CLAUDE.md) and the task-list protocol in
+[TODO.md](TODO.md); where they conflict with this file, CLAUDE.md wins.
