@@ -68,14 +68,6 @@ Last ID: T-0009
 
 ## In progress
 
-- [ ] T-0008 · Replace built-in AI providers with Claude CLI, Antigravity CLI, OpenCode CLI and a custom BYOK backup · area: zephium-agentic, zephium-app work_*, desktop work_*, frame work/assist/settings · owner: claude-main (+ subagents) · updated: 2026-11-13
-  - Needs a design decision first: (a) a CLI as the model behind Work's own tool loop, (b) handing whole tasks to the CLI (`work_computer/delegate.rs` already knows Codex and Claude, but it is gated off), or (c) Zephium exposing the browser as an MCP server that the CLI drives. Also decide what happens to the Ask Zephium sidebar and voice dictation.
-  - Keep the existing OpenAI-compatible "Compatible" BYOK provider (endpoint, model, key) as the backup. Remove the curated providers (Anthropic, OpenAI, Gemini, xAI, Mistral, DeepSeek, Groq, Cerebras, OpenRouter) and Zephium AI.
-  - Check whether Antigravity has a scriptable CLI before committing to it.
-  - Design: `docs/fork-cli-models.md`. Branch `cli-models` (from `custom`).
-  - 2026-11-13: implemented and committed on `cli-models`. Claude Code and Antigravity are model backends; OpenCode only has detection, Install and Sign in (no client, so it is never usable). The built-in key providers are hidden in the UI, and the custom endpoint stays. Passing: workspace clippy, `cargo test -p zephium-cli-models` (11 unit + 5 fake-app), app/core/agentic/work-composition tests, `pnpm --dir frame run check` (1345 tests), `pnpm build:custom`, the app starts, and a live Claude Code call returned the right tool call in 1.9 s. Remaining: the user tries Settings → AI and Ask Zephium in the app, then merge into `custom`.
-  - Known: agy saves a conversation file per call under `%USERPROFILE%\.gemini\antigravity-cli\conversations` (no flag to stop it), and an agy call takes about 60 s. Screenshots are not sent to the apps (text only).
-
 ## Open
 
 - [ ] T-0002 · Launch `pnpm dev` and confirm "Zephium Dev" starts · area: desktop, frame · owner: - · updated: 2026-11-13
@@ -93,6 +85,15 @@ Last ID: T-0009
 ## Blocked
 
 ## Done
+
+- [x] T-0008 · Replace built-in AI providers with Claude CLI, Antigravity CLI, OpenCode CLI and a custom BYOK backup · area: zephium-agentic, zephium-app work_*, desktop work_*, frame work/assist/settings · owner: claude-main (+ subagents) · updated: 2026-11-13
+  - Needs a design decision first: (a) a CLI as the model behind Work's own tool loop, (b) handing whole tasks to the CLI (`work_computer/delegate.rs` already knows Codex and Claude, but it is gated off), or (c) Zephium exposing the browser as an MCP server that the CLI drives. Also decide what happens to the Ask Zephium sidebar and voice dictation.
+  - Keep the existing OpenAI-compatible "Compatible" BYOK provider (endpoint, model, key) as the backup. Remove the curated providers (Anthropic, OpenAI, Gemini, xAI, Mistral, DeepSeek, Groq, Cerebras, OpenRouter) and Zephium AI.
+  - Check whether Antigravity has a scriptable CLI before committing to it.
+  - Design: `docs/fork-cli-models.md`. Branch `cli-models` (from `custom`).
+  - 2026-11-13: implemented and committed on `cli-models`. Claude Code and Antigravity are model backends; OpenCode only has detection, Install and Sign in (no client, so it is never usable). The built-in key providers are hidden in the UI, and the custom endpoint stays. Passing: workspace clippy, `cargo test -p zephium-cli-models` (11 unit + 5 fake-app), app/core/agentic/work-composition tests, `pnpm --dir frame run check` (1345 tests), `pnpm build:custom`, the app starts, and a live Claude Code call returned the right tool call in 1.9 s. The user confirmed Ask Zephium works with Claude Code and Antigravity in the app.
+  - Known: agy saves a conversation file per call under `%USERPROFILE%\.gemini\antigravity-cli\conversations` (no flag to stop it), and an agy call takes about 60 s. Screenshots are not sent to the apps (text only).
+  - Follow-up fixes: agy's agent allows only its `finish` tool (needed for `--json-schema`), wrapped answers are unwrapped, the model card's `fixed` class no longer collides with Tailwind, each app has its own logo (Claude Code uses the Anthropic mark), and the picker card shows "In use". Merged into `custom` and pushed to `origin/custom`.
 
 - [x] T-0007 · Remove the Zephium account and the hosted "Zephium AI" (Cloud) provider · area: zephium-account, desktop/src/account*, Cloud provider code, frame account · owner: claude-main (+ subagents) · updated: 2026-11-13
   - Branch `remove-account` (from `custom`). The account holds only identity, plan, usage, billing and avatar on `api.zephium.app`. Browser settings are local.
