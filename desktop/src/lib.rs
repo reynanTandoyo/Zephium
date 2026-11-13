@@ -1797,6 +1797,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             calendar::calendar_events,
             calendar::calendar_create_event,
             calendar::calendar_update_event,
+            calendar::calendar_update_occurrence,
+            calendar::calendar_delete_occurrence,
             calendar::calendar_delete_event,
             calendar::calendar_sync,
             mail::mail_autoconfig,

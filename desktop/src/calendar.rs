@@ -1,6 +1,8 @@
-//! Fork-owned (T-0037/T-0038/T-0039): IPC for calendars. Accounts and
-//! calendars live in `calendar.json` in the profile data directory, events in
-//! memory; passwords only in the OS credential vault
+//! Fork-owned (T-0037/T-0038/T-0039/T-0041): IPC for calendars. Accounts,
+//! calendars, refresh state and cached events live in the application store
+//! (`zephium-store`, META migration v30) and survive restarts; an old
+//! `calendar.json` in the profile data directory is imported once and renamed
+//! to `calendar.json.migrated`. Passwords live only in the OS credential vault
 //! (`app.zephium.calendar|<account id>`) and never cross IPC outward. All
 //! domain logic is in `zephium-calendar`.
 use super::*;
@@ -10,11 +12,16 @@ use zephium_calendar::api::{
     CalendarEventRefV1, CalendarEventsV1, CalendarSyncReportV1, CalendarV1,
 };
 use zephium_calendar::http::{ReqwestClient, Secret};
-use zephium_calendar::store::{JsonFileStorage, VaultSecrets};
+use zephium_calendar::persist::StoreCalendar;
+use zephium_calendar::store::VaultSecrets;
 use zephium_calendar::{CalendarError, CalendarService};
 
-/// How often due calendars are refreshed in the background.
+/// How often the background task looks for calendars that are due. A CalDAV
+/// calendar is due once its last refresh is 15 minutes old (see
+/// `zephium-calendar`), so each refreshes every 15 to 20 minutes.
 const REFRESH_EVERY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// How often the background task checks for shutdown while waiting.
+const SHUTDOWN_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Calendars, accounts or events changed; read them again.
 #[derive(Clone, Debug, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
@@ -38,11 +45,21 @@ fn changed(app: &tauri::AppHandle) {
 /// refresh. A failure leaves every `calendar_*` command answering
 /// `unsupported` rather than blocking startup.
 pub(crate) fn install(app: &tauri::AppHandle, data_dir: &std::path::Path) {
+    let Some(store) = APP_STORE.get().cloned() else {
+        write_diagnostic(format_args!("calendar: unavailable: no application store"));
+        return;
+    };
+    let persistent = Arc::new(StoreCalendar::new(
+        store,
+        Some(data_dir.join("calendar.json")),
+    ));
     let built = ReqwestClient::new().and_then(|http| {
-        CalendarService::new(
+        CalendarService::with_cache(
             Arc::new(http),
-            Arc::new(JsonFileStorage::new(data_dir.join("calendar.json"))),
+            persistent.clone(),
             Arc::new(VaultSecrets),
+            persistent,
+            zephium_calendar::service::system_clock(),
         )
     });
     let service = match built {
@@ -55,14 +72,39 @@ pub(crate) fn install(app: &tauri::AppHandle, data_dir: &std::path::Path) {
     app.manage(CalendarState(service.clone()));
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+        // Read the saved events off the setup path.
+        let warm = service.clone();
+        let _ = tokio::task::spawn_blocking(move || warm.warm()).await;
+        if wait_or_shutdown(&app, std::time::Duration::from_secs(8)).await {
+            return;
+        }
         loop {
-            if !service.sync_due().await.outcomes.is_empty() {
+            let report = service.sync_due().await;
+            if shutdown_started(&app) {
+                return;
+            }
+            if !report.outcomes.is_empty() {
                 changed(&app);
             }
-            tokio::time::sleep(REFRESH_EVERY).await;
+            if wait_or_shutdown(&app, REFRESH_EVERY).await {
+                return;
+            }
         }
     });
+}
+
+/// Sleeps for `duration`; `true` when shutdown began meanwhile.
+async fn wait_or_shutdown(app: &tauri::AppHandle, duration: std::time::Duration) -> bool {
+    let mut waited = std::time::Duration::ZERO;
+    while waited < duration {
+        if shutdown_started(app) {
+            return true;
+        }
+        let step = SHUTDOWN_POLL.min(duration - waited);
+        tokio::time::sleep(step).await;
+        waited += step;
+    }
+    shutdown_started(app)
 }
 
 fn service(
@@ -228,6 +270,43 @@ pub(crate) async fn calendar_update_event(
         .await?;
     changed(&app);
     Ok(updated)
+}
+
+/// Changes one occurrence of a recurring event (RECURRENCE-ID override).
+/// `recurrence_id` is the occurrence's `recurrence_id` as
+/// `calendar_events` lists it; the draft's `rrule` is ignored.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn calendar_update_occurrence(
+    caller: WebviewWindow,
+    app: tauri::AppHandle,
+    calendar: String,
+    uid: String,
+    recurrence_id: String,
+    draft: CalendarEventDraftV1,
+) -> Result<CalendarEventRefV1, CalendarError> {
+    let updated = service(&app, &caller, "calendar_update_occurrence")?
+        .update_occurrence(&calendar, &uid, &recurrence_id, &draft)
+        .await?;
+    changed(&app);
+    Ok(updated)
+}
+
+/// Deletes one occurrence of a recurring event (EXDATE on the series).
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn calendar_delete_occurrence(
+    caller: WebviewWindow,
+    app: tauri::AppHandle,
+    calendar: String,
+    uid: String,
+    recurrence_id: String,
+) -> Result<(), CalendarError> {
+    service(&app, &caller, "calendar_delete_occurrence")?
+        .delete_occurrence(&calendar, &uid, &recurrence_id)
+        .await?;
+    changed(&app);
+    Ok(())
 }
 
 /// Deletes an event (the whole series when it repeats).

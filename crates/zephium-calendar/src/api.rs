@@ -245,7 +245,7 @@ pub fn occurrence_wire(
     }
 }
 
-fn parse_draft_time(text: &str, all_day: bool, tzid: Option<&str>) -> Result<EventTime> {
+pub(crate) fn parse_draft_time(text: &str, all_day: bool, tzid: Option<&str>) -> Result<EventTime> {
     let text = text.trim();
     if all_day {
         let date =
@@ -283,7 +283,8 @@ const MAX_DRAFT_TEXT: usize = 100_000;
 
 /// Applies `draft` to `base` (an existing master) or builds a new event.
 /// Attendees, organizer, status and unrelated properties of `base` survive;
-/// exceptions are dropped when the start moves.
+/// exceptions (EXDATEs and overrides) are kept while the series start stays
+/// and dropped when it moves or the event stops repeating.
 pub fn apply_draft(uid: &str, draft: &CalendarEventDraftV1, base: Option<&Event>) -> Result<Event> {
     if draft.summary.chars().count() > 1_000
         || draft.location.len() > 2_000
@@ -339,6 +340,11 @@ pub fn apply_draft(uid: &str, draft: &CalendarEventDraftV1, base: Option<&Event>
     event.start = start;
     event.end = end;
     event.rrule = rrule;
+    if event.rrule.is_none() && event.rdates.is_empty() {
+        // No longer a series: nothing is left for exceptions to refer to.
+        event.exdates.clear();
+        event.overrides.clear();
+    }
     event.url = draft
         .url
         .as_ref()

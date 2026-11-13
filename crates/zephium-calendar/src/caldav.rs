@@ -44,6 +44,18 @@ pub struct RemoteResource {
     pub events: Vec<Event>,
     /// `true` while the server listed the resource without its data.
     pub pending: bool,
+    /// The `calendar-data` text as sent, kept for the persistent cache.
+    pub raw: Option<String>,
+}
+
+/// Result of comparing a server listing with known ETags.
+#[derive(Clone, Debug)]
+pub struct RangeDelta {
+    /// New resources and those whose ETag differs, with their data.
+    pub changed: Vec<RemoteResource>,
+    /// Every resource the server listed (changed or not); anything cached but
+    /// missing here is gone.
+    pub present: Vec<Url>,
 }
 
 /// Result of a `sync-collection` REPORT.
@@ -343,6 +355,44 @@ impl<'a> CaldavClient<'a> {
         Ok(resources)
     }
 
+    /// For servers without sync tokens: lists the ETags of events overlapping
+    /// `[from, to)` and fetches only the resources whose ETag is new or
+    /// differs from `known` (address -> ETag). A resource without an ETag is
+    /// always fetched.
+    pub async fn query_range_delta(
+        &self,
+        calendar: &Url,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        known: &std::collections::HashMap<String, Option<String>>,
+    ) -> Result<RangeDelta> {
+        let body = format!(
+            "<c:calendar-query {NS}><d:prop><d:getetag/></d:prop>             <c:filter><c:comp-filter name=\"VCALENDAR\"><c:comp-filter name=\"VEVENT\">             <c:time-range start=\"{}\" end=\"{}\"/></c:comp-filter></c:comp-filter></c:filter>             </c:calendar-query>",
+            from.format("%Y%m%dT%H%M%SZ"),
+            to.format("%Y%m%dT%H%M%SZ")
+        );
+        let (responses, _) = self
+            .multistatus(Method::Report, calendar, "1", body)
+            .await?;
+        let listed = self.resources(calendar, &responses)?.0;
+        let present = listed
+            .iter()
+            .map(|resource| resource.href.clone())
+            .collect();
+        let mut changed: Vec<RemoteResource> = listed
+            .into_iter()
+            .filter(|resource| {
+                let unchanged = resource.etag.is_some()
+                    && known
+                        .get(resource.href.as_str())
+                        .is_some_and(|etag| *etag == resource.etag);
+                !unchanged
+            })
+            .collect();
+        self.fill_missing(calendar, &mut changed).await?;
+        Ok(RangeDelta { changed, present })
+    }
+
     /// REPORT sync-collection since `token`. A refused token is
     /// [`CalendarError::Conflict`]; the caller falls back to a full read.
     pub async fn sync_changes(&self, calendar: &Url, token: &str) -> Result<SyncChanges> {
@@ -396,6 +446,7 @@ impl<'a> CaldavClient<'a> {
                     .map(|node| ical::parse_calendar(&node.text).unwrap_or_default())
                     .unwrap_or_default(),
                 pending: data.is_none(),
+                raw: data.map(|node| node.text.clone()),
             });
         }
         Ok((changed, removed))
@@ -436,6 +487,7 @@ impl<'a> CaldavClient<'a> {
                 if let Some(&index) = batch.iter().find(|&&i| resources[i].href == href) {
                     resources[index].pending = false;
                     resources[index].events = ical::parse_calendar(&data.text).unwrap_or_default();
+                    resources[index].raw = Some(data.text.clone());
                     resources[index].etag =
                         response.text("getetag").or(resources[index].etag.take());
                 }

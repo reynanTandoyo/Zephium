@@ -5,7 +5,8 @@ use crate::error::CalendarError;
 use crate::http::{Method, Secret};
 use crate::service::CalendarService;
 use crate::store::{
-    CalendarStorage, JsonFileStorage, MemorySecrets, MemoryStorage, SecretStore, StoredState,
+    CalendarStorage, EventCache, JsonFileStorage, MemoryEventCache, MemorySecrets, MemoryStorage,
+    SecretStore, StoredState,
 };
 use std::sync::Arc;
 
@@ -22,13 +23,18 @@ struct Harness {
 }
 
 fn harness() -> Harness {
+    harness_with(Arc::new(MemoryEventCache::default()))
+}
+
+fn harness_with(cache: Arc<dyn EventCache>) -> Harness {
     let fake = Arc::new(Fake::default());
     let storage = Arc::new(MemoryStorage::default());
     let secrets = Arc::new(MemorySecrets::default());
-    let service = CalendarService::with_clock(
+    let service = CalendarService::with_cache(
         fake.clone(),
         storage.clone(),
         secrets.clone(),
+        cache,
         Arc::new(|| utc("2026-01-10T12:00:00Z")),
     )
     .expect("service");
@@ -66,7 +72,22 @@ fn draft(summary: &str) -> CalendarEventDraftV1 {
 }
 
 async fn signed_in() -> Harness {
-    let h = harness();
+    signed_in_on(harness(), work_report("Planning", "\"e1\"")).await
+}
+
+/// `work_report` for a daily series of five days.
+fn series_report(etag: &str) -> String {
+    multistatus(&format!(
+        "<d:response><d:href>/dav/calendars/ann/work/one.ics</d:href><d:propstat><d:prop>\
+         <d:getetag>{etag}</d:getetag><c:calendar-data>BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\n\
+         UID:one@x\nSUMMARY:Planning\nDTSTART;TZID=Europe/Berlin:20260112T090000\n\
+         DTEND;TZID=Europe/Berlin:20260112T100000\nRRULE:FREQ=DAILY;COUNT=5\nEND:VEVENT\n\
+         END:VCALENDAR\n</c:calendar-data>\
+         </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+    ))
+}
+
+async fn signed_in_on(h: Harness, report: String) -> Harness {
     script_account(&h.fake);
     h.fake.route(
         Method::Propfind,
@@ -86,7 +107,7 @@ async fn signed_in() -> Harness {
         Method::Report,
         "/dav/calendars/ann/work/",
         "calendar-query",
-        response(207, &[], &work_report("Planning", "\"e1\"")),
+        response(207, &[], &report),
     );
     h.service
         .add_account(
@@ -579,4 +600,408 @@ fn vault_targets_use_the_calendar_service_name() {
         crate::store::vault_target("a|b"),
         Err(CalendarError::InvalidInput)
     );
+}
+
+fn last_put_body(h: &Harness) -> String {
+    let put = h
+        .fake
+        .requests()
+        .into_iter()
+        .rfind(|r| r.method == Method::Put)
+        .expect("a PUT");
+    String::from_utf8_lossy(&put.body).into_owned()
+}
+
+fn series_draft(summary: &str, start_hour: u32) -> CalendarEventDraftV1 {
+    CalendarEventDraftV1 {
+        summary: summary.to_owned(),
+        description: String::new(),
+        location: String::new(),
+        start: format!("2026-01-12T{start_hour:02}:00:00"),
+        end: format!("2026-01-12T{:02}:00:00", start_hour + 1),
+        all_day: false,
+        tzid: Some("Europe/Berlin".to_owned()),
+        rrule: Some("FREQ=DAILY;COUNT=5".to_owned()),
+        reminders: Vec::new(),
+        url: None,
+    }
+}
+
+fn week(h: &Harness) -> Vec<crate::api::CalendarOccurrenceV1> {
+    h.service
+        .events(utc("2026-01-11T00:00:00Z"), utc("2026-01-20T00:00:00Z"))
+        .expect("events")
+        .occurrences
+}
+
+#[tokio::test]
+async fn one_occurrence_can_be_edited_or_deleted_and_the_series_keeps_its_exceptions() {
+    let h = signed_in_on(harness(), series_report("\"e1\"")).await;
+    h.service.sync_all().await;
+    let work = h.service.calendars()[0].id.clone();
+    h.fake.route(
+        Method::Put,
+        "/dav/calendars/ann/work/one.ics",
+        "",
+        response(204, &[("etag", "\"e2\"")], ""),
+    );
+    assert_eq!(week(&h).len(), 5);
+
+    // Edit the third occurrence (Jan 14, 09:00 Berlin = 08:00Z).
+    let mut draft = series_draft("Moved", 15);
+    draft.start = "2026-01-14T15:00:00".to_owned();
+    draft.end = "2026-01-14T16:00:00".to_owned();
+    h.service
+        .update_occurrence(&work, "one@x", "2026-01-14T08:00:00Z", &draft)
+        .await
+        .expect("occurrence edited");
+    let body = last_put_body(&h);
+    assert!(body.contains("BEGIN:VTIMEZONE"));
+    assert!(body.contains("RRULE:FREQ=DAILY;COUNT=5"));
+    assert_eq!(body.matches("BEGIN:VEVENT").count(), 2);
+    assert!(body.contains("RECURRENCE-ID;TZID=Europe/Berlin:20260114T090000"));
+    assert!(body.contains("SUMMARY:Moved"));
+    let put = h
+        .fake
+        .requests()
+        .into_iter()
+        .rfind(|r| r.method == Method::Put)
+        .expect("put");
+    assert!(put.headers.contains(&("if-match", "\"e1\"".to_owned())));
+    let listed = week(&h);
+    assert_eq!(listed.len(), 5);
+    let moved: Vec<_> = listed.iter().filter(|o| o.summary == "Moved").collect();
+    assert_eq!(moved.len(), 1);
+    assert_eq!(moved[0].start, "2026-01-14T14:00:00Z");
+    assert_eq!(
+        moved[0].recurrence_id.as_deref(),
+        Some("2026-01-14T08:00:00Z")
+    );
+
+    // Delete the fourth (Jan 15).
+    h.service
+        .delete_occurrence(&work, "one@x", "2026-01-15T08:00:00Z")
+        .await
+        .expect("occurrence deleted");
+    let body = last_put_body(&h);
+    assert!(body.contains("EXDATE;TZID=Europe/Berlin:20260115T090000"));
+    assert!(body.contains("RECURRENCE-ID;TZID=Europe/Berlin:20260114T090000"));
+    assert_eq!(week(&h).len(), 4);
+    // Deleting the same occurrence again adds no second EXDATE.
+    h.service
+        .delete_occurrence(&work, "one@x", "2026-01-15T08:00:00Z")
+        .await
+        .expect("again");
+    assert_eq!(last_put_body(&h).matches("EXDATE").count(), 1);
+
+    // Editing the series without moving its start keeps both exceptions.
+    h.service
+        .update_event(&work, "one@x", &series_draft("Series", 9))
+        .await
+        .expect("series edited");
+    let body = last_put_body(&h);
+    assert!(body.contains("EXDATE;TZID=Europe/Berlin:20260115T090000"));
+    assert!(body.contains("RECURRENCE-ID;TZID=Europe/Berlin:20260114T090000"));
+    let listed = week(&h);
+    assert_eq!(listed.len(), 4);
+    assert!(listed.iter().any(|o| o.summary == "Moved"));
+    assert!(listed.iter().any(|o| o.summary == "Series"));
+
+    // Moving the series start drops the exceptions.
+    h.service
+        .update_event(&work, "one@x", &series_draft("Later", 11))
+        .await
+        .expect("moved series");
+    let body = last_put_body(&h);
+    assert!(!body.contains("RECURRENCE-ID") && !body.contains("EXDATE"));
+    assert_eq!(week(&h).len(), 5);
+
+    // Stopping the repetition drops what no longer refers to anything.
+    h.service
+        .update_occurrence(
+            &work,
+            "one@x",
+            "2026-01-13T10:00:00Z",
+            &series_draft("X", 11),
+        )
+        .await
+        .expect("override");
+    assert!(last_put_body(&h).contains("RECURRENCE-ID"));
+    let mut once = series_draft("Once", 11);
+    once.rrule = None;
+    h.service
+        .update_event(&work, "one@x", &once)
+        .await
+        .expect("single");
+    let body = last_put_body(&h);
+    assert!(!body.contains("RECURRENCE-ID") && !body.contains("EXDATE"));
+    assert!(!body.contains("RRULE:FREQ=DAILY"));
+}
+
+#[tokio::test]
+async fn occurrence_changes_refuse_bad_instances_and_read_only_calendars() {
+    let h = signed_in_on(harness(), series_report("\"e1\"")).await;
+    h.service.sync_all().await;
+    let work = h.service.calendars()[0].id.clone();
+    let holidays = h.service.calendars()[1].id.clone();
+    for bad in [
+        "2026-01-14T09:30:00Z",
+        "2026-02-14T08:00:00Z",
+        "not a time",
+        "2026-01-14",
+        "",
+    ] {
+        assert_eq!(
+            h.service
+                .update_occurrence(&work, "one@x", bad, &series_draft("X", 9))
+                .await
+                .err(),
+            Some(CalendarError::InvalidInput),
+            "{bad:?}"
+        );
+        assert_eq!(
+            h.service.delete_occurrence(&work, "one@x", bad).await.err(),
+            Some(CalendarError::InvalidInput),
+            "{bad:?}"
+        );
+    }
+    assert_eq!(
+        h.service
+            .delete_occurrence(&work, "missing@x", "2026-01-14T08:00:00Z")
+            .await
+            .err(),
+        Some(CalendarError::NotFound)
+    );
+    assert_eq!(
+        h.service
+            .delete_occurrence(&holidays, "one@x", "2026-01-14T08:00:00Z")
+            .await
+            .err(),
+        Some(CalendarError::ReadOnly)
+    );
+    assert!(
+        h.fake
+            .requests()
+            .iter()
+            .all(|request| request.method != Method::Put),
+        "nothing was sent"
+    );
+}
+
+fn changed_report(href: &str, etag: &str, summary: &str) -> String {
+    format!(
+        "<d:response><d:href>/dav/calendars/ann/work/{href}</d:href><d:propstat><d:prop>\
+         <d:getetag>{etag}</d:getetag><c:calendar-data>BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\n\
+         UID:{href}@x\nSUMMARY:{summary}\nDTSTART:20260113T100000Z\nDTEND:20260113T110000Z\n\
+         END:VEVENT\nEND:VCALENDAR\n</c:calendar-data></d:prop>\
+         <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+    )
+}
+
+fn etag_only(href: &str, etag: &str) -> String {
+    format!(
+        "<d:response><d:href>/dav/calendars/ann/work/{href}</d:href><d:propstat><d:prop>\
+         <d:getetag>{etag}</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status>\
+         </d:propstat></d:response>"
+    )
+}
+
+fn state_response(ctag: &str, token: Option<&str>) -> String {
+    let token = token
+        .map(|token| format!("<d:sync-token>{token}</d:sync-token>"))
+        .unwrap_or_default();
+    format!(
+        "{HEADER}<d:response><d:href>/dav/calendars/ann/work/</d:href><d:propstat><d:prop>\
+         <cs:getctag>{ctag}</cs:getctag>{token}</d:prop><d:status>HTTP/1.1 200 OK</d:status>\
+         </d:propstat></d:response></d:multistatus>"
+    )
+}
+
+fn bodies_of(fake: &Fake) -> Vec<String> {
+    fake.requests()
+        .iter()
+        .filter(|r| r.url.path() == "/dav/calendars/ann/work/")
+        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+        .collect()
+}
+
+fn all_bodies_of(fake: &Fake) -> Vec<String> {
+    fake.requests()
+        .iter()
+        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+        .collect()
+}
+
+fn script_delta(h: &Harness, ctag: &str, listing: &str, multiget: Option<String>) {
+    h.fake.clear();
+    h.fake.route(
+        Method::Propfind,
+        "/dav/calendars/ann/work/",
+        "",
+        response(207, &[], &state_response(ctag, None)),
+    );
+    if let Some(data) = multiget {
+        h.fake.route(
+            Method::Report,
+            "/dav/calendars/ann/work/",
+            "calendar-multiget",
+            response(207, &[], &multistatus(&data)),
+        );
+    }
+    h.fake.route(
+        Method::Report,
+        "/dav/calendars/ann/work/",
+        "calendar-query",
+        response(207, &[], &multistatus(listing)),
+    );
+}
+
+#[tokio::test]
+async fn without_a_sync_token_only_events_with_a_new_etag_are_fetched() {
+    let h = signed_in().await;
+    h.service.sync_all().await;
+    let day = || -> Vec<String> {
+        h.service
+            .events(utc("2026-01-10T00:00:00Z"), utc("2026-01-20T00:00:00Z"))
+            .expect("events")
+            .occurrences
+            .into_iter()
+            .map(|o| o.summary)
+            .collect()
+    };
+    assert_eq!(day(), ["Planning"]);
+
+    // The server lists one.ics unchanged and a new two.ics: only two.ics is
+    // fetched.
+    let first_read = h.fake.requests().len();
+    script_delta(
+        &h,
+        "c2",
+        &format!(
+            "{}{}",
+            etag_only("one.ics", "\"e1\""),
+            etag_only("two.ics", "\"e9\"")
+        ),
+        Some(changed_report("two.ics", "\"e9\"", "Two")),
+    );
+    h.service.sync_all().await;
+    let asked: Vec<String> = h.fake.requests()[first_read..]
+        .iter()
+        .filter(|r| r.url.path() == "/dav/calendars/ann/work/")
+        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+        .collect();
+    let multiget: Vec<_> = asked
+        .iter()
+        .filter(|body| body.contains("calendar-multiget"))
+        .collect();
+    assert_eq!(multiget.len(), 1);
+    assert!(multiget[0].contains("two.ics") && !multiget[0].contains("one.ics"));
+    assert!(asked
+        .iter()
+        .filter(|body| body.contains("calendar-query"))
+        .all(|body| !body.contains("calendar-data")));
+    let summaries = day();
+    assert_eq!(summaries.len(), 2);
+    assert!(summaries.contains(&"Planning".to_owned()) && summaries.contains(&"Two".to_owned()));
+
+    // Nothing changed: no data is fetched at all.
+    let before = h.fake.requests().len();
+    h.service.sync_all().await;
+    assert!(all_bodies_of(&h.fake)[before..]
+        .iter()
+        .all(|body| !body.contains("calendar-multiget")));
+    assert_eq!(day().len(), 2);
+
+    // two.ics changed and one.ics vanished from the server.
+    script_delta(
+        &h,
+        "c3",
+        &etag_only("two.ics", "\"e10\""),
+        Some(changed_report("two.ics", "\"e10\"", "Two v2")),
+    );
+    h.service.sync_all().await;
+    assert_eq!(day(), ["Two v2"]);
+
+    // A changed event whose data did not arrive does not pin its etag: the
+    // next refresh asks for the data again.
+    script_delta(&h, "c4", &etag_only("two.ics", "\"e11\""), None);
+    h.service.sync_all().await;
+    let before = h.fake.requests().len();
+    h.service.sync_all().await;
+    assert!(all_bodies_of(&h.fake)[before..]
+        .iter()
+        .any(|body| body.contains("calendar-multiget")));
+}
+
+#[tokio::test]
+async fn a_restart_serves_saved_events_and_continues_with_the_saved_sync_token() {
+    let cache: Arc<dyn EventCache> = Arc::new(MemoryEventCache::default());
+    let first = signed_in_on(
+        harness_with(cache.clone()),
+        work_report("Planning", "\"e1\""),
+    )
+    .await;
+    first.service.sync_all().await;
+    let work = first.service.calendars()[0].id.clone();
+    let range = (utc("2026-01-10T00:00:00Z"), utc("2026-01-20T00:00:00Z"));
+    assert_eq!(
+        first
+            .service
+            .events(range.0, range.1)
+            .expect("events")
+            .occurrences
+            .len(),
+        1
+    );
+
+    // A new service over the same durable state, with a server that answers
+    // nothing.
+    let fake = Arc::new(Fake::default());
+    let second = CalendarService::with_cache(
+        fake.clone(),
+        first.storage.clone(),
+        first.secrets.clone(),
+        cache,
+        Arc::new(|| utc("2026-01-10T12:00:00Z")),
+    )
+    .expect("restarted");
+    second.warm();
+    let occurrences = second.events(range.0, range.1).expect("events").occurrences;
+    assert_eq!(occurrences.len(), 1);
+    assert_eq!(occurrences[0].summary, "Planning");
+    assert_eq!(occurrences[0].calendar_id, work);
+    assert!(fake.requests().is_empty(), "served without any request");
+    // Fresh enough: a due-only refresh leaves the calendar alone.
+    let report = second.sync_due().await;
+    assert!(report.outcomes.iter().all(|o| o.calendar_id != work));
+
+    // The next refresh asks for changes since the saved token and reads
+    // nothing in full.
+    fake.route(
+        Method::Propfind,
+        "/dav/calendars/ann/work/",
+        "",
+        response(207, &[], &state_response("c2", Some("t2"))),
+    );
+    fake.route(
+        Method::Report,
+        "/dav/calendars/ann/work/",
+        "sync-collection",
+        response(
+            207,
+            &[],
+            &format!(
+                "{HEADER}{}<d:sync-token>t2</d:sync-token></d:multistatus>",
+                changed_report("one.ics", "\"e3\"", "Planning v3")
+            ),
+        ),
+    );
+    second.sync_all().await;
+    let asked = bodies_of(&fake);
+    assert!(asked
+        .iter()
+        .any(|b| b.contains("sync-collection") && b.contains(">t1<")));
+    assert!(asked.iter().all(|b| !b.contains("calendar-query")));
+    let occurrences = second.events(range.0, range.1).expect("events").occurrences;
+    assert_eq!(occurrences[0].summary, "Planning v3");
 }

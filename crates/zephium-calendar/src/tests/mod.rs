@@ -3,6 +3,7 @@
 
 mod caldav;
 mod ical;
+mod persist;
 mod recur;
 mod service;
 

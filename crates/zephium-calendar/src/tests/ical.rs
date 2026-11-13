@@ -200,3 +200,153 @@ fn serialization_round_trips() {
     let again = parse_calendar(&text).expect("reparse").remove(0);
     assert_eq!(again, original);
 }
+
+fn zoned_event(zone_start: &str, zone_end: &str) -> crate::model::Event {
+    let ics = wrap(&format!(
+        "BEGIN:VEVENT\r\nUID:z@x\r\nSUMMARY:Call\r\n\
+         DTSTART;TZID={zone_start}:20260105T090000\r\nDTEND;TZID={zone_end}:20260105T100000\r\n\
+         END:VEVENT\r\n"
+    ));
+    parse_calendar(&ics).expect("parse").remove(0)
+}
+
+fn components(text: &str) -> Vec<String> {
+    text.split("BEGIN:VTIMEZONE\r\n")
+        .skip(1)
+        .map(|part| {
+            part.split("END:VTIMEZONE\r\n")
+                .next()
+                .unwrap_or("")
+                .to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn every_zone_in_use_gets_one_vtimezone_with_its_daylight_rules() {
+    let event = zoned_event("Europe/Berlin", "America/New_York");
+    let text = serialize_event(&event, utc("2026-01-01T00:00:00Z"));
+    let zones = components(&text);
+    assert_eq!(zones.len(), 2, "{text}");
+    let berlin = zones
+        .iter()
+        .find(|zone| zone.starts_with("TZID:Europe/Berlin\r\n"))
+        .expect("Berlin");
+    assert!(berlin.contains("BEGIN:STANDARD\r\n"));
+    assert!(berlin.contains("TZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n"));
+    assert!(berlin.contains("TZNAME:CET\r\n"));
+    assert!(berlin.contains("RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\n"));
+    assert!(berlin.contains("BEGIN:DAYLIGHT\r\n"));
+    assert!(berlin.contains("TZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\n"));
+    assert!(berlin.contains("TZNAME:CEST\r\n"));
+    assert!(berlin.contains("RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\n"));
+    assert!(berlin.contains("DTSTART:20260329T020000\r\n"));
+    let york = zones
+        .iter()
+        .find(|zone| zone.starts_with("TZID:America/New_York\r\n"))
+        .expect("New York");
+    assert!(york.contains("RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU\r\n"));
+    assert!(york.contains("RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU\r\n"));
+    assert!(york.contains("TZOFFSETFROM:-0500\r\nTZOFFSETTO:-0400\r\n"));
+    // The components come before the event and the text still round-trips.
+    assert!(text.find("BEGIN:VTIMEZONE").unwrap() < text.find("BEGIN:VEVENT").unwrap());
+    assert!(text.lines().all(|line| line.len() <= 75));
+    let again = parse_calendar(&text).expect("reparse").remove(0);
+    assert_eq!(again, event);
+}
+
+#[test]
+fn one_zone_is_described_once_and_zones_without_daylight_saving_are_fixed() {
+    let text = serialize_event(
+        &zoned_event("Europe/Berlin", "Europe/Berlin"),
+        utc("2026-01-01T00:00:00Z"),
+    );
+    assert_eq!(components(&text).len(), 1);
+
+    let text = serialize_event(
+        &zoned_event("Asia/Kolkata", "Asia/Kolkata"),
+        utc("2026-01-01T00:00:00Z"),
+    );
+    let zones = components(&text);
+    assert_eq!(zones.len(), 1);
+    assert!(zones[0].contains("BEGIN:STANDARD\r\n"));
+    assert!(zones[0].contains("TZOFFSETFROM:+0530\r\nTZOFFSETTO:+0530\r\n"));
+    assert!(!zones[0].contains("RRULE") && !zones[0].contains("DAYLIGHT"));
+}
+
+#[test]
+fn utc_floating_and_date_events_need_no_vtimezone() {
+    let ics = wrap(
+        "BEGIN:VEVENT\r\nUID:u@x\r\nDTSTART:20260105T090000Z\r\nDTEND:20260105T100000Z\r\n\
+         END:VEVENT\r\n",
+    );
+    let event = parse_calendar(&ics).expect("parse").remove(0);
+    assert!(!serialize_event(&event, utc("2026-01-01T00:00:00Z")).contains("VTIMEZONE"));
+    let ics = wrap(
+        "BEGIN:VEVENT\r\nUID:d@x\r\nDTSTART;VALUE=DATE:20260105\r\nEND:VEVENT\r\n\
+         BEGIN:VEVENT\r\nUID:f@x\r\nDTSTART:20260105T090000\r\nEND:VEVENT\r\n",
+    );
+    for event in parse_calendar(&ics).expect("parse") {
+        assert!(!serialize_event(&event, utc("2026-01-01T00:00:00Z")).contains("VTIMEZONE"));
+    }
+}
+
+#[test]
+fn zones_used_only_by_exceptions_and_overrides_are_described_too() {
+    let ics = wrap(
+        "BEGIN:VEVENT\r\nUID:s@x\r\nSUMMARY:Series\r\n\
+         DTSTART;TZID=Europe/Berlin:20260105T090000\r\nDTEND;TZID=Europe/Berlin:20260105T100000\r\n\
+         RRULE:FREQ=DAILY;COUNT=4\r\nEXDATE;TZID=Europe/Berlin:20260106T090000\r\nEND:VEVENT\r\n\
+         BEGIN:VEVENT\r\nUID:s@x\r\nSUMMARY:Moved\r\nRECURRENCE-ID;TZID=Europe/Berlin:20260107T090000\r\n\
+         DTSTART;TZID=Asia/Tokyo:20260107T180000\r\nDTEND;TZID=Asia/Tokyo:20260107T190000\r\n\
+         END:VEVENT\r\n",
+    );
+    let master = parse_calendar(&ics).expect("parse").remove(0);
+    assert_eq!(master.overrides.len(), 1);
+    let text = serialize_event(&master, utc("2026-01-01T00:00:00Z"));
+    let names: Vec<String> = components(&text)
+        .iter()
+        .map(|zone| zone.lines().next().unwrap_or("").to_owned())
+        .collect();
+    assert_eq!(names, ["TZID:Asia/Tokyo", "TZID:Europe/Berlin"]);
+    assert_eq!(text.matches("BEGIN:VEVENT").count(), 2);
+    assert!(text.contains("RECURRENCE-ID;TZID=Europe/Berlin:20260107T090000"));
+    assert!(text.contains("EXDATE;TZID=Europe/Berlin:20260106T090000"));
+    let again = parse_calendar(&text).expect("reparse").remove(0);
+    assert_eq!(again, master);
+}
+
+#[test]
+fn bounds_cover_the_whole_series_or_none_when_it_never_ends() {
+    use crate::ical::bounds;
+    let one = parse_calendar(&wrap(
+        "BEGIN:VEVENT\r\nUID:a@x\r\nDTSTART:20260105T090000Z\r\nDTEND:20260105T100000Z\r\nEND:VEVENT\r\n",
+    ))
+    .expect("parse");
+    assert_eq!(
+        bounds(&one),
+        Some((
+            utc("2026-01-05T09:00:00Z"),
+            Some(utc("2026-01-05T10:00:00Z"))
+        ))
+    );
+    let counted = parse_calendar(&wrap(
+        "BEGIN:VEVENT\r\nUID:b@x\r\nDTSTART:20260105T090000Z\r\nDTEND:20260105T100000Z\r\n\
+         RRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\n",
+    ))
+    .expect("parse");
+    assert_eq!(
+        bounds(&counted),
+        Some((
+            utc("2026-01-05T09:00:00Z"),
+            Some(utc("2026-01-07T10:00:00Z"))
+        ))
+    );
+    let open = parse_calendar(&wrap(
+        "BEGIN:VEVENT\r\nUID:c@x\r\nDTSTART:20260105T090000Z\r\nDTEND:20260105T100000Z\r\n\
+         RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\n",
+    ))
+    .expect("parse");
+    assert_eq!(bounds(&open), Some((utc("2026-01-05T09:00:00Z"), None)));
+    assert_eq!(bounds(&[]), None);
+}
