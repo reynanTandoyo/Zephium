@@ -78,8 +78,6 @@ Last ID: T-0046
 - [ ] T-0044 · Calendar: reminders as Windows notifications · area: desktop/src/focus_alerts.rs, crates/zephium-calendar · owner: - · updated: 2026-11-13
 - [ ] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: - · updated: 2026-11-13
   - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
-- [ ] T-0046 · Calendar: links with Time, Tasks and meeting links · area: frame/src/features/time, frame/src/features/tasks, frame/src/features/calendar · owner: - · updated: 2026-11-13
-  - Today's events in the Time panel / new tab; link events to Tasks; open Teams/Meet/Zoom links as tabs.
 - [ ] T-0002 · Launch `pnpm dev` and confirm "Zephium Dev" starts · area: desktop, frame · owner: - · updated: 2026-11-13
   - Must not touch the installed Zephium or its profile.
 - [ ] T-0004 · Decide on fork releases for colleague updates · area: .github, desktop · owner: - · updated: 2026-11-13
@@ -95,6 +93,9 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0046 · Calendar: links with Time, Tasks and meeting links · area: frame/src/features/time, frame/src/features/tasks, frame/src/features/calendar · owner: orca w2-calendar-ui · updated: 2026-11-13
+  - Today's events in the Time panel / new tab; link events to Tasks; open Teams/Meet/Zoom links as tabs.
+  - `46c4b2000`, `abc36b826`: today's events in the Time panel and new tab, "Create task" from an event (link back via reserved address `calendar.zephium.invalid` in the task context), calendar mark on tasks, Join within 10 min. Frame gates + 31 component tests + calendar domain unit tests pass (Windows). Tasks.svelte JS budget +110 bytes (lazy import made it larger). Limits: hidden when time tracking is off or in private windows; a second task per event possible after reload.
 - [x] T-0024 · Mail: several accounts per profile · area: zephium-store, frame/src/features/mail · owner: orca w3-mail-followups · updated: 2026-11-13
   - Display name, colour, signature; reorder and remove accounts.
   - 2026-11-13: several accounts, display name/colour/signature/remove done in the UI; reorder missing (no backend command). Wave 3.
