@@ -1820,6 +1820,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             mail::mail_save_draft,
             mail::mail_search,
             mail::mail_watch,
+            focus_alerts::mail_notify_new,
             oauth::oauth_sign_in,
             oauth::oauth_cancel_sign_in,
             oauth::oauth_discard_grant,

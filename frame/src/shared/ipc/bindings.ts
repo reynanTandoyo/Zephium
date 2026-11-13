@@ -186,6 +186,12 @@ export const commands = {
 	 */
 	mailWatch: (account: string, on: boolean) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_watch", { account, on })),
 	/**
+	 *  A toast for a batch of new mail. The frame counts the batch and words it
+	 *  in the person's language; this only checks the text is a short line. No
+	 *  sender, subject or message body ever reaches this function.
+	 */
+	mailNotifyNew: (title: string, body: string) => __TAURI_INVOKE<void>("mail_notify_new", { title, body }),
+	/**
 	 *  Opens the system browser at the provider's consent page and waits (up to
 	 *  three minutes) for the person to finish. One sign-in at a time. The
 	 *  `client_id` is the one the person registered; `client_secret` is only for

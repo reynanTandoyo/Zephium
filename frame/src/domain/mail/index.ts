@@ -1,4 +1,5 @@
 export { MailStore, ALL_INBOXES } from "./mail.svelte";
+export { mailUnread, badgeText } from "./unread.svelte";
 export { AccountSetup } from "./setup.svelte";
 export type { ComposeSession } from "./compose.svelte";
 export type { MailFailure } from "./call";
