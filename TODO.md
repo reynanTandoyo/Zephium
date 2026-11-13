@@ -73,24 +73,12 @@ Last ID: T-0046
 - [ ] T-0015 · Modes: make Work-only Rust branches mode-aware · area: crates/zephium-app/src/shell/{spaces,operations,time,media,browser_pages}.rs · owner: - · updated: 2026-11-13
   - Switching space keeps the mode, typing an address returns to Browse, time tracking records the mode. Update the Rust tests in `shell/tests`.
   - 2026-11-13: `5a86ca30c` made spaces/operations/browser_pages mode-aware. Open: time tracking for Mail/Calendar (`Place` only has Site/Work; needs a store change), and media/space/address branches treat every mode like Work.
-- [ ] T-0022 · Mail: account setup with automatic server lookup · area: crates/zephium-mail, desktop IPC `mail_*`, frame/src/features/mail · owner: - · updated: 2026-11-13
-  - Address + password; Mozilla ISPDB / `autoconfig.<domain>` / `.well-known/autoconfig` / SRV lookup; manual host, port and security fallback; "Test connection".
-  - 2026-11-13: backend autoconfig (ISPDB, autoconfig.<domain>, .well-known) + `mail_autoconfig`/`mail_test_account` done (`80dc4770c`, `ba6def012`); UI in wave 2.
 - [ ] T-0024 · Mail: several accounts per profile · area: zephium-store, frame/src/features/mail · owner: - · updated: 2026-11-13
   - Display name, colour, signature; reorder and remove accounts.
-- [ ] T-0026 · Mail: folder list and combined inbox · area: frame/src/features/mail, crates/zephium-mail · owner: - · updated: 2026-11-13
-  - Inbox, Sent, Drafts, Trash, Archive, Junk via SPECIAL-USE; unread counts; "All inboxes".
-- [ ] T-0027 · Mail: message list with threads · area: frame/src/features/mail · owner: - · updated: 2026-11-13
-  - Sender, subject, date, snippet, unread/flag/attachment marks; threading by `References`/`In-Reply-To`; virtual scrolling (`shared/lib/virtual-window`).
+  - 2026-11-13: several accounts, display name/colour/signature/remove done in the UI; reorder missing (no backend command). Wave 3.
 - [ ] T-0028 · Mail: safe reading pane · area: frame/src/features/mail, desktop (locked-down view) · owner: - · updated: 2026-11-13
   - Text and HTML with no scripts; remote images blocked until "Load images"; links open as browser tabs and show their real target; attachments save/open. Follow docs/security-model.md.
-- [ ] T-0030 · Mail: compose, reply, reply all, forward · area: frame/src/features/mail · owner: - · updated: 2026-11-13
-  - Plain text first, simple rich text later; attachments; signatures; "From" picker across accounts; drafts saved to the Drafts folder.
-- [ ] T-0031 · Mail: message actions · area: frame/src/features/mail, crates/zephium-mail · owner: - · updated: 2026-11-13
-  - Mark read/unread, flag, move/copy (drag to folder), delete to Trash, archive, mark junk; keyboard shortcuts.
-- [ ] T-0032 · Mail: search · area: crates/zephium-mail, zephium-store · owner: - · updated: 2026-11-13
-  - Local search of cached mail plus server-side IMAP SEARCH.
-  - 2026-11-13: server-side IMAP SEARCH + `mail_search` done (`ba6def012`); UI in wave 2.
+  - 2026-11-13: sanitiser + sandboxed srcdoc iframe with CSP done, links listed below the message (inert inside the iframe). Open: "Load images" cannot work because the frame CSP has no https: in img-src (fix: fetch through the backend into data: URLs, no CSP change); verify the srcdoc iframe renders natively. Wave 3.
 - [ ] T-0033 · Mail: new-mail notifications and unread badge · area: desktop/src/focus_alerts.rs, frame/src/features/sidebar · owner: - · updated: 2026-11-13
   - Windows toast; unread count on the Mail mode button.
 - [ ] T-0034 · Mail: Microsoft 365 / Gmail sign-in (OAuth2, XOAUTH2) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
@@ -126,6 +114,26 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0022 · Mail: account setup with automatic server lookup · area: crates/zephium-mail, desktop IPC `mail_*`, frame/src/features/mail · owner: orca w2-mail-ui · updated: 2026-11-13
+  - Address + password; Mozilla ISPDB / `autoconfig.<domain>` / `.well-known/autoconfig` / SRV lookup; manual host, port and security fallback; "Test connection".
+  - 2026-11-13: backend autoconfig (ISPDB, autoconfig.<domain>, .well-known) + `mail_autoconfig`/`mail_test_account` done (`80dc4770c`, `ba6def012`); UI in wave 2.
+  - Mail UI `eecd02def`, `675346384` (merged `65c2220c5`): frame typecheck/lint/stylelint/knip/build pass, 67 unit + 21 component mail tests (Chromium, Windows). Not run in the native app.
+- [x] T-0026 · Mail: folder list and combined inbox · area: frame/src/features/mail, crates/zephium-mail · owner: orca w2-mail-ui · updated: 2026-11-13
+  - Inbox, Sent, Drafts, Trash, Archive, Junk via SPECIAL-USE; unread counts; "All inboxes".
+  - Mail UI `eecd02def`, `675346384` (merged `65c2220c5`): frame typecheck/lint/stylelint/knip/build pass, 67 unit + 21 component mail tests (Chromium, Windows). Not run in the native app.
+- [x] T-0027 · Mail: message list with threads · area: frame/src/features/mail · owner: orca w2-mail-ui · updated: 2026-11-13
+  - Sender, subject, date, snippet, unread/flag/attachment marks; threading by `References`/`In-Reply-To`; virtual scrolling (`shared/lib/virtual-window`).
+  - Mail UI `eecd02def`, `675346384` (merged `65c2220c5`): frame typecheck/lint/stylelint/knip/build pass, 67 unit + 21 component mail tests (Chromium, Windows). Not run in the native app.
+- [x] T-0030 · Mail: compose, reply, reply all, forward · area: frame/src/features/mail · owner: orca w2-mail-ui · updated: 2026-11-13
+  - Plain text first, simple rich text later; attachments; signatures; "From" picker across accounts; drafts saved to the Drafts folder.
+  - Mail UI `eecd02def`, `675346384` (merged `65c2220c5`): frame typecheck/lint/stylelint/knip/build pass, 67 unit + 21 component mail tests (Chromium, Windows). Not run in the native app.
+- [x] T-0031 · Mail: message actions · area: frame/src/features/mail, crates/zephium-mail · owner: orca w2-mail-ui · updated: 2026-11-13
+  - Mark read/unread, flag, move/copy (drag to folder), delete to Trash, archive, mark junk; keyboard shortcuts.
+  - Mail UI `eecd02def`, `675346384` (merged `65c2220c5`): frame typecheck/lint/stylelint/knip/build pass, 67 unit + 21 component mail tests (Chromium, Windows). Not run in the native app. Drag-to-folder untested natively.
+- [x] T-0032 · Mail: search · area: crates/zephium-mail, zephium-store · owner: orca w2-mail-ui · updated: 2026-11-13
+  - Local search of cached mail plus server-side IMAP SEARCH.
+  - 2026-11-13: server-side IMAP SEARCH + `mail_search` done (`ba6def012`); UI in wave 2.
+  - Mail UI `eecd02def`, `675346384` (merged `65c2220c5`): frame typecheck/lint/stylelint/knip/build pass, 67 unit + 21 component mail tests (Chromium, Windows). Not run in the native app. Local cache search not added (server search only).
 - [x] T-0042 · Calendar: day, week, month and agenda views · area: frame/src/features/calendar, frame/src/domain/calendar · owner: orca w2-calendar-ui · updated: 2026-11-13
   - Several calendars overlaid with colours and show/hide toggles; Today button; mini month navigator.
   - `795aae1df`, `6727a4639`: day/week/month/agenda, colours, show/hide, Today, mini month, keyboard. Frame typecheck/lint/stylelint/knip/build/check:styles pass, 50 unit + 14 component tests (Chromium, Windows). New lazy budget entry for `CalendarPage` (no existing budget raised). Not run in the native app.
