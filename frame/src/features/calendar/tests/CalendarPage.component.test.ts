@@ -26,6 +26,8 @@ const native = vi.hoisted(() => ({
   server: null as unknown as Server,
   create: vi.fn(),
   update: vi.fn(),
+  updateOccurrence: vi.fn(),
+  removeOccurrence: vi.fn(),
   remove: vi.fn(),
   addAccount: vi.fn(),
   open: vi.fn(),
@@ -49,6 +51,8 @@ vi.mock("$shared/ipc/bindings", async () => {
     calendarAddAccount: native.addAccount,
     calendarCreateEvent: native.create,
     calendarUpdateEvent: native.update,
+    calendarUpdateOccurrence: native.updateOccurrence,
+    calendarDeleteOccurrence: native.removeOccurrence,
     calendarDeleteEvent: native.remove,
     browserOpenUrl: native.open,
   });
@@ -136,6 +140,30 @@ function freshServer(): Server {
         end: at("15:00:00"),
         recurring: true,
         recurrence_id: at("14:00:00"),
+        series_start: `${dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 14))}T14:00:00`,
+        series_end: `${dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 14))}T15:00:00`,
+        series_tzid: null,
+        rrule: "FREQ=WEEKLY",
+        recurrence: { freq: "weekly", interval: 1, by_day: [] },
+      }),
+      occurrence({
+        uid: "quarterly",
+        summary: "Quarterly review",
+        start: at("12:00:00"),
+        end: at("12:30:00"),
+        recurring: true,
+        recurrence_id: at("12:00:00"),
+        series_start: at("12:00:00"),
+        series_end: at("12:30:00"),
+        rrule: "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU",
+        recurrence: { freq: "monthly", interval: 1, custom: true },
+      }),
+      occurrence({
+        uid: "offsite",
+        summary: "Offsite",
+        all_day: true,
+        start: dayKey(today),
+        end: dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)),
       }),
       occurrence({
         uid: "call",
@@ -183,6 +211,10 @@ beforeEach(() => {
     native.server.events = native.server.events.filter((entry) => entry.uid !== uid);
     return ok(null);
   });
+  native.updateOccurrence.mockImplementation(async (calendarId: string, uid: string) =>
+    ok({ calendar_id: calendarId, uid }),
+  );
+  native.removeOccurrence.mockResolvedValue(ok(null));
   native.addAccount.mockImplementation(async () => err("unauthorized"));
   native.open.mockResolvedValue({ accepted: true, operation_id: null });
 });
@@ -333,13 +365,139 @@ test("read-only calendars show no edit controls", async () => {
   await expect.element(screen.getByRole("button", { name: "Delete" })).not.toBeInTheDocument();
 });
 
-test("a recurring event can be deleted as a series but not edited yet", async () => {
+test("editing a repeating event asks which events, then writes only that scope", async () => {
   const screen = await setup();
   await eventButton(screen, /Weekly sync/u).click();
-  await expect.element(screen.getByText(/Recurring events cannot be edited yet/u)).toBeVisible();
-  await expect.element(screen.getByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  await screen.getByRole("button", { name: "Edit" }).click();
+  await expect.element(screen.getByText("Edit which events?")).toBeVisible();
+  expect(native.update).not.toHaveBeenCalled();
+
+  await screen.getByRole("button", { name: "This event" }).click();
+  await expect.element(screen.getByText("Changes apply to this event only.")).toBeVisible();
+  await expect.element(screen.getByLabelText("Every")).not.toBeInTheDocument();
+  await screen.getByLabelText("Title").fill("Weekly sync (moved room)");
+  await screen.getByRole("button", { name: "Save" }).click();
+
+  await vi.waitFor(() => expect(native.updateOccurrence).toHaveBeenCalledTimes(1));
+  const [calendarId, uid, instance, draft] = native.updateOccurrence.mock.calls[0] as [
+    string,
+    string,
+    string,
+    CalendarEventDraftV1,
+  ];
+  expect([calendarId, uid, instance, draft.summary]).toEqual([
+    "work",
+    "series",
+    at("14:00:00"),
+    "Weekly sync (moved room)",
+  ]);
+  expect(native.update).not.toHaveBeenCalled();
+});
+
+test("editing all events sends the series start and the structured rule", async () => {
+  const screen = await setup();
+  await eventButton(screen, /Weekly sync/u).click();
+  await screen.getByRole("button", { name: "Edit" }).click();
+  await screen.getByRole("button", { name: "All events" }).click();
+  await expect.element(screen.getByText("Changes apply to all occurrences.")).toBeVisible();
+
+  const every = screen.getByLabelText("Every");
+  await expect.element(every).toHaveValue(1);
+  await every.fill("2");
+  await screen.getByRole("button", { name: "Save" }).click();
+
+  await vi.waitFor(() => expect(native.update).toHaveBeenCalledTimes(1));
+  const [calendarId, uid, draft] = native.update.mock.calls[0] as [
+    string,
+    string,
+    CalendarEventDraftV1,
+  ];
+  const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 14);
+  expect([calendarId, uid]).toEqual(["work", "series"]);
+  expect(draft.start).toContain(dayKey(first));
+  expect(draft.recurrence).toMatchObject({ freq: "weekly", interval: 2 });
+  expect(native.updateOccurrence).not.toHaveBeenCalled();
+});
+
+test("a rule the form cannot express is shown read-only and sent back untouched", async () => {
+  const screen = await setup();
+  await eventButton(screen, /Quarterly review/u).click();
+  await screen.getByRole("button", { name: "Edit" }).click();
+  await screen.getByRole("button", { name: "All events" }).click();
+  await expect.element(screen.getByText(/more complex than the form can show/u)).toBeVisible();
+  await expect.element(screen.getByText("FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU")).toBeVisible();
+  await expect.element(screen.getByLabelText("Every")).not.toBeInTheDocument();
+  await screen.getByRole("button", { name: "Save" }).click();
+
+  await vi.waitFor(() => expect(native.update).toHaveBeenCalledTimes(1));
+  const draft = native.update.mock.calls[0]![2] as CalendarEventDraftV1;
+  expect(draft.rrule).toBe("FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU");
+  expect(draft.recurrence ?? null).toBeNull();
+});
+
+test("deleting a repeating event asks which events and deletes that scope", async () => {
+  const screen = await setup();
+  await eventButton(screen, /Weekly sync/u).click();
   await screen.getByRole("button", { name: "Delete" }).click();
-  await expect.element(screen.getByText(/Delete every occurrence/u)).toBeVisible();
+  await expect.element(screen.getByText("Delete which events?")).toBeVisible();
+  expect(native.remove).not.toHaveBeenCalled();
+  await screen.getByRole("button", { name: "This event" }).click();
+  await vi.waitFor(() =>
+    expect(native.removeOccurrence).toHaveBeenCalledWith("work", "series", at("14:00:00")),
+  );
+  expect(native.remove).not.toHaveBeenCalled();
+
+  await eventButton(screen, /Quarterly review/u).click();
+  await screen.getByRole("button", { name: "Delete" }).click();
+  await screen.getByRole("button", { name: "All events" }).click();
+  await vi.waitFor(() => expect(native.remove).toHaveBeenCalledWith("work", "quarterly"));
+});
+
+const neighbour = (screen: Awaited<ReturnType<typeof setup>>, selector: string) => {
+  const columns = [...screen.container.querySelectorAll<HTMLElement>(selector)];
+  const index = columns.findIndex((column) => column.dataset.day === dayKey(today));
+  const target = columns[index < columns.length - 1 ? index + 1 : index - 1]!;
+  return { target, key: target.dataset.day! };
+};
+
+test("dragging an all-day banner moves it to another day", async () => {
+  const screen = await setup();
+  const chip = eventButton(screen, /Offsite/u);
+  await expect.element(chip).toBeVisible();
+  const { target, key } = neighbour(screen, ".banner-column");
+  await userEvent.dragAndDrop(chip, page.elementLocator(target));
+
+  await vi.waitFor(() => expect(native.update).toHaveBeenCalledTimes(1));
+  const [, uid, draft] = native.update.mock.calls[0] as [string, string, CalendarEventDraftV1];
+  expect(uid).toBe("offsite");
+  expect(draft).toMatchObject({ all_day: true, start: key });
+});
+
+test("dragging a timed event to another day column moves it there", async () => {
+  const screen = await setup();
+  const block = eventButton(screen, /Customer call/u);
+  await expect.element(block).toBeVisible();
+  const { target, key } = neighbour(screen, ".column");
+  await userEvent.dragAndDrop(block, page.elementLocator(target));
+
+  await vi.waitFor(() => expect(native.update).toHaveBeenCalledTimes(1));
+  const [, uid, draft] = native.update.mock.calls[0] as [string, string, CalendarEventDraftV1];
+  expect(uid).toBe("call");
+  expect(draft.start.startsWith(key)).toBe(true);
+});
+
+test("moving a repeating event asks which events first", async () => {
+  const screen = await setup();
+  const block = eventButton(screen, /Weekly sync/u);
+  await expect.element(block).toBeVisible();
+  const { target } = neighbour(screen, ".column");
+  await userEvent.dragAndDrop(block, page.elementLocator(target));
+  await expect.element(screen.getByText("Move which events?")).toBeVisible();
+  expect(native.update).not.toHaveBeenCalled();
+  expect(native.updateOccurrence).not.toHaveBeenCalled();
+  await screen.getByRole("button", { name: "All events" }).click();
+  await vi.waitFor(() => expect(native.update).toHaveBeenCalledTimes(1));
+  expect(native.update.mock.calls[0]![1]).toBe("series");
 });
 
 test("a meeting link opens in a new browser tab", async () => {

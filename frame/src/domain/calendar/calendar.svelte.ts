@@ -182,6 +182,22 @@ export const createEvent = (calendar: string, draft: CalendarEventDraftV1) =>
 export const updateEvent = (calendar: string, uid: string, draft: CalendarEventDraftV1) =>
   run("save", () => call(() => commands.calendarUpdateEvent(calendar, uid, draft)));
 
+/** Changes one occurrence of a repeating event; `recurrenceId` is the
+ *  occurrence's own `recurrence_id`. */
+export const updateOccurrence = (
+  calendar: string,
+  uid: string,
+  recurrenceId: string,
+  draft: CalendarEventDraftV1,
+) =>
+  run("save", () =>
+    call(() => commands.calendarUpdateOccurrence(calendar, uid, recurrenceId, draft)),
+  );
+
+/** Deletes one occurrence of a repeating event. */
+export const deleteOccurrence = (calendar: string, uid: string, recurrenceId: string) =>
+  run("delete", () => call(() => commands.calendarDeleteOccurrence(calendar, uid, recurrenceId)));
+
 /** Deletes the event; a recurring event is deleted as a whole series. */
 export const deleteEvent = (calendar: string, uid: string) =>
   run("delete", () => call(() => commands.calendarDeleteEvent(calendar, uid)));

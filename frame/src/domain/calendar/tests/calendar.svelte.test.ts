@@ -13,6 +13,8 @@ const host = vi.hoisted(() => ({
   events: vi.fn(),
   setVisible: vi.fn(),
   create: vi.fn(),
+  updateOccurrence: vi.fn(),
+  deleteOccurrence: vi.fn(),
   sync: vi.fn(),
   open: vi.fn(),
 }));
@@ -25,6 +27,8 @@ vi.mock("$shared/ipc/bindings", async () => {
     calendarEvents: host.events,
     calendarSetVisible: host.setVisible,
     calendarCreateEvent: host.create,
+    calendarUpdateOccurrence: host.updateOccurrence,
+    calendarDeleteOccurrence: host.deleteOccurrence,
     calendarSync: host.sync,
     browserOpenUrl: host.open,
   });
@@ -222,4 +226,34 @@ test("disposal stops listening and drops what was loaded", async () => {
   expect(host.changed).toBeNull();
   expect(store.accounts()).toEqual([]);
   expect(store.eventState()).toBe("idle");
+});
+
+test("changes and deletes one occurrence by its recurrence id, then reads back", async () => {
+  await init();
+  await setRange(...range);
+  host.updateOccurrence.mockResolvedValue(ok({ calendar_id: "c1", uid: "a" }));
+  host.deleteOccurrence.mockResolvedValue(ok(null));
+  const draft = {
+    summary: "x",
+    description: "",
+    location: "",
+    start: "2026-10-14T09:00:00",
+    end: "2026-10-14T10:00:00",
+    all_day: false,
+    tzid: "Europe/Berlin",
+    rrule: null,
+    reminders: [],
+    url: null,
+  };
+  const before = host.events.mock.calls.length;
+  expect((await store.updateOccurrence("c1", "a", "2026-10-14T09:00:00", draft)).ok).toBe(true);
+  expect(host.updateOccurrence).toHaveBeenCalledWith("c1", "a", "2026-10-14T09:00:00", draft);
+  expect((await store.deleteOccurrence("c1", "a", "2026-10-14T09:00:00")).ok).toBe(true);
+  expect(host.deleteOccurrence).toHaveBeenCalledWith("c1", "a", "2026-10-14T09:00:00");
+  expect(host.events.mock.calls.length).toBe(before + 2);
+  host.deleteOccurrence.mockResolvedValue(err("not_found"));
+  expect(await store.deleteOccurrence("c1", "a", "2026-10-21T09:00:00")).toEqual({
+    ok: false,
+    error: "not_found",
+  });
 });

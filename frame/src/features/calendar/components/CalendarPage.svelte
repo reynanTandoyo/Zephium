@@ -37,7 +37,9 @@
     type CalendarView,
     type EventForm,
     type PlacedEvent,
+    type Scope,
   } from "$domain/calendar";
+  import type { CalendarEventDraftV1 } from "$shared/ipc/bindings";
   import { firstDayOfWeek } from "$domain/time";
   import AccountsPanel from "./AccountsPanel.svelte";
   import AgendaList from "./AgendaList.svelte";
@@ -46,12 +48,14 @@
   import EventEditor from "./EventEditor.svelte";
   import MiniMonth from "./MiniMonth.svelte";
   import MonthGrid from "./MonthGrid.svelte";
+  import ScopeChoice from "./ScopeChoice.svelte";
   import TimeGrid from "./TimeGrid.svelte";
   import { faultText, viewTitle } from "../lib/format";
 
   type Panel =
     | { kind: "details"; id: string }
-    | { kind: "editor"; editing: PlacedEvent | null; form: EventForm }
+    | { kind: "editor"; editing: PlacedEvent | null; scope: Scope | null; form: EventForm }
+    | { kind: "scope"; action: "edit" | "move" | "delete"; event: PlacedEvent; start: Date | null }
     | { kind: "accounts" };
 
   // Weeks start where the locale says (1 is Monday … 7 is Sunday); the date
@@ -118,7 +122,12 @@
     const calendarId = defaultCalendar();
     if (!calendarId) return;
     panelFault = null;
-    panel = { kind: "editor", editing: null, form: formForSlot(calendarId, start, end) };
+    panel = {
+      kind: "editor",
+      editing: null,
+      scope: null,
+      form: formForSlot(calendarId, start, end),
+    };
   }
 
   /** An hour starting at the next full hour, on the day being viewed. */
@@ -134,18 +143,41 @@
     draftEvent(start, new Date(start.getTime() + 3_600_000));
   }
 
-  function edit(event: PlacedEvent) {
+  const repeats = (event: PlacedEvent) => event.occurrence.recurring;
+
+  /** A repeating event asks which events first; a single one goes straight on. */
+  function ask(action: "edit" | "move" | "delete", event: PlacedEvent, start: Date | null = null) {
     if (editPolicy(event.occurrence) !== "edit") return;
     panelFault = null;
-    panel = { kind: "editor", editing: event, form: formFromEvent(event) };
+    panel = { kind: "scope", action, event, start };
   }
 
-  async function save(calendarId: string, draft: Parameters<typeof calendar.createEvent>[1]) {
+  function openEditor(event: PlacedEvent, scope: Scope | null) {
+    panelFault = null;
+    panel = { kind: "editor", editing: event, scope, form: formFromEvent(event, scope ?? "this") };
+  }
+
+  function edit(event: PlacedEvent) {
+    if (editPolicy(event.occurrence) !== "edit") return;
+    if (repeats(event)) ask("edit", event);
+    else openEditor(event, null);
+  }
+
+  /** One native write for an existing event: the occurrence when the scope is
+   *  `this`, otherwise the event (the whole series when it repeats). */
+  function write(event: PlacedEvent, scope: Scope | null, draft: CalendarEventDraftV1) {
+    const { calendar_id: id, uid, recurrence_id: instance } = event.occurrence;
+    return scope === "this" && instance !== null
+      ? calendar.updateOccurrence(id, uid, instance, draft)
+      : calendar.updateEvent(id, uid, draft);
+  }
+
+  async function save(calendarId: string, draft: CalendarEventDraftV1) {
     const current = panel;
     if (current?.kind !== "editor") return;
     panelFault = null;
     const result = current.editing
-      ? await calendar.updateEvent(calendarId, current.editing.occurrence.uid, draft)
+      ? await write(current.editing, current.scope, draft)
       : await calendar.createEvent(calendarId, draft);
     if (!result.ok) {
       panelFault = result.error;
@@ -154,29 +186,45 @@
     if (panel === current) close();
   }
 
-  async function remove(event: PlacedEvent) {
+  async function remove(event: PlacedEvent, scope: Scope | null) {
     panelFault = null;
-    const result = await calendar.deleteEvent(event.occurrence.calendar_id, event.occurrence.uid);
+    const { calendar_id: id, uid, recurrence_id: instance } = event.occurrence;
+    const result =
+      scope === "this" && instance !== null
+        ? await calendar.deleteOccurrence(id, uid, instance)
+        : await calendar.deleteEvent(id, uid);
     if (!result.ok) {
       panelFault = result.error;
       return;
     }
-    if (panel?.kind === "details" && panel.id === event.id) close();
+    close();
   }
 
-  async function move(event: PlacedEvent, start: Date) {
+  async function performMove(event: PlacedEvent, start: Date, scope: Scope | null) {
     moveFault = null;
-    const result = formToDraft(movedForm(event, start));
+    const result = formToDraft(movedForm(event, start, scope ?? "this"));
     if (!result.ok) {
       moveFault = "invalid_input";
       return;
     }
-    const saved = await calendar.updateEvent(
-      event.occurrence.calendar_id,
-      event.occurrence.uid,
-      result.draft,
-    );
+    const saved = await write(event, scope, result.draft);
     if (!saved.ok) moveFault = saved.error;
+  }
+
+  function move(event: PlacedEvent, start: Date) {
+    if (repeats(event)) ask("move", event, start);
+    else void performMove(event, start, null);
+  }
+
+  function choose(scope: Scope) {
+    const current = panel;
+    if (current?.kind !== "scope") return;
+    if (current.action === "edit") openEditor(current.event, scope);
+    else if (current.action === "delete") void remove(current.event, scope);
+    else if (current.start) {
+      close();
+      void performMove(current.event, current.start, scope);
+    }
   }
 
   async function join(url: string) {
@@ -337,15 +385,16 @@
           pending={calendar.busy() === "delete"}
           fault={panelFault}
           onedit={() => edit(shown)}
-          ondelete={() => void remove(shown)}
+          ondelete={() => (repeats(shown) ? ask("delete", shown) : void remove(shown, null))}
           onjoin={(url) => void join(url)}
           onclose={close}
         />
       {:else if panel.kind === "editor"}
-        {#key panel.editing?.id ?? "new"}
+        {#key `${panel.editing?.id ?? "new"}:${panel.scope}`}
           <EventEditor
             initial={panel.form}
             editing={panel.editing !== null}
+            scope={panel.scope}
             calendars={writable}
             pending={calendar.busy() === "save"}
             fault={panelFault}
@@ -353,6 +402,15 @@
             oncancel={close}
           />
         {/key}
+      {:else if panel.kind === "scope"}
+        <ScopeChoice
+          action={panel.action}
+          canThis={panel.event.occurrence.recurrence_id !== null}
+          pending={calendar.busy() !== null}
+          fault={panelFault}
+          onchoose={choose}
+          oncancel={close}
+        />
       {:else if panel.kind === "accounts"}
         <AccountsPanel onclose={close} />
       {/if}
