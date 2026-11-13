@@ -7815,12 +7815,14 @@ dependencies = [
  "zephium-engine",
  "zephium-import",
  "zephium-ipc",
+ "zephium-mail",
  "zephium-notes",
  "zephium-store",
  "zephium-voice",
  "zephium-webext",
  "zephium-webext-macos",
  "zephium-work-composition",
+ "zeroize",
 ]
 
 [[package]]

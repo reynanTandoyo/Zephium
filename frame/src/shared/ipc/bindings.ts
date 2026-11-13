@@ -105,6 +105,45 @@ export const commands = {
 	workAiAppInstall: (app: WorkAiAppIdV1) => typedError<null, WorkModelsFaultV1>(__TAURI_INVOKE("work_ai_app_install", { app })),
 	/**  Opens a visible terminal running the app so the person can sign in once. */
 	workAiAppSignIn: (app: WorkAiAppIdV1) => typedError<null, WorkModelsFaultV1>(__TAURI_INVOKE("work_ai_app_sign_in", { app })),
+	/**  Looks up server settings for an address. */
+	mailAutoconfig: (email: string) => typedError<MailAutoconfigV1, MailErrorV1>(__TAURI_INVOKE("mail_autoconfig", { email })),
+	/**  Connects to both servers with the typed password, storing nothing. */
+	mailTestAccount: (account: MailNewAccountV1) => typedError<MailTestV1, MailErrorV1>(__TAURI_INVOKE("mail_test_account", { account })),
+	/**  Adds an account. The password goes to the OS vault and is wiped here. */
+	mailAddAccount: (account: MailNewAccountV1) => typedError<MailAccountV1, MailErrorV1>(__TAURI_INVOKE("mail_add_account", { account })),
+	/**  Changes an account; a password, when given, replaces the stored one. */
+	mailUpdateAccount: (update: MailAccountUpdateV1) => typedError<MailAccountV1, MailErrorV1>(__TAURI_INVOKE("mail_update_account", { update })),
+	/**  Removes an account, its password and everything cached for it. */
+	mailRemoveAccount: (account: string) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_remove_account", { account })),
+	/**  The accounts, in the order they were added. No secrets. */
+	mailAccounts: () => typedError<MailAccountV1[], MailErrorV1>(__TAURI_INVOKE("mail_accounts")),
+	/**  Folders from the local cache; reads the server only when nothing is cached. */
+	mailFolders: (account: string) => typedError<MailFolderV1[], MailErrorV1>(__TAURI_INVOKE("mail_folders", { account })),
+	/**  Refreshes folders and counts from the server and announces changes. */
+	mailSync: (account: string) => typedError<MailFolderV1[], MailErrorV1>(__TAURI_INVOKE("mail_sync", { account })),
+	/**  A page of headers, newest first. Falls back to the cache while offline. */
+	mailMessages: (account: string, folder: string, page: MailPageRequestV1) => typedError<MailPageV1, MailErrorV1>(__TAURI_INVOKE("mail_messages", { account, folder, page })),
+	/**  One message with its body. Bodies are cached after the first read. */
+	mailMessage: (account: string, folder: string, uid: number) => typedError<MailBodyV1, MailErrorV1>(__TAURI_INVOKE("mail_message", { account, folder, uid })),
+	/**  Saves one attachment where the person chooses. The bytes never reach the frame. */
+	mailAttachment: (account: string, folder: string, uid: number, part: number) => typedError<MailSaveOutcomeV1, MailErrorV1>(__TAURI_INVOKE("mail_attachment", { account, folder, uid, part })),
+	/**  Sets or clears `\Seen`, `\Flagged` or `\Deleted` on messages. */
+	mailSetFlags: (account: string, folder: string, uids: number[], flag: MailFlagV1, on: boolean) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_set_flags", { account, folder, uids, flag, on })),
+	/**  Moves messages to another folder. */
+	mailMove: (account: string, folder: string, uids: number[], destination: string) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_move", { account, folder, uids, destination })),
+	/**  Deletes messages: into Trash, or for good from Trash. */
+	mailDelete: (account: string, folder: string, uids: number[]) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_delete", { account, folder, uids })),
+	/**  Sends a message, then files a copy in Sent when the account asks for it. */
+	mailSend: (account: string, draft: MailDraftV1) => typedError<MailSendOutcomeV1, MailErrorV1>(__TAURI_INVOKE("mail_send", { account, draft })),
+	/**  Stores a draft in the Drafts folder. */
+	mailSaveDraft: (account: string, draft: MailDraftV1) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_save_draft", { account, draft })),
+	/**  Searches one folder on the server by subject, sender and text. */
+	mailSearch: (account: string, folder: string, query: string) => typedError<MailMessageV1[], MailErrorV1>(__TAURI_INVOKE("mail_search", { account, folder, query })),
+	/**
+	 *  Starts or stops watching an account's inbox for new mail. The watcher
+	 *  announces changes through `zephium:mail-changed`.
+	 */
+	mailWatch: (account: string, on: boolean) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_watch", { account, on })),
 	voiceStatus: () => __TAURI_INVOKE<VoiceStatusV1>("voice_status"),
 	voiceChooseEngine: (engine: "on_device" | "open_ai" | "groq" | null) => __TAURI_INVOKE<VoiceStatusV1>("voice_choose_engine", { engine }),
 	voiceChooseLanguage: (language: string | null) => __TAURI_INVOKE<VoiceStatusV1>("voice_choose_language", { language }),
@@ -681,6 +720,7 @@ export const events = {
 	workEnvironmentChanged: makeEvent<WorkEnvironmentChanged>("work-environment-changed"),
 	zephiumImportProgress: makeEvent<ImportJobView>("zephium:import-progress"),
 	zephiumKeymapChanged: makeEvent<KeymapChanged>("zephium:keymap-changed"),
+	zephiumMailChanged: makeEvent<MailChanged>("zephium:mail-changed"),
 	zephiumPageAssistChanged: makeEvent<PageAssistChanged>("zephium:page-assist-changed"),
 	zephiumSwipe: makeEvent<SwipeScroll>("zephium:swipe"),
 	zephiumVoiceChanged: makeEvent<VoiceChanged>("zephium:voice-changed"),
@@ -1479,6 +1519,222 @@ export type LoginItemStatus = {
 	enabled: boolean,
 	/**  Registered, but the person still has to allow it in System Settings. */
 	needs_approval: boolean,
+};
+
+/**  Changes to an existing account. `password` is `Some` only to replace it. */
+export type MailAccountUpdateV1 = {
+	id: string,
+	display_name: string,
+	email: string,
+	imap: MailEndpointV1,
+	smtp: MailEndpointV1,
+	username: string,
+	colour: string,
+	signature: string,
+	save_sent_copy: boolean,
+	password: string | null,
+};
+
+/**  An account as the frame sees it. There is no password field. */
+export type MailAccountV1 = {
+	id: string,
+	display_name: string,
+	email: string,
+	imap: MailEndpointV1,
+	smtp: MailEndpointV1,
+	username: string,
+	colour: string,
+	signature: string,
+	save_sent_copy: boolean,
+};
+
+export type MailAddressV1 = {
+	name: string | null,
+	email: string,
+};
+
+export type MailAttachmentV1 = {
+	part: number,
+	filename: string,
+	content_type: string,
+	size: number,
+	content_id: string | null,
+	inline: boolean,
+};
+
+export type MailAutoconfigSourceV1 = "ispdb" | "provider_subdomain" | "well_known";
+
+/**  The result of provider autoconfig. `found: false` means enter it by hand. */
+export type MailAutoconfigV1 = {
+	found: boolean,
+	imap: MailEndpointV1 | null,
+	smtp: MailEndpointV1 | null,
+	username: string | null,
+	provider: string | null,
+	source: MailAutoconfigSourceV1 | null,
+};
+
+/**
+ *  A message with its body. `html` is raw and unsanitised: the frame must
+ *  sanitise it before display.
+ */
+export type MailBodyV1 = {
+	header: MailMessageV1,
+	reply_to: MailAddressV1[],
+	text: string | null,
+	html: string | null,
+	truncated: boolean,
+	attachments: MailAttachmentV1[],
+	inline_images: MailInlineImageV1[],
+};
+
+export type MailChangeKindV1 =
+/**  A folder gained messages (the inbox first). */
+"new_mail" |
+/**  Counts or flags moved. */
+"counts" |
+/**  Messages were moved or deleted here. */
+"removed" |
+/**  The account list changed. */
+"accounts";
+
+/**
+ *  Something in mail changed; read it again. Carries counts only: no sender,
+ *  subject or address, so the event can never leak mail content.
+ */
+export type MailChanged = {
+	account: string,
+	kind: MailChangeKindV1,
+	folder: string | null,
+	/**  Unread messages in `folder` after the change. */
+	unread: number,
+	/**  Messages that arrived, for `NewMail`. */
+	new_messages: number,
+};
+
+export type MailDraftV1 = {
+	to: MailAddressV1[],
+	cc: MailAddressV1[],
+	bcc: MailAddressV1[],
+	subject: string,
+	text: string,
+	html: string | null,
+	attachments: MailOutgoingAttachmentV1[],
+	in_reply_to: string | null,
+	references: string[],
+};
+
+export type MailEndpointV1 = {
+	host: string,
+	port: number,
+	security: MailSecurityV1,
+};
+
+/**  Why a mail command failed. A closed set: no server text. */
+export type MailErrorV1 = "invalid_input" | "not_found" | "offline" | "timeout" | "tls" | "auth_failed" | "server_rejected" | "protocol" | "too_large" | "credentials" | "unsupported" | "busy" | "internal" |
+/**  Mail is switched off in Settings. */
+"disabled";
+
+export type MailFlagV1 = "seen" | "flagged" | "deleted";
+
+export type MailFlagsV1 = {
+	seen: boolean,
+	flagged: boolean,
+	answered: boolean,
+	draft: boolean,
+	deleted: boolean,
+};
+
+export type MailFolderRoleV1 = "inbox" | "sent" | "drafts" | "trash" | "archive" | "junk" | "other";
+
+export type MailFolderV1 = {
+	path: string,
+	name: string,
+	delimiter: string | null,
+	role: MailFolderRoleV1,
+	unread: number,
+	total: number,
+	selectable: boolean,
+};
+
+/**  An inline image, base64-encoded, for rewriting `cid:` references. */
+export type MailInlineImageV1 = {
+	content_id: string,
+	content_type: string,
+	data_base64: string,
+};
+
+/**  One row of the message list. */
+export type MailMessageV1 = {
+	uid: number,
+	message_id: string | null,
+	subject: string,
+	from: MailAddressV1[],
+	to: MailAddressV1[],
+	cc: MailAddressV1[],
+	/**  Unix seconds. */
+	date: number | null,
+	flags: MailFlagsV1,
+	size: number,
+	has_attachments: boolean,
+	snippet: string,
+	in_reply_to: string | null,
+	references: string[],
+};
+
+/**
+ *  What the person typed to add or test an account. The password is read
+ *  once, written to the OS vault and wiped; this type is not `Debug` so it
+ *  cannot be formatted into a log by accident.
+ */
+export type MailNewAccountV1 = {
+	display_name: string,
+	email: string,
+	imap: MailEndpointV1,
+	smtp: MailEndpointV1,
+	username: string,
+	colour: string,
+	signature: string,
+	save_sent_copy: boolean,
+	password: string,
+};
+
+export type MailOutgoingAttachmentV1 = {
+	filename: string,
+	content_type: string,
+	data_base64: string,
+};
+
+export type MailPageRequestV1 = {
+	/**  Exclusive UID bound; `None` for the newest page. */
+	before_uid: number | null,
+	limit: number,
+};
+
+export type MailPageV1 = {
+	messages: MailMessageV1[],
+	/**  Pass as `before_uid` for the next page; `None` at the end. */
+	next_before: number | null,
+	total: number,
+	/**  True when the server was unreachable and this is the local cache. */
+	from_cache: boolean,
+};
+
+export type MailSaveOutcomeV1 = "saved" | "cancelled";
+
+export type MailSecurityV1 = "tls" | "start_tls";
+
+export type MailSendOutcomeV1 = {
+	/**  The message went out. False never occurs: a failed send is an `Err`. */
+	sent: boolean,
+	/**  The copy in Sent was also stored. */
+	saved_copy: boolean,
+};
+
+/**  Each server's outcome when testing an account; `None` means it worked. */
+export type MailTestV1 = {
+	imap: MailErrorV1 | null,
+	smtp: MailErrorV1 | null,
 };
 
 export type Material = "none" | "vibrancy" | "liquid_glass" | "acrylic" | "mica" | "mica_alt";
