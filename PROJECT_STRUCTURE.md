@@ -20,7 +20,8 @@ on Windows and **WebKit** on macOS, not Chromium or Firefox. The interface is
 - **Ask Zephium**: a sidebar assistant that reads the current page.
 - **Work**: an agentic canvas. Helpers browse live pages, use MCP connectors,
   folders and shell, and lay results out on the canvas. It works with your
-  own model keys (Anthropic, OpenAI, Gemini, …) or local models.
+  own model keys (Anthropic, OpenAI, Gemini, …) or local models. The
+  fork removed the Zephium account and the hosted "Zephium AI" provider.
 
 | Fact | Value |
 | --- | --- |
@@ -81,9 +82,8 @@ app → features → session           lib.rs: specta_builder() registers       
 
 - **Leaves** (no zephium dependencies): `core`, `credentials`, `decision`,
   `private-fs`, `update-transport`, `webext`, `voice`
-- **On top of core**: `ipc`, `import`, `notes`, `blocker`. `account` builds
-  on `credentials`, `mcp` builds on `credentials`, and `page-assist` builds
-  on `ipc`.
+- **On top of core**: `ipc`, `import`, `notes`, `blocker`. `mcp` builds on
+  `credentials`, and `page-assist` builds on `ipc`.
 - **Agent stack**: `agentic` (on core and decision) →
   `agent-runtime`, `agent-model-catalog`, `agent-provider-transport` →
   `agent-controller`
@@ -125,8 +125,7 @@ app → features → session           lib.rs: specta_builder() registers       
 | `zephium-work-composition` | Trusted desktop Work composition (no Tauri/UI); `page_assist/` sidebar service; qualification objectives | 31k |
 | `zephium-page-assist` | Pure core of Ask Zephium: page framing, citations, pacing, conversation, policy | 5k |
 | `zephium-mcp` | MCP client over `rmcp` (stdio; HTTP with OAuth) | 3k |
-| **Account and system** | | |
-| `zephium-account` | Optional account: email sign-in, session token in the OS vault, billing | 5k |
+| **System** | | |
 | `zephium-credentials` | OS vault (Windows Credential Manager, macOS Keychain) | <1k |
 | `zephium-voice` | Dictation: mic capture (WASAPI, Apple Speech), level meter | 2k |
 | **Qualification** | | |
@@ -153,7 +152,7 @@ use it as evidence that a feature works.
 | Windows/overlays | `overlay/`, `panel.rs`, `tab_switcher`, `tab_previews`, `history_menu` |
 | Browser features | `blocker_service`, `browser_import`, `profiles`, `private_window`, `spaces`, `notes`, `page_assist`, `search_providers`, `media`, `voice`, … |
 | System | `login_item`, `taskbar_badge`, `memory_pressure`, `relaunch`, `focus_alerts`, `windows_privacy`, `frame_sources`, … |
-| Diagnostics/account | `diagnostic_report/` (redaction), `account/` |
+| Diagnostics | `diagnostic_report/` (redaction), `legacy_vault.rs` (fork: one-time removal of the old Zephium account token) |
 | Probes | `navigation_probe`, `foreground_rendering_probe`, `favicon_probe`, `blocker_bench` |
 
 - **Tauri configs** (each one is merged over `tauri.conf.json`):
@@ -196,13 +195,13 @@ entries → app → features → session → domain → shared      (all may imp
 | Layer | Role |
 | --- | --- |
 | `app/` | Composition roots (browser, panel, onboarding) |
-| `features/` | 29 feature modules, each with an `index.ts` public API plus `components/`, `lib/`, `tests/`. **No sibling-feature imports** except listed exceptions (`tools`→notes/tasks/history/…, `settings`→time/assist, `assist`→work, `library`→downloads, `work`→tasks/notes/library) |
+| `features/` | 28 feature modules, each with an `index.ts` public API plus `components/`, `lib/`, `tests/`. **No sibling-feature imports** except listed exceptions (`tools`→notes/tasks/history/…, `settings`→time/assist, `assist`→work, `library`→downloads, `work`→tasks/notes/library) |
 | `session/` | Transient per-document state (drag, attention, tool drafts, sidebar mode, …) |
 | `domain/` | 37 slices that mirror Rust projections and send typed intents. **Only `domain` talks to IPC** |
 | `shared/` | `ipc/` (generated `bindings.ts` plus hand-written `native-events.ts`), `ui/` primitives, `lib/` helpers, `i18n/` (generated), `sky/`, `testing/` (test-only) |
 | `styles/` | `global.css`, `tokens.css`, `tokens/*`, `axes/*` (palette, tint, density, contrast, material, motion, type) |
 
-Feature modules: `account`, `address`, `assist`, `blocker`, `bookmarks`,
+Feature modules: `address`, `assist`, `blocker`, `bookmarks`,
 `dock`, `downloads`, `essentials`, `extensions`, `history`, `library`,
 `media`, `newtab`, `notes`, `onboarding`, `panel`, `permissions`, `search`,
 `settings`, `sidebar`, `source`, `split`, `tabs`, `tasks`, `time`, `tools`,

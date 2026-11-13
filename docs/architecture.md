@@ -43,7 +43,7 @@ These groups locate work; they do not define a dependency graph.
 | Browser execution contracts | `zephium-agentic`, `zephium-agent-controller`, `zephium-agent-runtime` |
 | Work composition | `zephium-work-composition`, `zephium-app/src/work_*`, `desktop/src/work_*` |
 | Provider and decision services | `zephium-agent-provider-transport`, `zephium-agent-model-catalog`, `zephium-decision` |
-| Account and credentials | `zephium-account`, `zephium-credentials` |
+| Account and credentials | `zephium-credentials` |
 | Sidebar assistance and voice | `zephium-page-assist`, `zephium-voice`, desktop adapters |
 | External protocol integration | `zephium-mcp` |
 | Development and qualification | `xtask`, `scripts/`, `zephium-terra-macos-probe` |
@@ -122,7 +122,7 @@ retirement, and file removal; bypassing that workflow can leave live engine
 storage or remove data without settled authorization.
 
 `zephium-private-fs` owns capability-oriented private filesystem operations.
-Account secrets belong behind `zephium-credentials` and account services;
+Account secrets belong behind `zephium-credentials`;
 renderer state, general preferences, and IPC projections are not secret stores.
 
 ## 6. History, navigation, and launcher

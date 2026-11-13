@@ -73,7 +73,7 @@ Zephium 是一款开源浏览器，用 Rust 构建，基于操作系统自带的
 - **计划变成你的一天。** 一次点击，就能把计划中的每一步变成任务，并链接回对应的 Work。任何值得保留的内容都可以存为笔记。
 - **能力延伸到浏览器之外。** Work 可以读取和编辑你授权的文件夹，运行命令，并把较大的编码任务交给 Claude Code 或 Codex。它能连接 Linear、Notion、Sentry、Stripe、Figma 等 MCP 服务器，以及 `gh` 这类命令行工具。
 - **决定权始终在你。** 任何会发布、合并或更改内容的操作，都会等你确认。
-- **随意选择模型。** 使用你自己的密钥接入 Anthropic、OpenAI、Google Gemini、DeepSeek 或 OpenRouter，或通过 Ollama、LM Studio 或任何兼容 OpenAI 的服务器在本地运行模型。密钥保存在系统钥匙串中。或者登录 Zephium AI，免去密钥：它会为每一步选出合适的模型，开始时还有免费额度（[定价](https://zephium.app/pricing)）。
+- **随意选择模型。** 使用你自己的密钥接入 Anthropic、OpenAI、Google Gemini、DeepSeek 或 OpenRouter，或通过 Ollama、LM Studio 或任何兼容 OpenAI 的服务器在本地运行模型。密钥保存在系统钥匙串中。
 
 Work 内置 25 项技能，包括旅行规划、调研、对比与选择、规划我的一天、修复 bug 和每周状态汇报。你也可以编写自己的技能。
 

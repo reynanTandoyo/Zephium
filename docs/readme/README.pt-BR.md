@@ -100,9 +100,6 @@ em uma tela, e você vê cada passo.
   Google Gemini, DeepSeek ou OpenRouter, ou rode um modelo localmente com
   Ollama, LM Studio ou qualquer servidor compatível com a OpenAI. As chaves
   ficam no chaveiro do seu sistema.
-  Ou entre no Zephium AI e dispense as chaves: ele escolhe o modelo certo para
-  cada etapa, e você começa com créditos grátis
-  ([preços](https://zephium.app/pricing)).
 
 O Work vem com 25 skills, incluindo planejar viagem, pesquisar, comparar e
 escolher, planejar meu dia, corrigir um bug e status semanal. Você pode criar as

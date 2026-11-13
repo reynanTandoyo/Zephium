@@ -73,7 +73,7 @@ Zephium은 Rust로 만든 오픈 소스 브라우저로, 운영체제에 내장�
 - **계획이 하루가 됩니다.** 한 번 클릭하면 계획의 각 단계가 해당 Work에 연결된 작업이 됩니다. 남겨 둘 만한 내용은 무엇이든 메모로 저장할 수 있습니다.
 - **브라우저 밖까지 닿습니다.** Work는 허용한 폴더를 읽고 편집하고, 명령을 실행하며, 규모가 큰 코딩 작업은 Claude Code나 Codex에 넘깁니다. Linear, Notion, Sentry, Stripe, Figma 같은 MCP 서버와 `gh` 같은 명령줄 도구에도 연결됩니다.
 - **결정권은 당신에게 있습니다.** 게시하거나 병합하거나 무언가를 바꾸는 작업은 당신의 승인을 기다립니다.
-- **어떤 모델이든 사용할 수 있습니다.** Anthropic, OpenAI, Google Gemini, DeepSeek, OpenRouter는 직접 발급한 키로 사용하고, Ollama, LM Studio 또는 OpenAI 호환 서버를 통해 로컬 모델을 실행할 수도 있습니다. 키는 시스템 키체인에 보관됩니다. 또는 Zephium AI에 로그인해 키 없이 시작할 수도 있습니다. 단계마다 알맞은 모델을 골라 주고, 무료 크레딧으로 시작할 수 있습니다([요금](https://zephium.app/pricing)).
+- **어떤 모델이든 사용할 수 있습니다.** Anthropic, OpenAI, Google Gemini, DeepSeek, OpenRouter는 직접 발급한 키로 사용하고, Ollama, LM Studio 또는 OpenAI 호환 서버를 통해 로컬 모델을 실행할 수도 있습니다. 키는 시스템 키체인에 보관됩니다.
 
 Work에는 여행 계획, 리서치, 비교하고 선택하기, 내 하루 계획, 버그 수정, 주간 현황 등 25개의 스킬이 포함되어 있습니다. 직접 스킬을 만들 수도 있습니다.
 

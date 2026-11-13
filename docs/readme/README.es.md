@@ -99,9 +99,6 @@ ahí, en un lienzo, y tú ves cada paso.
   OpenAI, Google Gemini, DeepSeek u OpenRouter, o ejecuta un modelo en local con
   Ollama, LM Studio o cualquier servidor compatible con OpenAI. Las claves se
   guardan en el llavero de tu sistema.
-  O inicia sesión en Zephium AI y olvídate de las claves: elige el modelo
-  adecuado para cada paso y empiezas con créditos gratis
-  ([precios](https://zephium.app/pricing)).
 
 Work incluye 25 skills, entre ellas planificar un viaje, investigar, comparar y
 elegir, planificar mi día, corregir un error y estado semanal. Puedes escribir

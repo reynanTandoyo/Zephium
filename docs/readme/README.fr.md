@@ -101,9 +101,6 @@ canevas, et vous voyez chaque étape.
   Google Gemini, DeepSeek ou OpenRouter, ou faites tourner un modèle en local
   avec Ollama, LM Studio ou n'importe quel serveur compatible OpenAI. Les clés
   sont conservées dans le trousseau de votre système.
-  Ou connectez-vous à Zephium AI et oubliez les clés : il choisit le bon modèle
-  à chaque étape, et vous démarrez avec des crédits offerts
-  ([tarifs](https://zephium.app/pricing)).
 
 Work est livré avec 25 skills, dont l'organisation de voyage, la recherche,
 comparer et choisir, planifier ma journée, corriger un bug et le point

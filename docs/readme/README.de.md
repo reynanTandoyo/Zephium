@@ -100,9 +100,6 @@ auf einer Arbeitsfläche, und du siehst jeden Schritt.
   OpenAI, Google Gemini, DeepSeek oder OpenRouter, oder betreibe ein Modell
   lokal über Ollama, LM Studio oder einen beliebigen OpenAI-kompatiblen Server.
   Die Schlüssel liegen in der Schlüsselverwaltung deines Systems.
-  Oder melde dich bei Zephium AI an und verzichte auf die Schlüssel: Es wählt für
-  jeden Schritt das passende Modell, und du startest mit Gratis-Guthaben
-  ([Preise](https://zephium.app/pricing)).
 
 Work wird mit 25 Skills ausgeliefert, darunter Reiseplanung, Recherche,
 Vergleichen und Entscheiden, meinen Tag planen, einen Bug beheben und

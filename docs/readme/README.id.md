@@ -100,9 +100,6 @@ mengerjakannya di atas kanvas, dan Anda melihat setiap langkahnya.
   Google Gemini, DeepSeek, atau OpenRouter, atau jalankan model secara lokal
   lewat Ollama, LM Studio, atau server mana pun yang kompatibel dengan OpenAI.
   Kunci disimpan di keychain sistem Anda.
-  Atau masuk ke Zephium AI dan lewati urusan kunci: Zephium AI memilih model yang
-  tepat untuk setiap langkah, dan Anda mulai dengan kredit gratis
-  ([harga](https://zephium.app/pricing)).
 
 Work hadir dengan 25 skill, termasuk perencanaan perjalanan, riset,
 membandingkan dan memilih, merencanakan hari saya, memperbaiki bug, dan status

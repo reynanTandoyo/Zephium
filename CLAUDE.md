@@ -76,6 +76,10 @@ Rule precedence, highest first:
 | `desktop/tauri.custom.conf.json` | "Zephium Custom" identity (`app.zephium.custom`), updater pointed at this fork, NSIS-only bundle |
 | `build:custom` script in `package.json` and `desktop/package.json` | builds the custom installer |
 | `.gitignore` (last lines) and the pointer at the end of `AGENTS.md` | fork additions to upstream files |
+| Removal of the Zephium account and hosted "Zephium AI" (T-0007) | deleted `crates/zephium-account`, `desktop/src/account*`, frame `domain/account`, `features/account`, settings account pages; Cloud provider code removed across agentic/app/work-composition/desktop/frame. Upstream changes to these files will conflict: keep them deleted |
+| `desktop/src/legacy_vault.rs` | one-time removal of the old account token from the OS vault |
+| Deprecated serde variants (`WorkModelProvider::Cloud`, hosted `WorkModelFaultV1`, `PageAssistCostV1::Hosted`, `HostedRefusal`) | kept only so saved runs and conversations still load; never produced |
+| `frame/vite.frame.ts` groups `browser-controls`, `browser-downloads` | keep the browser startup within the 24-request budget after the account chunks were removed |
 
 Update this table whenever you add a fork-only file or an edit to an
 upstream file.

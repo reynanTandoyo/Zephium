@@ -100,9 +100,6 @@ kanwie, a Ty widzisz każdy krok.
   DeepSeek lub OpenRouter albo uruchom model lokalnie przez Ollama, LM Studio
   lub dowolny serwer zgodny z OpenAI. Klucze są przechowywane w systemowym
   pęku kluczy.
-  Albo zaloguj się do Zephium AI i pomiń klucze: sam dobiera odpowiedni model
-  do każdego kroku, a na start dostajesz darmowe kredyty
-  ([cennik](https://zephium.app/pricing)).
 
 Work ma w zestawie 25 umiejętności, między innymi planowanie podróży, badanie
 tematu, porównywanie i wybór, planowanie dnia, naprawę błędu i cotygodniowy

@@ -95,9 +95,7 @@ step.
 - **Bring any model.** Use your own keys for Anthropic, OpenAI, Google Gemini,
   xAI, Mistral, DeepSeek, Groq, Cerebras or OpenRouter, or run a model locally
   through Ollama, LM Studio or any OpenAI-compatible server. Keys live in your
-  system keychain. Or sign in to Zephium AI and skip the keys: it picks the
-  right model for each step, and you start with free credits
-  ([pricing](https://zephium.app/pricing)).
+  system keychain.
 
 Work ships with 25 skills, including trip planning, research, compare and
 choose, plan my day, fix a bug and weekly status. You can write your own.
@@ -184,11 +182,8 @@ Edge.
   WebView2 diagnostics. See
   [Microsoft's WebView2 data and privacy documentation](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/data-privacy).
 - **No account needed.** History, tasks, notes, memory and time live on your
-  device. An account is only needed for Zephium AI. Update checks, protection
-  lists and extension services can contact their servers without signing in.
-- **Zephium AI keeps no content.** Requests pass through to the model that
-  answers them. We count usage for your plan, never store prompts, answers or
-  pages, and never see your card.
+  device. Update checks, protection lists and extension services can contact
+  their servers.
 - **Private windows keep nothing** once they close.
 
 ## Download
