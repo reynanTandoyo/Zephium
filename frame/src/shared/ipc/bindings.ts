@@ -134,6 +134,14 @@ export const commands = {
 	 *  `calendar_sync` and retry.
 	 */
 	calendarUpdateEvent: (calendar: string, uid: string, draft: CalendarEventDraftV1) => typedError<CalendarEventRefV1, CalendarError>(__TAURI_INVOKE("calendar_update_event", { calendar, uid, draft })),
+	/**
+	 *  Changes one occurrence of a recurring event (RECURRENCE-ID override).
+	 *  `recurrence_id` is the occurrence's `recurrence_id` as
+	 *  `calendar_events` lists it; the draft's `rrule` is ignored.
+	 */
+	calendarUpdateOccurrence: (calendar: string, uid: string, recurrenceId: string, draft: CalendarEventDraftV1) => typedError<CalendarEventRefV1, CalendarError>(__TAURI_INVOKE("calendar_update_occurrence", { calendar, uid, recurrenceId, draft })),
+	/**  Deletes one occurrence of a recurring event (EXDATE on the series). */
+	calendarDeleteOccurrence: (calendar: string, uid: string, recurrenceId: string) => typedError<null, CalendarError>(__TAURI_INVOKE("calendar_delete_occurrence", { calendar, uid, recurrenceId })),
 	/**  Deletes an event (the whole series when it repeats). */
 	calendarDeleteEvent: (calendar: string, uid: string) => typedError<null, CalendarError>(__TAURI_INVOKE("calendar_delete_event", { calendar, uid })),
 	/**  Refreshes every calendar now. */
@@ -1136,6 +1144,8 @@ export type CalendarEventDraftV1 = {
 	rrule: string | null,
 	/**  Reminders as minutes before the start. */
 	reminders: number[],
+	/**  Repeat rule in simple form; replaces `rrule` when present. */
+	recurrence?: CalendarRecurrenceV1 | null,
 	/**  Link. */
 	url: string | null,
 };
@@ -1199,6 +1209,26 @@ export type CalendarOccurrenceV1 = {
 	attendees: CalendarPersonV1[],
 	/**  Reminders as minutes before the start. */
 	reminders: number[],
+	/**
+	 *  Series only: start of the whole series (the master event), same
+	 *  format as `start`; with `series_end` and `series_tzid` it is what an
+	 *  edit of the whole series sends back as `start`, `end` and `tzid`.
+	 */
+	series_start?: string | null,
+	/**  Series only: end of the series' first instance, same format as `end`. */
+	series_end?: string | null,
+	/**  Series only: IANA zone of the series, when it has one. */
+	series_tzid?: string | null,
+	/**
+	 *  Series only: the RRULE value as stored, for rules `recurrence` cannot
+	 *  express.
+	 */
+	rrule?: string | null,
+	/**
+	 *  Series only: the repeat rule in simple form; absent when the rule is
+	 *  outside daily/weekly/monthly/yearly.
+	 */
+	recurrence?: CalendarRecurrenceV1 | null,
 };
 
 /**  A person on an event. */
@@ -1209,6 +1239,38 @@ export type CalendarPersonV1 = {
 	name: string | null,
 	/**  `needs_action`, `accepted`, `declined`, `tentative` or `delegated`. */
 	partstat: string,
+};
+
+/**
+ *  A repeat rule in simple form. Part of an occurrence (read) and of a draft
+ *  (write): when a draft carries it, it replaces the draft's `rrule`.
+ */
+export type CalendarRecurrenceV1 = {
+	/**  `daily`, `weekly`, `monthly` or `yearly`. */
+	freq: string,
+	/**  Every n-th period, 1 to 1000. */
+	interval: number,
+	/**  Stop after this many instances (1 to 1000); excludes `until`. */
+	count?: number | null,
+	/**
+	 *  Last day or instant: `YYYY-MM-DD` (the whole day counts),
+	 *  `YYYY-MM-DDTHH:MM:SSZ` or `YYYY-MM-DDTHH:MM:SS` (wall clock).
+	 */
+	until?: string | null,
+	/**
+	 *  Weekdays `MO`..`SU`; monthly and yearly rules may prefix a number
+	 *  from 1 to 5 or a sign (`2TU`, `-1FR`).
+	 */
+	by_day?: string[],
+	/**  Days of the month, 1 to 31 or -31 to -1. */
+	by_month_day?: number[],
+	/**  Months, 1 to 12. */
+	by_month?: number[],
+	/**
+	 *  Read only: the stored rule has parts this description cannot express
+	 *  (for example BYSETPOS); send `rrule` back to keep it as it is.
+	 */
+	custom?: boolean,
 };
 
 /**  What one calendar's refresh did. */
