@@ -13,12 +13,12 @@ pub const MICROSOFT_MAIL_SCOPES: &[&str] = &[
 ];
 /// Mail scope for Gmail.
 pub const GOOGLE_MAIL_SCOPES: &[&str] = &["https://mail.google.com/"];
-/// Calendar scopes for Microsoft Graph. Unused until T-0040.
+/// Calendar scopes for Microsoft Graph (T-0040).
 pub const MICROSOFT_CALENDAR_SCOPES: &[&str] = &[
     "https://graph.microsoft.com/Calendars.ReadWrite",
     "offline_access",
 ];
-/// Calendar scope for Google Calendar. Unused until T-0040.
+/// Calendar scope for Google Calendar (T-0040).
 pub const GOOGLE_CALENDAR_SCOPES: &[&str] = &["https://www.googleapis.com/auth/calendar"];
 
 /// Longest client ID accepted.
@@ -46,7 +46,7 @@ pub enum Provider {
 pub enum Purpose {
     /// IMAP and SMTP access.
     Mail,
-    /// Calendar access (T-0040).
+    /// Calendar access: Google Calendar API, Microsoft Graph.
     Calendar,
 }
 
