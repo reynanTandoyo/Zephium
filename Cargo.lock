@@ -7882,6 +7882,7 @@ dependencies = [
  "zephium-ipc",
  "zephium-mail",
  "zephium-notes",
+ "zephium-oauth",
  "zephium-store",
  "zephium-voice",
  "zephium-webext",

@@ -177,6 +177,24 @@ export const commands = {
 	 *  announces changes through `zephium:mail-changed`.
 	 */
 	mailWatch: (account: string, on: boolean) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_watch", { account, on })),
+	/**
+	 *  Opens the system browser at the provider's consent page and waits (up to
+	 *  three minutes) for the person to finish. One sign-in at a time. The
+	 *  `client_id` is the one the person registered; `client_secret` is only for
+	 *  Google "Desktop app" clients, which Google also issues a secret for.
+	 */
+	oauthSignIn: (provider: OAuthProviderV1, clientId: string, tenant: string | null, clientSecret: string | null) => typedError<OAuthGrantV1, OAuthErrorV1>(__TAURI_INVOKE("oauth_sign_in", { provider, clientId, tenant, clientSecret })),
+	/**  Stops a sign-in that is waiting for the browser (the person gave up). */
+	oauthCancelSignIn: () => typedError<null, OAuthErrorV1>(__TAURI_INVOKE("oauth_cancel_sign_in")),
+	/**  Throws away a grant that was not attached to an account. */
+	oauthDiscardGrant: (handle: string) => typedError<null, OAuthErrorV1>(__TAURI_INVOKE("oauth_discard_grant", { handle })),
+	/**
+	 *  Forgets an account's tokens: removes its refresh token from the OS vault
+	 *  and drops the access token. The mail account stays and asks for a new
+	 *  sign-in; the grant itself is revoked in the person's Microsoft or Google
+	 *  account settings.
+	 */
+	oauthSignOut: (account: string) => typedError<null, OAuthErrorV1>(__TAURI_INVOKE("oauth_sign_out", { account })),
 	voiceStatus: () => __TAURI_INVOKE<VoiceStatusV1>("voice_status"),
 	voiceChooseEngine: (engine: "on_device" | "open_ai" | "groq" | null) => __TAURI_INVOKE<VoiceStatusV1>("voice_choose_engine", { engine }),
 	voiceChooseLanguage: (language: string | null) => __TAURI_INVOKE<VoiceStatusV1>("voice_choose_language", { language }),
@@ -1767,6 +1785,8 @@ export type MailAccountUpdateV1 = {
 	signature: string,
 	save_sent_copy: boolean,
 	password: string | null,
+	/**  A handle from `oauth_sign_in` to sign an OAuth account in again. */
+	oauth_grant?: string | null,
 };
 
 /**  An account as the frame sees it. There is no password field. */
@@ -1780,6 +1800,11 @@ export type MailAccountV1 = {
 	colour: string,
 	signature: string,
 	save_sent_copy: boolean,
+	/**
+	 *  Set only for OAuth accounts: who they sign in with. `null` for
+	 *  password accounts.
+	 */
+	oauth?: MailOAuthV1 | null,
 };
 
 export type MailAddressV1 = {
@@ -1930,7 +1955,20 @@ export type MailNewAccountV1 = {
 	colour: string,
 	signature: string,
 	save_sent_copy: boolean,
+	/**  Empty when `oauth_grant` is given. */
 	password: string,
+	/**
+	 *  A handle from `oauth_sign_in`: signs the account in with OAuth
+	 *  instead of a password. Consumed by `mail_add_account`.
+	 */
+	oauth_grant?: string | null,
+};
+
+/**  The OAuth identity of an account. No token. */
+export type MailOAuthV1 = {
+	provider: OAuthProviderV1,
+	client_id: string,
+	tenant: string | null,
 };
 
 export type MailOutgoingAttachmentV1 = {
@@ -2170,6 +2208,26 @@ export type NoteTarget = {
 };
 
 export type NotesChanged = NoteChanges;
+
+/**  Why an OAuth command failed. A closed set: no server or browser text. */
+export type OAuthErrorV1 = "invalid_input" | "cancelled" | "timeout" | "offline" | "denied" | "state_mismatch" | "protocol" | "rejected" | "sign_in_required" | "credentials" | "busy" | "unsupported" | "internal";
+
+/**
+ *  The result of a completed sign-in. The handle is opaque and single-use:
+ *  pass it as `oauth_grant` to `mail_add_account` (or `mail_update_account`)
+ *  within ten minutes. No token is in here.
+ */
+export type OAuthGrantV1 = {
+	handle: string,
+	provider: OAuthProviderV1,
+	client_id: string,
+	tenant: string | null,
+	/**  Seconds until the handle expires. */
+	expires_in_secs: number,
+};
+
+/**  The identity provider. */
+export type OAuthProviderV1 = "microsoft" | "google";
 
 /**
  *  Immediate result returned by a privileged IPC command. `accepted` with an

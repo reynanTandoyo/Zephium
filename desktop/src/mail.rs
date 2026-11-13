@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::{Notify, Semaphore};
+use zephium_mail::auth::{AuthKind, Credential};
 use zephium_mail::autoconfig::{self, Autoconfig, AutoconfigSource, ConfigFetcher};
 use zephium_mail::engine::MailEngine;
 use zephium_mail::limits::{MAX_ACCOUNTS, MAX_AUTOCONFIG_BYTES, MAX_PAGE};
@@ -25,8 +26,13 @@ use zephium_store::mail_cache::{
 };
 use zeroize::Zeroize;
 
+use crate::oauth::{self, OAuthProviderV1};
+
 const EVENT: &str = "zephium:mail-changed";
 const SETTING_ENABLED: &str = "mail.enabled";
+/// JSON map of account id to [`AuthKind`] for OAuth accounts. Holds client
+/// IDs and tenants only, never a token; absent means a password account.
+const SETTING_AUTH: &str = "mail.auth";
 const MAX_IN_FLIGHT: usize = 8;
 const MAX_DRAFT_BYTES: usize = 48 * 1024 * 1024;
 
@@ -103,6 +109,19 @@ pub(crate) struct MailAccountV1 {
     pub(crate) colour: String,
     pub(crate) signature: String,
     pub(crate) save_sent_copy: bool,
+    /// Set only for OAuth accounts: who they sign in with. `null` for
+    /// password accounts.
+    #[serde(default)]
+    #[specta(optional)]
+    pub(crate) oauth: Option<MailOAuthV1>,
+}
+
+/// The OAuth identity of an account. No token.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+pub(crate) struct MailOAuthV1 {
+    pub(crate) provider: OAuthProviderV1,
+    pub(crate) client_id: String,
+    pub(crate) tenant: Option<String>,
 }
 
 /// What the person typed to add or test an account. The password is read
@@ -118,7 +137,13 @@ pub(crate) struct MailNewAccountV1 {
     pub(crate) colour: String,
     pub(crate) signature: String,
     pub(crate) save_sent_copy: bool,
+    /// Empty when `oauth_grant` is given.
     pub(crate) password: String,
+    /// A handle from `oauth_sign_in`: signs the account in with OAuth
+    /// instead of a password. Consumed by `mail_add_account`.
+    #[serde(default)]
+    #[specta(optional)]
+    pub(crate) oauth_grant: Option<String>,
 }
 
 impl Drop for MailNewAccountV1 {
@@ -140,6 +165,10 @@ pub(crate) struct MailAccountUpdateV1 {
     pub(crate) signature: String,
     pub(crate) save_sent_copy: bool,
     pub(crate) password: Option<String>,
+    /// A handle from `oauth_sign_in` to sign an OAuth account in again.
+    #[serde(default)]
+    #[specta(optional)]
+    pub(crate) oauth_grant: Option<String>,
 }
 
 impl Drop for MailAccountUpdateV1 {
@@ -411,6 +440,18 @@ fn account_out(account: &Account) -> MailAccountV1 {
         colour: account.colour.clone(),
         signature: account.signature.clone(),
         save_sent_copy: account.save_sent_copy,
+        oauth: match &account.auth {
+            AuthKind::Password => None,
+            AuthKind::Oauth {
+                provider,
+                client_id,
+                tenant,
+            } => Some(MailOAuthV1 {
+                provider: (*provider).into(),
+                client_id: client_id.clone(),
+                tenant: tenant.clone(),
+            }),
+        },
     }
 }
 
@@ -432,7 +473,46 @@ fn account_record(account: &Account) -> MailAccountRecord {
     }
 }
 
+/// Serializes the read-modify-write of the auth map.
+static AUTH_LOCK: Mutex<()> = Mutex::new(());
+
+fn auth_map() -> HashMap<String, AuthKind> {
+    use zephium_core::ports::store::Store;
+    APP_STORE
+        .get()
+        .and_then(|store| store.app_setting(SETTING_AUTH))
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default()
+}
+
+/// How an account signs in; anything unreadable is a password account.
+fn auth_of(id: &str) -> AuthKind {
+    auth_map().remove(id).unwrap_or_default()
+}
+
+/// Records (or, for `None`, forgets) an account's OAuth identity.
+fn set_auth(id: &str, auth: Option<AuthKind>) -> bool {
+    use zephium_core::ports::store::Store;
+    let _guard = AUTH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut map = auth_map();
+    match auth {
+        Some(kind @ AuthKind::Oauth { .. }) => map.insert(id.to_owned(), kind),
+        _ => map.remove(id),
+    };
+    let Ok(json) = serde_json::to_string(&map) else {
+        return false;
+    };
+    APP_STORE
+        .get()
+        .is_some_and(|store| store.set_app_setting(SETTING_AUTH.to_owned(), json))
+}
+
 fn account_from_record(record: MailAccountRecord) -> Option<Account> {
+    let auth = auth_of(&record.id);
+    account_from_record_with(record, auth)
+}
+
+fn account_from_record_with(record: MailAccountRecord, auth: AuthKind) -> Option<Account> {
     let account = Account {
         id: record.id,
         display_name: record.display_name,
@@ -451,6 +531,7 @@ fn account_from_record(record: MailAccountRecord) -> Option<Account> {
         colour: record.colour,
         signature: record.signature,
         save_sent_copy: record.save_sent_copy,
+        auth,
     };
     account.validate().ok()?;
     Some(account)
@@ -781,7 +862,8 @@ fn runtime() -> std::sync::Arc<Runtime> {
                     std::sync::Arc::new(TlsConnectorImpl),
                     std::sync::Arc::new(OsVault),
                     std::sync::Arc::new(LettreSender),
-                ),
+                )
+                .with_tokens(oauth::token_manager()),
                 watchers: Mutex::new(HashMap::new()),
             })
         })
@@ -1038,17 +1120,34 @@ pub(crate) async fn mail_autoconfig(
     })
 }
 
-fn account_from_new(input: &MailNewAccountV1, id: String) -> Account {
+/// The auth kind a sign-in handle stands for, without consuming it.
+fn auth_from_grant(handle: &str) -> Result<AuthKind, MailError> {
+    let (config, _) = oauth::peek_grant(handle).ok_or(MailError::InvalidInput)?;
+    Ok(AuthKind::Oauth {
+        provider: config.provider,
+        client_id: config.client_id,
+        tenant: config.tenant,
+    })
+}
+
+fn account_from_new(input: &MailNewAccountV1, id: String, auth: AuthKind) -> Account {
+    let email = input.email.trim().to_owned();
     Account {
         id,
         display_name: input.display_name.trim().to_owned(),
-        email: input.email.trim().to_owned(),
+        // XOAUTH2 names the mailbox by its address.
+        username: if auth == AuthKind::Password {
+            input.username.trim().to_owned()
+        } else {
+            email.clone()
+        },
+        email,
         imap: endpoint_in(&input.imap),
         smtp: endpoint_in(&input.smtp),
-        username: input.username.trim().to_owned(),
         colour: input.colour.clone(),
         signature: input.signature.clone(),
         save_sent_copy: input.save_sent_copy,
+        auth,
     }
 }
 
@@ -1060,11 +1159,27 @@ pub(crate) async fn mail_test_account(
     account: MailNewAccountV1,
 ) -> Reply<MailTestV1> {
     let _permit = gate(&caller, "mail_test_account")?;
-    let candidate = account_from_new(&account, "test".to_owned());
-    let result = runtime()
-        .engine
-        .test_account(&candidate, &account.password)
-        .await;
+    let result = async {
+        match &account.oauth_grant {
+            Some(handle) => {
+                let auth = auth_from_grant(handle)?;
+                let candidate = account_from_new(&account, "test".to_owned(), auth);
+                let (_, token) = oauth::peek_grant(handle).ok_or(MailError::InvalidInput)?;
+                runtime()
+                    .engine
+                    .test_credential(&candidate, &Credential::Bearer(token))
+                    .await
+            }
+            None => {
+                let candidate = account_from_new(&account, "test".to_owned(), AuthKind::Password);
+                runtime()
+                    .engine
+                    .test_account(&candidate, &account.password)
+                    .await
+            }
+        }
+    }
+    .await;
     log("test_account", result.is_ok());
     let report = result?;
     Ok(MailTestV1 {
@@ -1093,17 +1208,40 @@ async fn add_account(
     app: &tauri::AppHandle,
     input: &MailNewAccountV1,
 ) -> Result<Account, MailError> {
-    let account = account_from_new(input, new_account_id().map_err(|_| MailError::Internal)?);
+    let auth = match &input.oauth_grant {
+        Some(handle) => auth_from_grant(handle)?,
+        None => AuthKind::Password,
+    };
+    let account = account_from_new(
+        input,
+        new_account_id().map_err(|_| MailError::Internal)?,
+        auth,
+    );
     account.validate()?;
     if db(|cache| cache.accounts()).await?.len() >= MAX_ACCOUNTS {
         return Err(MailError::Busy);
     }
     let vault = OsVault;
-    vault.set(&account.id, &input.password)?;
+    match &input.oauth_grant {
+        Some(handle) => {
+            // The refresh token goes straight to the OS vault.
+            let grant = oauth::take_grant(handle).ok_or(MailError::InvalidInput)?;
+            oauth::token_manager().adopt(&account.id, &grant).await?;
+            if !set_auth(&account.id, Some(account.auth.clone())) {
+                let _ = oauth::token_manager().sign_out(&account.id).await;
+                return Err(MailError::Busy);
+            }
+        }
+        None => vault.set(&account.id, &input.password)?,
+    }
     let record = account_record(&account);
     let saved = db(move |cache| cache.save_account(&record)).await;
     if !matches!(saved, Ok(true)) {
         let _ = vault.remove(&account.id);
+        if input.oauth_grant.is_some() {
+            let _ = oauth::token_manager().sign_out(&account.id).await;
+            set_auth(&account.id, None);
+        }
         return Err(saved.err().unwrap_or(MailError::Busy));
     }
     emit(
@@ -1129,7 +1267,19 @@ pub(crate) async fn mail_update_account(
     let _permit = gate(&caller, "mail_update_account")?;
     let app = caller.app_handle().clone();
     let outcome = async {
-        load_account(&update.id).await?;
+        let current = load_account(&update.id).await?;
+        // A grant re-signs an OAuth account in; a password belongs to a
+        // password account. Never both, never the wrong kind.
+        let oauth_account = matches!(current.auth, AuthKind::Oauth { .. });
+        if (update.oauth_grant.is_some() && !oauth_account)
+            || (update.password.is_some() && (oauth_account || update.oauth_grant.is_some()))
+        {
+            return Err(MailError::InvalidInput);
+        }
+        let auth = match &update.oauth_grant {
+            Some(handle) => auth_from_grant(handle)?,
+            None => current.auth.clone(),
+        };
         let account = Account {
             id: update.id.clone(),
             display_name: update.display_name.trim().to_owned(),
@@ -1140,8 +1290,25 @@ pub(crate) async fn mail_update_account(
             colour: update.colour.clone(),
             signature: update.signature.clone(),
             save_sent_copy: update.save_sent_copy,
+            auth,
+        };
+        let account = Account {
+            // XOAUTH2 names the mailbox by its address.
+            username: if oauth_account {
+                account.email.clone()
+            } else {
+                account.username.clone()
+            },
+            ..account
         };
         account.validate()?;
+        if let Some(handle) = &update.oauth_grant {
+            let grant = oauth::take_grant(handle).ok_or(MailError::InvalidInput)?;
+            oauth::token_manager().adopt(&account.id, &grant).await?;
+            if !set_auth(&account.id, Some(account.auth.clone())) {
+                return Err(MailError::Busy);
+            }
+        }
         if let Some(password) = &update.password {
             OsVault.set(&account.id, password)?;
         }
@@ -1191,6 +1358,8 @@ pub(crate) async fn mail_remove_account(caller: WebviewWindow, account: String) 
         }
         runtime.engine.forget(&account).await;
         OsVault.remove(&account)?;
+        oauth::token_manager().sign_out(&account).await?;
+        set_auth(&account, None);
         let id = account.clone();
         if !db(move |cache| cache.remove_account(&id)).await? {
             return Err(MailError::NotFound);
@@ -1780,9 +1949,23 @@ mod tests {
             colour: "#336699".into(),
             signature: String::new(),
             save_sent_copy: true,
+            auth: AuthKind::Password,
         };
         let record = account_record(&account);
-        assert_eq!(account_from_record(record.clone()), Some(account));
+        assert_eq!(account_from_record(record.clone()), Some(account.clone()));
+        let oauth_kind = AuthKind::Oauth {
+            provider: zephium_oauth::provider::Provider::Google,
+            client_id: "123-abc.apps.googleusercontent.com".into(),
+            tenant: None,
+        };
+        let signed_in =
+            account_from_record_with(record.clone(), oauth_kind.clone()).expect("oauth");
+        assert_eq!(signed_in.auth, oauth_kind);
+        let out = serde_json::to_string(&account_out(&signed_in)).expect("json");
+        assert!(out.contains("\"oauth\""));
+        assert!(!out.contains("token"));
+        let plain_out = serde_json::to_string(&account_out(&account)).expect("json");
+        assert!(plain_out.contains("\"oauth\":null"));
         let mut plain = record.clone();
         plain.imap_security = "plain".into();
         assert!(account_from_record(plain).is_none());
@@ -1811,6 +1994,7 @@ mod tests {
             colour: "#000000".into(),
             signature: String::new(),
             save_sent_copy: false,
+            auth: AuthKind::Password,
         };
         let json = serde_json::to_string(&account_out(&account)).expect("json");
         assert!(!json.contains("password"));
