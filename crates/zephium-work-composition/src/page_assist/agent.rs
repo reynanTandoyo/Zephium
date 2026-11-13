@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
-use zephium_app::work_models::WorkCallSource;
 use zephium_core::ids::ProfileId;
 use zephium_core::work::model::{
     work_model_cache_key, WorkModelEvent, WorkModelMessage, WorkModelPart, WorkModelRequest,
@@ -506,7 +505,6 @@ impl Reply {
         model: &ResolvedModel,
         request: WorkModelRequest,
         text: &mut Text,
-        hosted: bool,
     ) -> Result<zephium_core::work::model::WorkModelOutcome, End> {
         let (sender, mut receiver) = mpsc::unbounded_channel::<String>();
         let events = move |event: WorkModelEvent| {
@@ -536,7 +534,7 @@ impl Reply {
         }
         match outcome {
             Ok(Ok(outcome)) => Ok(outcome),
-            Ok(Err(error)) => Err(End::Failed(fault::model_fault(error, hosted))),
+            Ok(Err(error)) => Err(End::Failed(fault::model_fault(error))),
             Err(_) => Err(End::Failed(PageAssistFaultV1::Model {
                 fault: WorkModelFaultV1::ProviderDown,
                 retry_after_ms: None,
@@ -607,16 +605,11 @@ pub(super) async fn run(reply: Reply) {
 
 async fn body(reply: &Reply) -> End {
     let ports = reply.service.ports();
-    let source = WorkCallSource::Page {
-        conversation: reply.conversation.clone(),
-        reply: reply.reply,
-    };
     reply.phase(Some(PageAssistPhaseV1::Thinking));
-    let model = match ports.models.resolve(&reply.profile, source).await {
+    let model = match ports.models.resolve(&reply.profile).await {
         Ok(model) => model,
-        Err(error) => return End::Failed(fault::model_fault(error, false)),
+        Err(error) => return End::Failed(fault::model_fault(error)),
     };
-    let hosted = model.entry.model.provider == zephium_core::work::model::WorkModelProvider::Cloud;
     reply.note(format_args!(
         "start model={} effort={:?} tools={} attachments={} suggestion={:?}",
         model.entry.id,
@@ -665,7 +658,7 @@ async fn body(reply: &Reply) -> End {
             tool_choice: WorkModelToolChoice::Auto,
             volatile_tail: 0,
         };
-        let outcome = match reply.call(&model, request, &mut text, hosted).await {
+        let outcome = match reply.call(&model, request, &mut text).await {
             Ok(outcome) => outcome,
             Err(end) => {
                 reply.flush(&mut text);

@@ -1145,14 +1145,8 @@ where
                     )
                 }
                 Err(failure) => {
-                    self.record_turn(
-                        Some(part),
-                        WorkStepStatus::Failed,
-                        None,
-                        failure,
-                        model.entry.model.provider,
-                    )
-                    .await;
+                    self.record_turn(Some(part), WorkStepStatus::Failed, None, failure)
+                        .await;
                     let mut report = PartReport::ended(
                         WorkPartStateV1::Failed,
                         "The helper's model could not be reached.",

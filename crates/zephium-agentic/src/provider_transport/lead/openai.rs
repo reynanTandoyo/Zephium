@@ -77,10 +77,7 @@ pub(super) fn body(
         }
     }
     // Only OpenAI's own endpoints are known to hold a call to a strict schema.
-    let strict_provider = matches!(
-        request.model.provider,
-        WorkModelProvider::OpenAi | WorkModelProvider::Cloud
-    );
+    let strict_provider = request.model.provider == WorkModelProvider::OpenAi;
     let mut tools: Vec<Value> = request
         .tools
         .iter()
@@ -104,19 +101,13 @@ pub(super) fn body(
     body.insert("input".into(), Value::Array(input));
     body.insert("stream".into(), json!(true));
     body.insert("store".into(), json!(false));
-    // OpenAI, directly or through Zephium Cloud; xAI speaks this wire without the key.
-    if matches!(
-        request.model.provider,
-        WorkModelProvider::OpenAi | WorkModelProvider::Cloud
-    ) {
+    // OpenAI; xAI speaks this wire without the key.
+    if request.model.provider == WorkModelProvider::OpenAi {
         if let Some(key) = &request.cache_key {
             body.insert("prompt_cache_key".into(), json!(key));
         }
     }
     body.insert("max_output_tokens".into(), json!(request.max_output_tokens));
-    if let Some(calls) = target.search_calls.filter(|_| native_search) {
-        body.insert("max_tool_calls".into(), json!(calls));
-    }
     let mut include = vec![json!("reasoning.encrypted_content")];
     // xAI's Responses API documents no search include.
     if native_search && target.upstream() != WorkModelProvider::XAi {

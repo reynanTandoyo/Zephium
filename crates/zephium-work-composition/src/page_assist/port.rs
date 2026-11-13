@@ -5,7 +5,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use zephium_app::work_models::WorkCallSource;
 use zephium_core::ids::ProfileId;
 use zephium_core::work::model::{
     WorkModelClient, WorkModelEntry, WorkModelError, WorkModelReasoning,
@@ -353,7 +352,6 @@ pub trait ModelSource: Send + Sync {
     fn resolve<'a>(
         &'a self,
         profile: &'a ProfileId,
-        source: WorkCallSource,
     ) -> BoxFuture<'a, Result<ResolvedModel, WorkModelError>>;
 }
 

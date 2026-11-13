@@ -346,7 +346,6 @@ where
                         WorkStepStatus::Failed,
                         None,
                         CallFailure::Refused(error),
-                        self.models.lead.entry.model.provider,
                     )
                     .await;
                     let fatal = matches!(
@@ -1608,47 +1607,15 @@ where
         status: WorkStepStatus,
         usage: Option<WorkUsage>,
         failure: CallFailure,
-        provider: WorkModelProvider,
     ) {
         let mut step = self.run.step(WorkStepKindV1::Turn, status, part);
         step.usage = Some(usage.unwrap_or_default());
-        let hosted = provider == WorkModelProvider::Cloud;
         step.model_fault = match failure {
-            CallFailure::Refused(error) => model_fault(error, hosted),
+            CallFailure::Refused(error) => model_fault(error),
             _ => None,
         };
         step.note = Some(
             match failure {
-                CallFailure::Refused(WorkModelError::OverBudget) if hosted => {
-                    "Zephium AI's included usage is spent; upgrade, buy extra usage or use your own key"
-                }
-                CallFailure::Refused(WorkModelError::Hosted { refusal, .. }) => match refusal {
-                    HostedRefusal::PlanRequired => {
-                        "The chosen Zephium AI model needs another plan; see plans in Settings → Account"
-                    }
-                    HostedRefusal::BillingReview => {
-                        "The Zephium account is under billing review; open Settings → Account"
-                    }
-                    HostedRefusal::OutOfCredits => {
-                        "Zephium AI's included usage is spent; upgrade, buy extra usage or use your own key"
-                    }
-                    HostedRefusal::DailyLimit => {
-                        "The daily Zephium AI limit is reached; it resets at 00:00 UTC"
-                    }
-                    HostedRefusal::FreeUsagePaused => {
-                        "Free Zephium AI usage is paused for now; credits and your own key still work"
-                    }
-                    HostedRefusal::ConfirmationLimited => {
-                        "Zephium AI is still confirming earlier requests; wait a moment"
-                    }
-                    HostedRefusal::Paused => {
-                        "Zephium AI is paused as a spending protection; try later or use your own key"
-                    }
-                    _ => "The model's turn could not be used",
-                },
-                CallFailure::Refused(WorkModelError::Unauthorized) if hosted => {
-                    "The Zephium account's session ended; sign in again in Settings → Account"
-                }
                 CallFailure::Refused(WorkModelError::MissingKey) => {
                     "No key is set for the chosen model; add one in Settings → AI"
                 }
@@ -2111,28 +2078,12 @@ fn model_stop(error: WorkModelError) -> &'static str {
 }
 
 /// A refused model call in the words the person acts on.
-fn model_fault(error: WorkModelError, hosted: bool) -> Option<WorkModelFaultV1> {
+fn model_fault(error: WorkModelError) -> Option<WorkModelFaultV1> {
     Some(match error {
-        WorkModelError::MissingKey if hosted => WorkModelFaultV1::SignedOut,
         WorkModelError::MissingKey => WorkModelFaultV1::MissingKey,
-        WorkModelError::Unauthorized if hosted => WorkModelFaultV1::SignedOut,
         WorkModelError::Unauthorized => WorkModelFaultV1::KeyRefused,
-        WorkModelError::OverBudget if hosted => WorkModelFaultV1::HostedUsage,
         WorkModelError::OverBudget => WorkModelFaultV1::ProviderCredit,
         WorkModelError::PlanLimit => WorkModelFaultV1::PlanLimit,
-        WorkModelError::Hosted { refusal, .. } => match refusal {
-            HostedRefusal::PlanRequired => WorkModelFaultV1::PlanRequired,
-            HostedRefusal::BillingReview => WorkModelFaultV1::BillingReview,
-            HostedRefusal::OutOfCredits => WorkModelFaultV1::HostedUsage,
-            HostedRefusal::DailyLimit => WorkModelFaultV1::DailyLimit,
-            HostedRefusal::FreeUsagePaused => WorkModelFaultV1::FreeUsagePaused,
-            HostedRefusal::ConfirmationLimited => WorkModelFaultV1::HostedBusy,
-            HostedRefusal::Paused => WorkModelFaultV1::HostedPaused,
-            HostedRefusal::AlreadySent
-            | HostedRefusal::InvalidAudio
-            | HostedRefusal::UnsupportedAudio
-            | HostedRefusal::AudioTooLong => return None,
-        },
         WorkModelError::RateLimited { .. } => WorkModelFaultV1::RateLimited,
         WorkModelError::Overloaded => WorkModelFaultV1::ProviderDown,
         WorkModelError::Network => WorkModelFaultV1::Unreachable,
@@ -2307,70 +2258,30 @@ mod compact_tests {
         let (_, text) = closing(&[], &[], Stall::Model(WorkModelError::BadRequest));
         assert!(text.contains("refused"), "{text}");
         assert_eq!(
-            model_fault(WorkModelError::PlanLimit, false),
+            model_fault(WorkModelError::PlanLimit),
             Some(WorkModelFaultV1::PlanLimit)
         );
     }
 
     #[test]
-    fn hosted_refusals_name_the_account_not_a_provider_key() {
-        let fault = |error, hosted| model_fault(error, hosted);
+    fn refusals_name_the_providers_key_and_never_an_account() {
         assert_eq!(
-            fault(WorkModelError::OverBudget, true),
-            Some(WorkModelFaultV1::HostedUsage)
-        );
-        assert_eq!(
-            fault(WorkModelError::OverBudget, false),
+            model_fault(WorkModelError::OverBudget),
             Some(WorkModelFaultV1::ProviderCredit)
         );
         assert_eq!(
-            fault(WorkModelError::Unauthorized, true),
-            Some(WorkModelFaultV1::SignedOut)
-        );
-        assert_eq!(
-            fault(WorkModelError::Unauthorized, false),
+            model_fault(WorkModelError::Unauthorized),
             Some(WorkModelFaultV1::KeyRefused)
         );
-        assert_eq!(fault(WorkModelError::Cancelled, false), None);
-    }
-
-    #[test]
-    fn each_hosted_refusal_has_its_own_fault_and_the_rest_have_none() {
-        let hosted = |refusal| WorkModelError::Hosted {
-            refusal,
-            retry_after_ms: None,
-        };
-        for (refusal, expected) in [
-            (
-                HostedRefusal::PlanRequired,
-                Some(WorkModelFaultV1::PlanRequired),
-            ),
-            (
-                HostedRefusal::BillingReview,
-                Some(WorkModelFaultV1::BillingReview),
-            ),
-            (
-                HostedRefusal::OutOfCredits,
-                Some(WorkModelFaultV1::HostedUsage),
-            ),
-            (
-                HostedRefusal::DailyLimit,
-                Some(WorkModelFaultV1::DailyLimit),
-            ),
-            (
-                HostedRefusal::FreeUsagePaused,
-                Some(WorkModelFaultV1::FreeUsagePaused),
-            ),
-            (
-                HostedRefusal::ConfirmationLimited,
-                Some(WorkModelFaultV1::HostedBusy),
-            ),
-            (HostedRefusal::Paused, Some(WorkModelFaultV1::HostedPaused)),
-            (HostedRefusal::AlreadySent, None),
-            (HostedRefusal::AudioTooLong, None),
-        ] {
-            assert_eq!(model_fault(hosted(refusal), true), expected, "{refusal:?}");
-        }
+        assert_eq!(model_fault(WorkModelError::Cancelled), None);
+        // The removed hosted service's refusals stay unproduced and map to no fault.
+        assert_eq!(
+            model_fault(WorkModelError::Hosted {
+                refusal: HostedRefusal::PlanRequired,
+                retry_after_ms: None,
+            }),
+            None
+        );
     }
 
     #[test]

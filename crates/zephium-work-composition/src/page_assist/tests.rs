@@ -2,7 +2,6 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use zephium_app::work_models::WorkCallSource;
 use zephium_core::work::model::{
     WorkModelClient, WorkModelEntry, WorkModelError, WorkModelEvent, WorkModelFuture,
     WorkModelMessage, WorkModelOutcome, WorkModelPart, WorkModelProvider, WorkModelRef,
@@ -308,7 +307,6 @@ impl ModelSource for FakeModels {
     fn resolve<'a>(
         &'a self,
         _profile: &'a ProfileId,
-        _source: WorkCallSource,
     ) -> BoxFuture<'a, Result<ResolvedModel, WorkModelError>> {
         let entry = self.entry.clone();
         let client: Arc<dyn WorkModelClient> = self.client.clone();

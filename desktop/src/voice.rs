@@ -8,7 +8,6 @@ use super::*;
 #[serde(rename_all = "snake_case")]
 pub(crate) enum VoiceEngineV1 {
     OnDevice,
-    Zephium,
     OpenAi,
     Groq,
 }
@@ -60,27 +59,10 @@ pub(crate) enum VoiceFaultV1 {
     /// Siri and Dictation are off in System Settings, so this Mac's
     /// recognizer refuses every take.
     DictationOff,
-    /// No engine can run: nothing on this device and no account or key.
+    /// No engine can run: nothing on this device and no key.
     NoEngine,
     KeyRefused,
-    SignedOut,
     OutOfCredit,
-    /// The chosen Zephium AI speech model needs another plan.
-    PlanRequired,
-    /// The Zephium account is under billing review.
-    BillingReview,
-    /// The account's daily Zephium AI limit is reached.
-    DailyLimit,
-    /// Free Zephium AI usage is paused for now.
-    FreeUsagePaused,
-    /// Zephium AI is paused as a spending protection.
-    HostedPaused,
-    /// The server could not read the recording.
-    InvalidAudio,
-    /// The server does not take the recording's encoding.
-    UnsupportedAudio,
-    /// The recording is longer than Zephium AI takes.
-    AudioTooLong,
     RateLimited,
     Offline,
     ProviderDown,
@@ -178,13 +160,12 @@ mod product {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Mutex, MutexGuard};
     use zephium_app::voice::{self, VoiceEngine};
-    use zephium_core::work::model::{HostedRefusal, WorkModelError};
+    use zephium_core::work::model::WorkModelError;
     use zephium_voice::{Capture, Ending, Listener, Outcome, Recognition};
 
     pub(super) fn engine_v1(engine: VoiceEngine) -> VoiceEngineV1 {
         match engine {
             VoiceEngine::OnDevice => VoiceEngineV1::OnDevice,
-            VoiceEngine::Zephium => VoiceEngineV1::Zephium,
             VoiceEngine::OpenAi => VoiceEngineV1::OpenAi,
             VoiceEngine::Groq => VoiceEngineV1::Groq,
         }
@@ -193,34 +174,15 @@ mod product {
     pub(super) fn engine_of(engine: VoiceEngineV1) -> VoiceEngine {
         match engine {
             VoiceEngineV1::OnDevice => VoiceEngine::OnDevice,
-            VoiceEngineV1::Zephium => VoiceEngine::Zephium,
             VoiceEngineV1::OpenAi => VoiceEngine::OpenAi,
             VoiceEngineV1::Groq => VoiceEngine::Groq,
         }
     }
 
-    pub(super) fn cloud_fault(engine: VoiceEngine, error: WorkModelError) -> VoiceFaultV1 {
+    pub(super) fn cloud_fault(error: WorkModelError) -> VoiceFaultV1 {
         match error {
-            WorkModelError::Unauthorized | WorkModelError::MissingKey
-                if engine == VoiceEngine::Zephium =>
-            {
-                VoiceFaultV1::SignedOut
-            }
             WorkModelError::Unauthorized | WorkModelError::MissingKey => VoiceFaultV1::KeyRefused,
             WorkModelError::OverBudget => VoiceFaultV1::OutOfCredit,
-            WorkModelError::Hosted { refusal, .. } => match refusal {
-                HostedRefusal::OutOfCredits => VoiceFaultV1::OutOfCredit,
-                HostedRefusal::PlanRequired => VoiceFaultV1::PlanRequired,
-                HostedRefusal::BillingReview => VoiceFaultV1::BillingReview,
-                HostedRefusal::DailyLimit => VoiceFaultV1::DailyLimit,
-                HostedRefusal::FreeUsagePaused => VoiceFaultV1::FreeUsagePaused,
-                HostedRefusal::ConfirmationLimited => VoiceFaultV1::RateLimited,
-                HostedRefusal::Paused => VoiceFaultV1::HostedPaused,
-                HostedRefusal::InvalidAudio => VoiceFaultV1::InvalidAudio,
-                HostedRefusal::UnsupportedAudio => VoiceFaultV1::UnsupportedAudio,
-                HostedRefusal::AudioTooLong => VoiceFaultV1::AudioTooLong,
-                HostedRefusal::AlreadySent => VoiceFaultV1::Unavailable,
-            },
             WorkModelError::RateLimited { .. } => VoiceFaultV1::RateLimited,
             WorkModelError::Network => VoiceFaultV1::Offline,
             WorkModelError::Overloaded => VoiceFaultV1::ProviderDown,
@@ -298,7 +260,6 @@ mod product {
     }
 
     pub(super) async fn resolve() -> Resolved {
-        tauri::async_runtime::spawn(zephium_app::work_models::refresh_cloud_catalog());
         let chosen = voice::chosen();
         let language = voice::language();
         let cloud = voice::cloud_engines().await;
@@ -482,7 +443,7 @@ mod product {
                     let language = voice::language();
                     voice::transcribe(engine, &wav, language.as_deref())
                         .await
-                        .map_err(|error| cloud_fault(engine, error))
+                        .map_err(cloud_fault)
                 }
                 Err(fault) => Err(fault_of(fault)),
             };
@@ -821,56 +782,16 @@ mod tests {
     #[cfg(feature = "work-product")]
     #[test]
     fn cloud_refusals_name_what_the_person_can_fix() {
-        use zephium_app::voice::VoiceEngine;
-        use zephium_core::work::model::{HostedRefusal, WorkModelError};
+        use zephium_core::work::model::WorkModelError;
         let fault = product::cloud_fault;
         assert_eq!(
-            fault(VoiceEngine::Zephium, WorkModelError::Unauthorized),
-            VoiceFaultV1::SignedOut
-        );
-        assert_eq!(
-            fault(VoiceEngine::OpenAi, WorkModelError::Unauthorized),
+            fault(WorkModelError::Unauthorized),
             VoiceFaultV1::KeyRefused
         );
-        assert_eq!(
-            fault(VoiceEngine::Groq, WorkModelError::OverBudget),
-            VoiceFaultV1::OutOfCredit
-        );
-        assert_eq!(
-            fault(VoiceEngine::Zephium, WorkModelError::ContextTooLong),
-            VoiceFaultV1::TooLong
-        );
-        let hosted = |refusal| WorkModelError::Hosted {
-            refusal,
-            retry_after_ms: None,
-        };
-        for (refusal, expected) in [
-            (HostedRefusal::OutOfCredits, VoiceFaultV1::OutOfCredit),
-            (HostedRefusal::PlanRequired, VoiceFaultV1::PlanRequired),
-            (HostedRefusal::BillingReview, VoiceFaultV1::BillingReview),
-            (HostedRefusal::DailyLimit, VoiceFaultV1::DailyLimit),
-            (
-                HostedRefusal::FreeUsagePaused,
-                VoiceFaultV1::FreeUsagePaused,
-            ),
-            (
-                HostedRefusal::ConfirmationLimited,
-                VoiceFaultV1::RateLimited,
-            ),
-            (HostedRefusal::Paused, VoiceFaultV1::HostedPaused),
-            (HostedRefusal::InvalidAudio, VoiceFaultV1::InvalidAudio),
-            (
-                HostedRefusal::UnsupportedAudio,
-                VoiceFaultV1::UnsupportedAudio,
-            ),
-            (HostedRefusal::AudioTooLong, VoiceFaultV1::AudioTooLong),
-            (HostedRefusal::AlreadySent, VoiceFaultV1::Unavailable),
-        ] {
-            assert_eq!(fault(VoiceEngine::Zephium, hosted(refusal)), expected);
-        }
+        assert_eq!(fault(WorkModelError::OverBudget), VoiceFaultV1::OutOfCredit);
+        assert_eq!(fault(WorkModelError::ContextTooLong), VoiceFaultV1::TooLong);
         for engine in [
             VoiceEngineV1::OnDevice,
-            VoiceEngineV1::Zephium,
             VoiceEngineV1::OpenAi,
             VoiceEngineV1::Groq,
         ] {

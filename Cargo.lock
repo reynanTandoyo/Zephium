@@ -7380,19 +7380,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zephium-account"
-version = "0.1.0"
-dependencies = [
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "url",
- "zephium-credentials",
- "zeroize",
-]
-
-[[package]]
 name = "zephium-agent-controller"
 version = "0.1.0"
 dependencies = [
@@ -7645,7 +7632,6 @@ dependencies = [
  "x11rb",
  "xkeysym",
  "zbus",
- "zephium-account",
  "zephium-agent-controller",
  "zephium-agent-model-catalog",
  "zephium-agent-provider-transport",
@@ -7655,6 +7641,7 @@ dependencies = [
  "zephium-blocker",
  "zephium-blocker-service",
  "zephium-core",
+ "zephium-credentials",
  "zephium-engine",
  "zephium-import",
  "zephium-ipc",

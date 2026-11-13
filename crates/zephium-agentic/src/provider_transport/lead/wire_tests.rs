@@ -676,7 +676,6 @@ fn new_providers_reach_their_own_endpoints() {
     ] {
         let target = LeadTarget::direct(provider).unwrap();
         assert_eq!(target.call_url("model", false).unwrap().as_str(), url);
-        assert!(LeadTarget::cloud(ZEPHIUM_CLOUD_BASE, provider).is_err());
     }
     let xai = openai::body(
         &request(WorkModelWire::OpenAiResponses, "grok-4.7"),
@@ -839,7 +838,7 @@ fn deepseek_holds_strict_tools_to_their_schemas_on_its_beta_path() {
     );
     let body = chat::body(&strict, &deepseek).unwrap();
     assert_eq!(body["tools"][0]["function"]["strict"], true);
-    // Loose tools, other providers and Cloud keep the ordinary path and body.
+    // Loose tools, other providers keep the ordinary path and body.
     let loose = request(WorkModelWire::ChatCompletions, "deepseek-flash");
     assert!(!deepseek.strict_tools(&loose));
     assert!(
@@ -849,8 +848,6 @@ fn deepseek_holds_strict_tools_to_their_schemas_on_its_beta_path() {
     );
     let mistral = LeadTarget::direct(WorkModelProvider::Mistral).unwrap();
     assert!(!mistral.strict_tools(&strict));
-    let cloud = LeadTarget::cloud(ZEPHIUM_CLOUD_BASE, WorkModelProvider::DeepSeek).unwrap();
-    assert!(!cloud.strict_tools(&strict));
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Provider-neutral model calls for the lead agent and its helpers.
 //!
 //! One request shape for every provider (OpenAI Responses, Anthropic
-//! Messages, Gemini, OpenAI-compatible chat, Zephium Cloud). Transports live in
+//! Messages, Gemini, OpenAI-compatible chat). Transports live in
 //! `zephium-agentic`; the loop in `zephium-app` sees only these types. Text
 //! fields carry model, page and person text, so `Debug` never prints them.
 
@@ -28,7 +28,8 @@ pub enum WorkModelProvider {
     Cerebras,
     /// Any OpenAI-compatible chat endpoint the person configured.
     Compatible,
-    /// Zephium Cloud: the upstream's native body, our base URL and bearer.
+    /// Deprecated: the hosted Zephium AI provider was removed in this fork;
+    /// kept so stored data still parses. Never produced, offered or usable.
     Cloud,
 }
 
@@ -54,7 +55,7 @@ pub enum WorkModelReasoning {
     Max,
 }
 
-/// The wire family a model speaks; Cloud models name their upstream's.
+/// The wire family a model speaks.
 #[cfg_attr(feature = "ipc-types", derive(specta::Type))]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -242,16 +243,16 @@ pub enum WorkModelError {
     /// One request is larger than the provider plan allows per minute, so
     /// waiting cannot help.
     PlanLimit,
-    /// Zephium Cloud's own refusal. `retry_after_ms` is the server's word on
-    /// when to ask again, never a guess.
+    /// Deprecated: the hosted Zephium AI service was removed in this fork, so
+    /// nothing produces this; kept so older call records still parse.
     Hosted {
         refusal: HostedRefusal,
         retry_after_ms: Option<u64>,
     },
 }
 
-/// Why Zephium Cloud refused, by its stable error codes. None of these is
-/// retried on its own: each needs the person, or the clock.
+/// Deprecated, never produced: why the removed hosted Zephium AI service
+/// refused. Kept only so older records still parse.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostedRefusal {
     /// The selected model needs another plan.

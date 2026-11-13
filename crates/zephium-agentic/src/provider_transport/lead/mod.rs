@@ -2,12 +2,11 @@
 //!
 //! One [`LeadClient`] speaks one wire (OpenAI Responses, Anthropic Messages,
 //! Gemini, OpenAI-compatible chat) to one endpoint, directly with the person's
-//! key or through Zephium Cloud with a bearer. Every failure leaves as a closed
+//! key. Every failure leaves as a closed
 //! [`WorkModelError`]; provider text never crosses.
 
 mod anthropic;
 mod chat;
-mod cloud;
 mod gemini;
 pub(super) mod image_fence;
 pub use image_fence::ModelImageGate;
@@ -30,13 +29,10 @@ use serde_json::Value;
 use zephium_core::work::model::*;
 use zeroize::Zeroizing;
 
-use cloud::classify_cloud;
-pub use cloud::{LeadCloudAccounting, LeadCloudObserver, LeadCloudRecord};
 pub use listing::{
-    check_key, detect_local_servers, fetch_cloud_catalog, list_models, CloudCatalog, LeadKeyCheck,
-    LocalServer, LocalServerKind,
+    check_key, detect_local_servers, list_models, LeadKeyCheck, LocalServer, LocalServerKind,
 };
-pub use transcribe::{transcribe, transcribe_observed, Transcript, TranscriptionTarget};
+pub use transcribe::{transcribe, Transcript, TranscriptionTarget};
 
 const OPENAI_BASE: &str = "https://api.openai.com/v1";
 const ANTHROPIC_BASE: &str = "https://api.anthropic.com/v1";
@@ -47,19 +43,13 @@ const XAI_BASE: &str = "https://api.x.ai/v1";
 const MISTRAL_BASE: &str = "https://api.mistral.ai/v1";
 const GROQ_BASE: &str = "https://api.groq.com/openai/v1";
 const CEREBRAS_BASE: &str = "https://api.cerebras.ai/v1";
-/// Zephium Cloud's production base; each wire appends its provider's own path.
-pub const ZEPHIUM_CLOUD_BASE: &str = "https://api.zephium.app";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const USER_AGENT: &str = "Zephium/1 (lead)";
 
 const MAX_RETRIES: u32 = 2;
 /// A longer Retry-After goes back to the caller instead of holding the call.
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(20);
-/// How long past the server's own limits a Cloud call waits for its cut-off.
-const LIMIT_GRACE: Duration = Duration::from_secs(15);
 const MAX_PAUSE_CONTINUATIONS: u32 = 3;
-/// How long a finished Cloud stream is read on for its accounting trailer.
-const TRAILER_WAIT: Duration = Duration::from_secs(10);
 const MAX_ERROR_BODY_BYTES: usize = 16 * 1024;
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_SECRET_BYTES: usize = 4 * 1024;
@@ -117,7 +107,7 @@ pub trait LeadCredential: Send + Sync {
     fn rejected(&self) {}
 }
 
-/// A secret held in memory, for the Cloud session and tests.
+/// A secret held in memory.
 pub struct LeadStaticCredential(Arc<LeadSecret>);
 
 impl LeadStaticCredential {
@@ -138,12 +128,8 @@ impl LeadCredential for LeadStaticCredential {
 #[derive(Clone, Debug)]
 pub struct LeadTarget {
     wire: WorkModelWire,
-    /// The upstream provider; for Cloud, the provider whose path it proxies.
     upstream: WorkModelProvider,
     base: Url,
-    cloud: bool,
-    /// Native search calls one request may make, as Cloud's catalog row says.
-    search_calls: Option<u32>,
 }
 
 impl LeadTarget {
@@ -159,6 +145,7 @@ impl LeadTarget {
             WorkModelProvider::Mistral => (WorkModelWire::ChatCompletions, MISTRAL_BASE),
             WorkModelProvider::Groq => (WorkModelWire::ChatCompletions, GROQ_BASE),
             WorkModelProvider::Cerebras => (WorkModelWire::ChatCompletions, CEREBRAS_BASE),
+            // Cloud is a deprecated, never-produced variant: it has no endpoint.
             WorkModelProvider::Compatible | WorkModelProvider::Cloud => {
                 return Err(WorkModelError::BadRequest)
             }
@@ -167,8 +154,6 @@ impl LeadTarget {
             wire,
             upstream: provider,
             base: Url::parse(base).map_err(|_| WorkModelError::BadRequest)?,
-            cloud: false,
-            search_calls: None,
         })
     }
 
@@ -179,36 +164,6 @@ impl LeadTarget {
             wire: WorkModelWire::ChatCompletions,
             upstream: WorkModelProvider::Compatible,
             base: compatible_base(base).ok_or(WorkModelError::BadRequest)?,
-            cloud: false,
-            search_calls: None,
-        })
-    }
-
-    /// Zephium Cloud proxying `upstream`'s native wire under `base`.
-    pub fn cloud(base: &str, upstream: WorkModelProvider) -> Result<Self, WorkModelError> {
-        let root = Url::parse(base).map_err(|_| WorkModelError::BadRequest)?;
-        if root.scheme() != "https" && !is_loopback(&root) {
-            return Err(WorkModelError::BadRequest);
-        }
-        let (wire, path) = match upstream {
-            WorkModelProvider::OpenAi => (WorkModelWire::OpenAiResponses, "openai/v1"),
-            WorkModelProvider::Anthropic => (WorkModelWire::AnthropicMessages, "anthropic/v1"),
-            WorkModelProvider::Google => (WorkModelWire::Gemini, "google/v1beta"),
-            WorkModelProvider::DeepSeek => (WorkModelWire::ChatCompletions, "deepseek/v1"),
-            WorkModelProvider::OpenRouter => (WorkModelWire::ChatCompletions, "openrouter/v1"),
-            WorkModelProvider::XAi
-            | WorkModelProvider::Mistral
-            | WorkModelProvider::Groq
-            | WorkModelProvider::Cerebras
-            | WorkModelProvider::Compatible
-            | WorkModelProvider::Cloud => return Err(WorkModelError::BadRequest),
-        };
-        Ok(Self {
-            wire,
-            upstream,
-            base: join(&root, path)?,
-            cloud: true,
-            search_calls: None,
         })
     }
 
@@ -222,30 +177,20 @@ impl LeadTarget {
         self.upstream
     }
 
-    /// Who produced a provider item: the upstream, and whether through Cloud,
-    /// whose account is not the person's own.
+    /// Who produced a provider item: the upstream provider.
     fn origin(&self) -> String {
-        let slug = models::provider_slug(self.upstream);
-        if self.cloud {
-            format!("{slug}@zephium")
-        } else {
-            slug.to_owned()
-        }
+        models::provider_slug(self.upstream).to_owned()
     }
 
-    /// Whether this request carries the provider's own search tool. Cloud
-    /// admits it only as the row's call cap allows, and never for Google.
+    /// Whether this request carries the provider's own search tool.
     pub(super) fn native_search(&self, request: &WorkModelRequest) -> bool {
         request.native_search
-            && !(self.cloud && self.upstream == WorkModelProvider::Google)
-            && self.search_calls != Some(0)
     }
 
     /// Whether this endpoint holds calls to tools marked strict to their
     /// schema: DeepSeek does on its beta path, which takes the same requests.
     pub(super) fn strict_tools(&self, request: &WorkModelRequest) -> bool {
         self.upstream == WorkModelProvider::DeepSeek
-            && !self.cloud
             && !request.tools.is_empty()
             && request.tools.iter().all(|tool| tool.strict)
     }
@@ -281,10 +226,6 @@ impl LeadTarget {
                 "anthropic-version",
                 HeaderValue::from_static(ANTHROPIC_VERSION),
             );
-        }
-        if self.cloud {
-            headers.insert("authorization", secret.header("Bearer ")?);
-            return Ok(());
         }
         match self.upstream {
             WorkModelProvider::Anthropic => {
@@ -364,10 +305,7 @@ pub struct LeadClient {
     credential: Arc<dyn LeadCredential>,
     price: Option<WorkModelPrice>,
     search_fee_micros: u64,
-    cloud_observer: Option<LeadCloudObserver>,
     max_request_bytes: Option<u64>,
-    idle_timeout: Option<Duration>,
-    call_timeout: Option<Duration>,
     #[cfg(test)]
     backoff: Duration,
 }
@@ -384,34 +322,10 @@ impl LeadClient {
             target,
             credential,
             price,
-            cloud_observer: None,
             max_request_bytes: None,
-            idle_timeout: None,
-            call_timeout: None,
             #[cfg(test)]
             backoff: Duration::from_millis(1),
         }
-    }
-
-    /// Reports every Cloud call's accounting record when the call ends.
-    pub fn with_cloud_observer(mut self, observer: LeadCloudObserver) -> Self {
-        self.cloud_observer = Some(observer);
-        self
-    }
-
-    /// Gives up on a silent stream, or a call that runs on, a little after
-    /// the server would: its own cut-off arrives first, with the accounting.
-    pub fn with_call_limits(mut self, idle_ms: Option<u64>, max_ms: Option<u64>) -> Self {
-        let grace = |ms: u64| Duration::from_millis(ms).saturating_add(LIMIT_GRACE);
-        self.idle_timeout = idle_ms.map(grace);
-        self.call_timeout = max_ms.map(grace);
-        self
-    }
-
-    /// Holds searches to the Cloud row's call cap.
-    pub fn with_search_limit(mut self, calls: u32) -> Self {
-        self.target.search_calls = Some(calls);
-        self
     }
 
     /// Refuses, before sending, a body larger than the endpoint admits.
@@ -517,7 +431,6 @@ impl LeadClient {
         let mut usage = total.usage;
         usage.cache_write_input_tokens = total.cache_write_tokens.min(usage.input_tokens);
         if self.target.upstream == WorkModelProvider::Compatible
-            && !self.target.cloud
             && zephium_core::work::model::local_model_endpoint(self.target.base.as_str())
             && self.price.as_ref().is_none_or(|price| {
                 price.input == 0 && price.cached_input == 0 && price.output == 0
@@ -552,9 +465,6 @@ impl LeadClient {
         let url = self.target.call_url(model, strict)?;
         let client = http(url.scheme() == "http")?;
         let mut retries = 0;
-        // One key per logical generation. It changes only when Cloud admitted
-        // an attempt and released it unspent; see `cloud::refusal`.
-        let mut key = idempotency_key()?;
         loop {
             let secret = self.credential.secret().await?;
             let mut headers = HeaderMap::new();
@@ -563,72 +473,21 @@ impl LeadClient {
             headers.insert("accept-encoding", HeaderValue::from_static("identity"));
             self.target.authorize(&mut headers, &secret)?;
             drop(secret);
-            if self.target.cloud {
-                headers.insert("idempotency-key", key.clone());
-            }
-            let mut post = client.post(url.clone()).headers(headers);
-            if let Some(limit) = self.call_timeout {
-                post = post.timeout(limit);
-            }
+            let post = client.post(url.clone()).headers(headers);
             let send = post.body(body.to_vec()).send();
             let sent = image_fence::fenced(image_fence, send)
                 .await
                 .map_err(|()| WorkModelError::Cancelled)?;
             let failure = match sent {
-                // Sent, maybe received: a Cloud call is never sent again blind.
-                Err(error) if self.target.cloud && !error.is_connect() => {
-                    let answered = cloud::Answered::default();
-                    self.record(&key, answered, None, LeadCloudAccounting::Unknown);
-                    return Err(WorkModelError::Protocol);
-                }
                 Err(error) => Failure::from_transport(&error),
                 Ok(response) if response.status().is_success() => {
-                    let answered = self
-                        .target
-                        .cloud
-                        .then(|| cloud::Answered::read(response.headers()));
-                    let (result, trailer) = self.stream(response, events).await;
-                    if let Some(answered) = answered {
-                        return self.settle_cloud(&key, answered, trailer.as_deref(), result);
-                    }
-                    match result {
+                    match self.stream(response, events).await {
                         Ok(decoded) => return Ok(decoded),
                         Err(StreamFailure::AfterOutput(error)) => return Err(error),
                         Err(StreamFailure::BeforeOutput(error)) => Failure::retryable(error),
                     }
                 }
-                Ok(response) if self.target.cloud => {
-                    let status = response.status();
-                    let answered = cloud::Answered::read(response.headers());
-                    let (failure, body) = Failure::from_response(response, true).await;
-                    let request_id = cloud::error_request_id(&body, &answered);
-                    let admitted = request_id.is_some();
-                    match cloud::refusal(status, request_id.as_deref()) {
-                        cloud::Refusal::Again => {}
-                        cloud::Refusal::AgainWithNewKey => {
-                            self.record(&key, answered, request_id, LeadCloudAccounting::Refused);
-                            key = idempotency_key()?;
-                        }
-                        cloud::Refusal::Final if admitted => {
-                            self.record(&key, answered, request_id, LeadCloudAccounting::Refused);
-                        }
-                        cloud::Refusal::Final => {}
-                        cloud::Refusal::Uncertain => {
-                            self.record(&key, answered, request_id, LeadCloudAccounting::Unknown);
-                            // A 409 says the server already holds this call; that is
-                            // not a protocol fault, and the receipt settles it.
-                            return Err(match failure.error {
-                                WorkModelError::Hosted {
-                                    refusal: HostedRefusal::AlreadySent,
-                                    ..
-                                } => failure.error,
-                                _ => WorkModelError::Protocol,
-                            });
-                        }
-                    }
-                    failure
-                }
-                Ok(response) => Failure::from_response(response, false).await.0,
+                Ok(response) => Failure::from_response(response).await,
             };
             if failure.error == WorkModelError::Unauthorized {
                 self.credential.rejected();
@@ -644,79 +503,15 @@ impl LeadClient {
         }
     }
 
-    /// The Cloud call's record, and its result as the caller should see it:
-    /// a dispatched call that failed is never read as worth retrying.
-    fn settle_cloud(
-        &self,
-        key: &HeaderValue,
-        answered: cloud::Answered,
-        trailer: Option<&str>,
-        result: Result<Decoded, StreamFailure>,
-    ) -> Result<Decoded, WorkModelError> {
-        let trailer = trailer.and_then(cloud::Trailer::parse);
-        let (request_id, accounting) = match trailer {
-            Some(trailer) => (trailer.request_id, trailer.accounting),
-            None => (
-                None,
-                answered
-                    .usage
-                    .clone()
-                    .unwrap_or(LeadCloudAccounting::Unknown),
-            ),
-        };
-        let request_id = request_id.or_else(|| answered.request_id.clone());
-        self.record(key, answered, request_id, accounting);
-        result.map_err(|failure| match failure {
-            StreamFailure::AfterOutput(error) | StreamFailure::BeforeOutput(error) => {
-                cloud::dispatched(error)
-            }
-        })
-    }
-
-    fn record(
-        &self,
-        key: &HeaderValue,
-        answered: cloud::Answered,
-        request_id: Option<String>,
-        accounting: LeadCloudAccounting,
-    ) {
-        let Some(observer) = &self.cloud_observer else {
-            return;
-        };
-        observer(LeadCloudRecord {
-            idempotency_key: key.to_str().unwrap_or_default().to_owned(),
-            request_id: request_id.or(answered.request_id),
-            policy_revision: answered.policy_revision,
-            accounting,
-        });
-    }
-
-    /// Decodes a stream; for Cloud, then reads on to its end for the
-    /// accounting trailer, which follows the provider's last event.
+    /// Decodes a stream.
     async fn stream(
         &self,
         response: reqwest::Response,
         events: &(dyn Fn(WorkModelEvent) + Send + Sync),
-    ) -> (Result<Decoded, StreamFailure>, Option<String>) {
+    ) -> Result<Decoded, StreamFailure> {
         let mut framer = sse::SseFramer::default();
         let mut body = response.bytes_stream();
-        let result = self.decode_stream(&mut body, &mut framer, events).await;
-        if !self.target.cloud {
-            return (result, None);
-        }
-        let drain = async {
-            let mut ignored = Vec::new();
-            while let Some(Ok(chunk)) = body.next().await {
-                if framer.push(&chunk, &mut ignored).is_err() {
-                    return;
-                }
-                ignored.clear();
-            }
-            let _ = framer.finish(&mut ignored);
-        };
-        let _ = tokio::time::timeout(TRAILER_WAIT, drain).await;
-        let trailer = framer.trailer().map(str::to_owned);
-        (result, trailer)
+        self.decode_stream(&mut body, &mut framer, events).await
     }
 
     async fn decode_stream<S, B>(
@@ -742,14 +537,7 @@ impl LeadClient {
         };
         let mut done = false;
         while !done {
-            let next = match self.idle_timeout {
-                Some(idle) => match tokio::time::timeout(idle, body.next()).await {
-                    Ok(next) => next,
-                    Err(_) => return Err(fail(emitted, WorkModelError::Network)),
-                },
-                None => body.next().await,
-            };
-            let chunk = match next {
+            let chunk = match body.next().await {
                 Some(Ok(chunk)) => chunk,
                 Some(Err(error)) => {
                     return Err(fail(emitted, Failure::from_transport(&error).error))
@@ -828,12 +616,12 @@ impl Failure {
     }
 
     /// The failure, and the bounded body it was read from.
-    async fn from_response(response: reqwest::Response, cloud: bool) -> (Self, Vec<u8>) {
+    async fn from_response(response: reqwest::Response) -> Self {
         let status = response.status();
         let headers = response.headers().clone();
         let body = bounded_body(response).await;
-        let (error, retry_after) = refused(status, &headers, &body, cloud);
-        (Self { error, retry_after }, body)
+        let (error, retry_after) = refused(status, &headers, &body);
+        Self { error, retry_after }
     }
 
     fn retry_wait(&self, retries: u32) -> Option<Duration> {
@@ -884,21 +672,20 @@ fn retry_after(headers: &HeaderMap) -> Option<Duration> {
     )
 }
 
-/// A failed answer as a closed error, with the wait the server named: the
-/// larger of its header and, for Cloud, its body.
+/// A failed answer as a closed error, with the wait the server named.
 fn refused(
     status: StatusCode,
     headers: &HeaderMap,
     body: &[u8],
-    cloud: bool,
 ) -> (WorkModelError, Option<Duration>) {
-    let wait = cloud::server_wait(headers, body, cloud);
-    let error = if cloud {
-        classify_cloud(status, body)
-    } else {
-        classify(status, body)
+    let wait = retry_after(headers);
+    let error = match classify(status, body) {
+        WorkModelError::RateLimited { .. } => WorkModelError::RateLimited {
+            retry_after_ms: wait.map(|wait| u64::try_from(wait.as_millis()).unwrap_or(u64::MAX)),
+        },
+        other => other,
     };
-    (cloud::with_wait(error, wait, cloud), wait)
+    (error, wait)
 }
 
 /// Maps a failed HTTP answer to a closed error. The body is read only for
@@ -954,24 +741,6 @@ fn classify(status: StatusCode, body: &[u8]) -> WorkModelError {
         400..=499 => WorkModelError::BadRequest,
         _ => WorkModelError::Protocol,
     }
-}
-
-/// A random UUID v4, as Cloud requires for `Idempotency-Key`.
-fn idempotency_key() -> Result<HeaderValue, WorkModelError> {
-    let mut bits = u128::from(ulid::Ulid::new());
-    bits ^= u128::from(ulid::Ulid::new()).rotate_left(48);
-    bits = (bits & !(0xF << 76)) | (0x4 << 76);
-    bits = (bits & !(0x3 << 62)) | (0x2 << 62);
-    let hex = format!("{bits:032x}");
-    let text = format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32]
-    );
-    HeaderValue::from_str(&text).map_err(|_| WorkModelError::Protocol)
 }
 
 /// Closed mapping of in-stream error codes shared by the wires.

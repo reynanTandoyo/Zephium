@@ -66,7 +66,6 @@ pub use work::{
 };
 
 mod about;
-mod account;
 #[cfg(feature = "adblock-qa")]
 mod blocker_bench;
 mod blocker_service;
@@ -89,6 +88,7 @@ mod history_menu;
 mod intro_sound;
 mod keymap;
 mod launcher_trigger;
+mod legacy_vault;
 #[cfg(target_os = "linux")]
 mod linux_global_shortcuts;
 #[cfg(any(target_os = "linux", test))]
@@ -1809,35 +1809,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             page_assist::page_styles_all,
             page_assist::page_style_toggle_for,
             page_assist::page_style_remove_for,
-            account::account_get,
-            account::account_send_code,
-            account::account_verify,
-            account::account_cancel_code,
-            account::account_sign_out,
-            account::account_refresh,
-            account::account_buy,
-            account::account_manage,
-            account::account_set_daily_limit,
-            account::account_plan_preview,
-            account::account_plan_confirm,
-            account::account_plan_dismiss,
-            account::account_sessions,
-            account::account_revoke_session,
-            account::account_set_server,
-            account::account_deletion_code,
-            account::account_delete,
-            account::account_set_name,
-            account::account_reauth_code,
-            account::account_email_code,
-            account::account_change_email,
-            account::account_sign_out_everywhere,
-            account::account_export,
-            account::account_usage_history,
-            account::account_receipt,
-            account::avatar::account_avatar_pick,
-            account::avatar::account_avatar_save,
-            account::avatar::account_avatar_discard,
-            account::avatar::account_avatar_remove,
             work_sites::work_sites,
             work_sites::work_set_site,
             work_sites::work_screenshot_sites,
@@ -2031,7 +2002,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             voice::VoiceLevels,
             page_assist::PageAssistChanged,
             swipe::SwipeScroll,
-            account::AccountChanged,
             ItemsChanged,
             FaviconsChanged,
             ResourceChanged,
@@ -3998,7 +3968,6 @@ fn execute_command_or(
         id,
         "settings.profiles"
             | "settings.about"
-            | "settings.account"
             | "settings.newtab"
             | "settings.ai"
             | "settings.focus"
@@ -6612,8 +6581,6 @@ fn build_profile_menu(
     let item = |id: &str| build_command_menu_item(handle, &resolved, id);
     let profile = MenuItemBuilder::with_id("settings.profiles", menu_text::label("Profile…"))
         .build(handle)?;
-    let account =
-        MenuItemBuilder::with_id("settings.account", menu_text::label("Account…")).build(handle)?;
     let first = PredefinedMenuItem::separator(handle)?;
     let new_tab = item("tab.new")?;
     let new_private = item("window.newPrivate")?;
@@ -6633,7 +6600,7 @@ fn build_profile_menu(
     let settings = item("browser.settings")?;
     let quit = build_quit_menu_item(handle)?;
     let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
-        vec![&profile, &account, &first, &new_tab, &new_private];
+        vec![&profile, &first, &new_tab, &new_private];
     items.extend(private_window::refs(&sides));
     items.extend([
         &split as &dyn tauri::menu::IsMenuItem<tauri::Wry>,
@@ -7040,14 +7007,14 @@ pub fn run() {
                 menu_text::set_language(store.app_setting("ui.language").as_deref());
                 updates::schedule_native_checks(app.handle());
                 work_models::install(app.handle());
-                // The benchmark must not reach the person's keychain or the
-                // account server: the keychain asks for their password.
+                // The benchmark must not reach the person's keychain: the
+                // keychain asks for their password.
                 #[cfg(feature = "adblock-qa")]
                 if !blocker_bench::enabled() {
-                    account::install(app.handle());
+                    legacy_vault::drop_account_items();
                 }
                 #[cfg(not(feature = "adblock-qa"))]
-                account::install(app.handle());
+                legacy_vault::drop_account_items();
 
                 #[cfg(target_os = "windows")]
                 let privileged_runtime = prepare_privileged_runtime_directories(&data_dir)?;

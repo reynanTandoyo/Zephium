@@ -1,5 +1,4 @@
-//! Models for the lead agent: the catalog (built in, or Zephium Cloud's when
-//! signed in), the person's keys, per-profile choices per role, and
+//! Models for the lead agent: the built-in catalog, the person's keys, per-profile choices per role, and
 //! [`resolve`], which hands the runtime a ready client.
 //!
 //! Choices are trusted host state stored through an installed settings port;
@@ -7,11 +6,10 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::{Duration, Instant};
 
 use zephium_agentic::lead::{
-    self, keys, models, LeadClient, LeadCloudRecord, LeadCredential, LeadKeyCheck, LeadSecret,
-    LeadSecretFuture, LeadStaticCredential, LeadTarget,
+    self, keys, models, LeadClient, LeadCredential, LeadKeyCheck, LeadSecret, LeadSecretFuture,
+    LeadStaticCredential, LeadTarget,
 };
 use zephium_core::ids::ProfileId;
 use zephium_core::work::model::*;
@@ -19,8 +17,8 @@ use zephium_core::work::model::*;
 use WorkModelProvider as P;
 
 /// The order a role falls back to a provider when nothing is chosen: the
-/// person's own keys first, then the signed-in account's hosted models.
-const FALLBACK_ORDER: [WorkModelProvider; 11] = [
+/// person's own keys, in this order.
+const FALLBACK_ORDER: [WorkModelProvider; 10] = [
     P::Anthropic,
     P::OpenAi,
     P::Google,
@@ -31,7 +29,6 @@ const FALLBACK_ORDER: [WorkModelProvider; 11] = [
     P::Cerebras,
     P::OpenRouter,
     P::Compatible,
-    P::Cloud,
 ];
 /// Providers that take a key in Settings, in display order.
 pub const KEYED_PROVIDERS: [WorkModelProvider; 10] = [
@@ -51,12 +48,8 @@ const ROLES: [WorkModelRole; 3] = [
     WorkModelRole::Page,
     WorkModelRole::Light,
 ];
-const CLOUD_CATALOG_KEY: &str = "work.models.cloud.catalog";
 const COMPATIBLE_BASE_KEY: &str = "work.models.compatible.base";
 const LEGACY_PRICE_ORIGIN_KEY: &str = "work.models.compatible.legacy_price_origin";
-const CLOUD_REFRESH: Duration = Duration::from_secs(60 * 60);
-const CLOUD_RETRY: Duration = Duration::from_secs(30);
-const MAX_STORED_CATALOG_BYTES: usize = 512 * 1024;
 
 /// App settings, installed by the composition root.
 pub trait WorkModelSettings: Send + Sync {
@@ -66,41 +59,7 @@ pub trait WorkModelSettings: Send + Sync {
     fn set(&self, key: String, value: String) -> bool;
 }
 
-/// What a hosted call is made for, kept on this computer so the usage history
-/// can group calls. The service never learns it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WorkCallSource {
-    /// A Work task: the profile that owns it and its id.
-    Task {
-        profile: String,
-        work: String,
-    },
-    Voice,
-    /// One assistant reply, so its charge can be added to the reply.
-    Page {
-        conversation: String,
-        reply: u32,
-    },
-}
-
-/// A signed-in Zephium Cloud session, installed by the sign-in flow.
-pub trait WorkCloudSession: Send + Sync {
-    /// Whether a session is active now.
-    fn signed_in(&self) -> bool;
-    /// The plan's name, as the server reports it.
-    fn plan(&self) -> Option<String>;
-    /// The API base, such as `https://api.zephium.app`.
-    fn base(&self) -> String;
-    /// The short-lived bearer, refreshed by the session.
-    fn credential(&self) -> Arc<dyn LeadCredential>;
-    /// A hosted call ended; `record` says what is known of its charge.
-    fn recorded(&self, _record: LeadCloudRecord) {}
-    /// The hosted request `request_id` was made for `source`.
-    fn sourced(&self, _request_id: &str, _source: &WorkCallSource) {}
-}
-
 static SETTINGS: RwLock<Option<Arc<dyn WorkModelSettings>>> = RwLock::new(None);
-static CLOUD: RwLock<Option<Arc<dyn WorkCloudSession>>> = RwLock::new(None);
 type Observer = Box<dyn Fn() + Send + Sync>;
 static OBSERVER: OnceLock<Observer> = OnceLock::new();
 
@@ -111,38 +70,9 @@ pub fn install_settings(settings: Arc<dyn WorkModelSettings>) {
     }
 }
 
-/// Installs the Cloud session. Without one, Cloud reads as signed out.
-pub fn install_cloud_session(session: Arc<dyn WorkCloudSession>) {
-    if let Ok(mut slot) = CLOUD.write() {
-        *slot = Some(session);
-    }
-    notify();
-}
-
 /// Called after any change a picker or Settings shows (keys, choices, catalog).
 pub fn set_observer(observer: Observer) {
     let _ = OBSERVER.set(observer);
-}
-
-/// The account signed in or out. Signed out, the hosted catalog and its
-/// cached copy go; signed in, the next refresh fetches it.
-pub fn cloud_session_changed() {
-    let signed_in = cloud().is_some();
-    {
-        let mut state = state();
-        state.cloud_fetched = None;
-        state.cloud_tried = None;
-        if !signed_in {
-            state.cloud.clear();
-            state.cloud_defaults = None;
-            state.transcriber = None;
-            state.cloud_loaded = true;
-        }
-    }
-    if !signed_in {
-        store_setting(CLOUD_CATALOG_KEY.to_owned(), String::new());
-    }
-    notify();
 }
 
 fn notify() {
@@ -159,14 +89,6 @@ pub(crate) fn setting(key: &str) -> Option<String> {
 pub(crate) fn store_setting(key: String, value: String) -> bool {
     let settings = SETTINGS.read().ok().and_then(|slot| slot.clone());
     settings.is_some_and(|settings| settings.set(key, value))
-}
-
-pub(crate) fn cloud() -> Option<Arc<dyn WorkCloudSession>> {
-    CLOUD
-        .read()
-        .ok()?
-        .clone()
-        .filter(|session| session.signed_in())
 }
 
 /// What the person sees about a provider's key. Never the key itself.
@@ -285,15 +207,6 @@ struct State {
     presence: HashMap<WorkModelProvider, bool>,
     verdicts: HashMap<WorkModelProvider, WorkKeyStatus>,
     listed: HashMap<WorkModelProvider, Vec<WorkModelEntry>>,
-    cloud: Vec<models::CloudModel>,
-    /// The server's per-role defaults; `None` from a server that sends none.
-    cloud_defaults: Option<models::CloudDefaults>,
-    transcriber: Option<models::CloudTranscriber>,
-    cloud_loaded: bool,
-    cloud_fetched: Option<Instant>,
-    /// When a fetch last started, so concurrent readers share one attempt and a
-    /// failing server is not asked again on every read.
-    cloud_tried: Option<Instant>,
     /// Choices kept in memory when no settings store is installed.
     choices: HashMap<String, StoredChoice>,
     efforts: HashMap<String, String>,
@@ -330,8 +243,7 @@ pub(crate) async fn blocking<T: Send + 'static>(
 /// Reads which keys exist, from Keychain attributes only, once per process.
 pub(crate) async fn ensure_presence() {
     let missing: Vec<_> = {
-        let mut state = state();
-        load_cloud_cache(&mut state);
+        let state = state();
         KEYED_PROVIDERS
             .into_iter()
             .filter(|provider| !state.presence.contains_key(provider))
@@ -378,7 +290,8 @@ fn compatible_base() -> Option<String> {
 /// Whether calls to `provider` can be made now.
 fn usable(state: &State, provider: WorkModelProvider) -> bool {
     match provider {
-        P::Cloud => cloud().is_some() && state.cloud.iter().any(|model| model.available),
+        // The deprecated hosted provider is never usable.
+        P::Cloud => false,
         P::Compatible => {
             compatible_base().is_some() && key_status(state, provider) != WorkKeyStatus::Invalid
         }
@@ -389,128 +302,7 @@ fn usable(state: &State, provider: WorkModelProvider) -> bool {
     }
 }
 
-fn load_cloud_cache(state: &mut State) {
-    if state.cloud_loaded {
-        return;
-    }
-    state.cloud_loaded = true;
-    if let Some(stored) = setting(CLOUD_CATALOG_KEY) {
-        if let Ok(body) = serde_json::from_str(&stored) {
-            state.cloud = models::parse_cloud(&body);
-            state.cloud_defaults = models::parse_cloud_defaults(&body);
-            state.transcriber = models::parse_cloud_transcriber(&body);
-        }
-    }
-}
-
-/// Refreshes the Cloud catalog when signed in and the copy is older than an
-/// hour; offline, the cached copy (or the built-in list) stays.
-pub async fn refresh_cloud_catalog() {
-    let Some(session) = cloud() else { return };
-    let stale = {
-        let mut state = state();
-        load_cloud_cache(&mut state);
-        let stale = state
-            .cloud_fetched
-            .is_none_or(|fetched| fetched.elapsed() > CLOUD_REFRESH)
-            && state
-                .cloud_tried
-                .is_none_or(|tried| tried.elapsed() > CLOUD_RETRY);
-        if stale {
-            state.cloud_tried = Some(Instant::now());
-        }
-        stale
-    };
-    if !stale {
-        return;
-    }
-    let Ok(secret) = session.credential().secret().await else {
-        return;
-    };
-    let Ok(fetched) = lead::fetch_cloud_catalog(&session.base(), &secret).await else {
-        return;
-    };
-    let mut raw: Vec<serde_json::Value> = fetched
-        .models
-        .iter()
-        .map(|model| {
-            serde_json::json!({
-                "id": model.entry.id.trim_start_matches("zephium/"),
-                "provider": models::provider_slug(model.upstream),
-                "upstream_model": model.entry.model.model,
-                "display_name": model.entry.display_name,
-                "description": model.description,
-                "tier": model.tier,
-                "available": model.available,
-                "roles": model.entry.roles,
-                "recommended": model.entry.recommended,
-                "context_window": model.entry.context_window,
-                "max_output": model.entry.max_output,
-                "supports": model.entry.supports,
-                "plan_min": model.plan_min,
-                "limits": {
-                    "max_request_bytes": model.max_request_bytes,
-                    "max_search_calls": model.max_search_calls,
-                    "idle_timeout_ms": model.idle_timeout_ms,
-                    "max_duration_ms": model.max_duration_ms,
-                },
-            })
-        })
-        .collect();
-    if let Some(transcriber) = &fetched.transcriber {
-        raw.push(serde_json::json!({
-            "id": transcriber.id,
-            "provider": "openai",
-            "upstream_model": transcriber.upstream_model,
-            "roles": ["transcribe"],
-            "limits": {"max_request_bytes": transcriber.max_request_bytes},
-        }));
-    }
-    let stored = match &fetched.defaults {
-        Some(defaults) => {
-            let id = |role: WorkModelRole| {
-                defaults
-                    .get(role)
-                    .map(|id| id.trim_start_matches("zephium/").to_owned())
-            };
-            serde_json::json!({
-                "models": raw,
-                "defaults": {
-                    "lead": id(WorkModelRole::Lead),
-                    "page": id(WorkModelRole::Page),
-                    "light": id(WorkModelRole::Light),
-                    "decision": id(WorkModelRole::Decision),
-                },
-            })
-        }
-        None => serde_json::json!({ "models": raw }),
-    };
-    // Readers re-read on every change event, and a read asks for this refresh:
-    // announcing an unchanged catalog would loop them.
-    let changed = match serde_json::to_string(&stored) {
-        Ok(text) if text.len() <= MAX_STORED_CATALOG_BYTES => {
-            let changed = setting(CLOUD_CATALOG_KEY).as_deref() != Some(text.as_str());
-            if changed {
-                store_setting(CLOUD_CATALOG_KEY.to_owned(), text);
-            }
-            changed
-        }
-        _ => true,
-    };
-    {
-        let mut state = state();
-        state.cloud = fetched.models;
-        state.transcriber = fetched.transcriber;
-        state.cloud_defaults = fetched.defaults;
-        state.cloud_fetched = Some(Instant::now());
-    }
-    if changed {
-        notify();
-    }
-}
-
-/// Curated BYOK entries, custom endpoint models, and the signed-in account's
-/// hosted models.
+/// Curated BYOK entries and custom endpoint models.
 fn entries(state: &State) -> Vec<WorkModelEntry> {
     let mut all = Vec::new();
     all.extend(models::builtin().into_iter().filter(|entry| {
@@ -526,9 +318,6 @@ fn entries(state: &State) -> Vec<WorkModelEntry> {
                 all.push(priced_locally(entry.clone(), local));
             }
         }
-    }
-    if cloud().is_some() {
-        all.extend(state.cloud.iter().map(|model| model.entry.clone()));
     }
     all
 }
@@ -552,6 +341,10 @@ fn stored_choice(state: &State, profile: ProfileId, role: WorkModelRole) -> Opti
         Some(text) => serde_json::from_str(&text).ok()?,
         None => state.choices.get(&key).cloned()?,
     };
+    // A choice saved while the removed hosted provider existed is ignored.
+    if stored.entry.model.provider == P::Cloud {
+        return None;
+    }
     let endpoint = compatible_base().map(|base| base.trim().trim_end_matches('/').to_owned());
     let local = endpoint.as_ref().is_some_and(|base| is_local(base));
     if stored.entry.model.provider == P::Compatible && stored.pricing_endpoint.is_none() {
@@ -613,26 +406,6 @@ fn family_entry(
     provider: WorkModelProvider,
     role: WorkModelRole,
 ) -> Option<WorkModelEntry> {
-    if provider == P::Cloud {
-        let hosted = || {
-            state
-                .cloud
-                .iter()
-                .filter(|model| model.available)
-                .map(|model| &model.entry)
-        };
-        // The server's default wins; a role it leaves empty is the person's
-        // to choose, never filled with a guess.
-        if let Some(defaults) = &state.cloud_defaults {
-            let id = defaults.get(role)?;
-            return hosted().find(|entry| entry.id == id).cloned();
-        }
-        return hosted()
-            .find(|entry| entry.recommended && entry.roles.contains(&role))
-            .or_else(|| hosted().find(|entry| entry.roles.contains(&role)))
-            .or_else(|| hosted().find(|entry| entry.roles.contains(&WorkModelRole::Lead)))
-            .cloned();
-    }
     let offered = |entry: &&WorkModelEntry| {
         entry.model.provider == provider
             && state
@@ -682,17 +455,10 @@ fn family_entry(
 /// usable, else the lead's provider family, else the first keyed provider.
 fn effective(state: &State, profile: ProfileId, role: WorkModelRole) -> Option<WorkModelEntry> {
     if let Some(choice) = stored_choice(state, profile, role) {
-        let exists = if choice.model.provider == P::Cloud {
-            state
-                .cloud
-                .iter()
-                .any(|model| model.entry.id == choice.id && model.available)
-        } else {
-            state
-                .listed
-                .get(&choice.model.provider)
-                .is_none_or(|entries| entries.iter().any(|entry| entry.id == choice.id))
-        };
+        let exists = state
+            .listed
+            .get(&choice.model.provider)
+            .is_none_or(|entries| entries.iter().any(|entry| entry.id == choice.id));
         return (usable(state, choice.model.provider) && exists).then_some(choice);
     }
     if role != WorkModelRole::Lead {
@@ -734,24 +500,13 @@ fn stored_effort(state: &State, profile: ProfileId) -> Option<WorkModelReasoning
     .find(|effort| effort_name(*effort) == name)
 }
 
-/// The provider whose wire `entry` travels: a hosted model's upstream.
-fn upstream(state: &State, entry: &WorkModelEntry) -> Option<WorkModelProvider> {
-    match entry.model.provider {
-        P::Cloud => state
-            .cloud
-            .iter()
-            .find(|model| model.entry.id == entry.id)
-            .map(|model| model.upstream),
-        provider => Some(provider),
-    }
-}
-
 /// The efforts `entry` takes as a lead, weakest first; empty when it has no
 /// reasoning its wire can set.
-fn efforts(state: &State, entry: &WorkModelEntry) -> Vec<WorkModelReasoning> {
-    match upstream(state, entry) {
-        Some(upstream) if entry.supports.reasoning => models::efforts(upstream, &entry.model.model),
-        _ => Vec::new(),
+fn efforts(entry: &WorkModelEntry) -> Vec<WorkModelReasoning> {
+    if entry.supports.reasoning {
+        models::efforts(entry.model.provider, &entry.model.model)
+    } else {
+        Vec::new()
     }
 }
 
@@ -762,10 +517,10 @@ fn effort_for(
     profile: ProfileId,
     entry: &WorkModelEntry,
 ) -> Option<WorkModelReasoning> {
-    let levels = efforts(state, entry);
+    let levels = efforts(entry);
     match stored_effort(state, profile) {
         Some(chosen) => models::nearest_effort(&levels, chosen),
-        None => models::default_effort(upstream(state, entry)?, &entry.model.model, &levels),
+        None => models::default_effort(entry.model.provider, &entry.model.model, &levels),
     }
 }
 
@@ -933,68 +688,19 @@ pub(crate) fn key_credential(provider: WorkModelProvider) -> Arc<dyn LeadCredent
     })
 }
 
-/// The signed-in session and its hosted speech model, when both exist.
-pub(crate) async fn hosted_transcriber(
-) -> Option<(Arc<dyn WorkCloudSession>, models::CloudTranscriber)> {
-    let session = cloud()?;
-    ensure_presence().await;
-    let transcriber = state().transcriber.clone()?;
-    Some((session, transcriber))
-}
-
 /// A provider refused its key during a call outside the model clients.
 pub(crate) fn key_refused(provider: WorkModelProvider) {
     record_failure(provider, generation(provider), Some(WorkKeyFault::WrongKey));
 }
 
-#[cfg(test)]
 fn client(
     state: &State,
     entry: &WorkModelEntry,
 ) -> Result<Arc<dyn WorkModelClient>, WorkModelError> {
-    client_for(state, entry, None)
-}
-
-fn client_for(
-    state: &State,
-    entry: &WorkModelEntry,
-    source: Option<WorkCallSource>,
-) -> Result<Arc<dyn WorkModelClient>, WorkModelError> {
     let provider = entry.model.provider;
     let (target, credential): (LeadTarget, Arc<dyn LeadCredential>) = match provider {
-        P::Cloud => {
-            let session = cloud().ok_or(WorkModelError::MissingKey)?;
-            // A locked model is listed to explain the plan, never called.
-            let hosted = state
-                .cloud
-                .iter()
-                .find(|model| model.entry.id == entry.id && model.available)
-                .ok_or(WorkModelError::BadRequest)?;
-            let target = LeadTarget::cloud(&session.base(), hosted.upstream)?;
-            if target.wire() != entry.model.wire {
-                return Err(WorkModelError::BadRequest);
-            }
-            let observer = session.clone();
-            let mut client = LeadClient::new(target, session.credential(), entry.price.clone())
-                .with_cloud_observer(Arc::new(move |record| {
-                    if let (Some(id), Some(source)) = (&record.request_id, &source) {
-                        observer.sourced(id, source);
-                    }
-                    observer.recorded(record);
-                }));
-            if let Some(max) = hosted.max_request_bytes {
-                client = client.with_request_limit(max);
-            }
-            if let Some(calls) = hosted.max_search_calls {
-                client = client.with_search_limit(calls);
-            }
-            client = client.with_call_limits(hosted.idle_timeout_ms, hosted.max_duration_ms);
-            return Ok(Arc::new(Observed {
-                inner: client,
-                provider,
-                generation: state.generations.get(&provider).copied().unwrap_or(0),
-            }));
-        }
+        // The deprecated hosted provider has no client.
+        P::Cloud => return Err(WorkModelError::BadRequest),
         P::Compatible => (
             LeadTarget::compatible(&compatible_base().ok_or(WorkModelError::MissingKey)?)?,
             Arc::new(CompatibleCredential {
@@ -1033,20 +739,10 @@ pub async fn resolve_entry(
     profile: ProfileId,
     role: WorkModelRole,
 ) -> Result<(WorkModelEntry, Arc<dyn WorkModelClient>), WorkModelError> {
-    resolve_entry_for(profile, role, None).await
-}
-
-/// Like [`resolve_entry`], with the task a hosted model's calls are made for,
-/// so its request ids can be grouped by task in the usage history.
-pub async fn resolve_entry_for(
-    profile: ProfileId,
-    role: WorkModelRole,
-    source: Option<WorkCallSource>,
-) -> Result<(WorkModelEntry, Arc<dyn WorkModelClient>), WorkModelError> {
     ensure_presence().await;
     let state = state();
     let entry = effective(&state, profile, role).ok_or(WorkModelError::MissingKey)?;
-    let client = client_for(&state, &entry, source)?;
+    let client = client(&state, &entry)?;
     Ok((entry, client))
 }
 
@@ -1069,12 +765,6 @@ pub struct WorkModelsView {
     /// What each role runs with now.
     pub effective: [Option<String>; 3],
     pub providers: Vec<WorkProviderView>,
-    pub cloud_signed_in: bool,
-    pub cloud_plan: Option<String>,
-    /// Hosted models listed for this account but locked by its plan.
-    pub cloud_locked: Vec<String>,
-    /// The cheapest plan each locked model needs, when the server says.
-    pub cloud_locked_plans: Vec<(String, Option<String>)>,
     /// The efforts each entry takes as a lead, for entries that take any.
     pub efforts: Vec<(String, Vec<WorkModelReasoning>)>,
     /// The effort the lead runs at now; `None` when its model takes none.
@@ -1099,7 +789,7 @@ pub async fn view(profile: ProfileId) -> WorkModelsView {
     }
     let efforts = entries
         .iter()
-        .map(|entry| (entry.id.clone(), efforts(&state, entry)))
+        .map(|entry| (entry.id.clone(), efforts(entry)))
         .filter(|(_, levels)| !levels.is_empty())
         .collect();
     let providers = KEYED_PROVIDERS
@@ -1116,20 +806,6 @@ pub async fn view(profile: ProfileId) -> WorkModelsView {
         chosen,
         effective,
         providers,
-        cloud_signed_in: cloud().is_some(),
-        cloud_plan: cloud().and_then(|session| session.plan()),
-        cloud_locked_plans: state
-            .cloud
-            .iter()
-            .filter(|model| !model.available)
-            .map(|model| (model.entry.id.clone(), model.plan_min.clone()))
-            .collect(),
-        cloud_locked: state
-            .cloud
-            .iter()
-            .filter(|model| !model.available)
-            .map(|model| model.entry.id.clone())
-            .collect(),
         efforts,
         effort,
     }
@@ -1154,11 +830,7 @@ pub fn choose(
                 .chain(state.listed.values().flatten().cloned())
                 .find(|entry| entry.id == id)
                 .ok_or(WorkModelError::BadRequest)?;
-            let locked = state
-                .cloud
-                .iter()
-                .any(|model| model.entry.id == id && !model.available);
-            if locked {
+            if entry.model.provider == P::Cloud {
                 return Err(WorkModelError::BadRequest);
             }
             if !entry.roles.contains(&role) && !entry.roles.contains(&WorkModelRole::Lead) {
@@ -1449,13 +1121,6 @@ pub async fn more_models(
     state().listed.insert(provider, listed.clone());
     notify();
     Ok(listed)
-}
-
-#[doc(hidden)]
-pub fn cloud_session_for_tests(session: Option<Arc<dyn WorkCloudSession>>) {
-    if let Ok(mut slot) = CLOUD.write() {
-        *slot = session;
-    }
 }
 
 #[doc(hidden)]
@@ -2135,133 +1800,50 @@ mod tests {
             WorkSearchReadiness::Native(entry) if entry.model.provider == P::Anthropic
         ));
 
-        // Signed in with no keys, hosted models carry every role.
-        struct Session;
-        impl WorkCloudSession for Session {
-            fn signed_in(&self) -> bool {
-                true
-            }
-            fn plan(&self) -> Option<String> {
-                Some("free".into())
-            }
-            fn base(&self) -> String {
-                "https://api.zephium.app".into()
-            }
-            fn credential(&self) -> Arc<dyn LeadCredential> {
-                Arc::new(LeadStaticCredential::new(
-                    LeadSecret::new("session".into()).unwrap(),
-                ))
-            }
-        }
-        let hosted = profile_id(43);
-        with_keys(&[]);
-
-        // Readers that ask together share one catalog fetch, and a fetch that
-        // failed is not repeated on the next read.
-        static ASKED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        struct Refused;
-        impl LeadCredential for Refused {
-            fn secret(&self) -> LeadSecretFuture<'_> {
-                ASKED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Box::pin(async { Err(WorkModelError::MissingKey) })
-            }
-            fn rejected(&self) {}
-        }
-        struct Failing;
-        impl WorkCloudSession for Failing {
-            fn signed_in(&self) -> bool {
-                true
-            }
-            fn plan(&self) -> Option<String> {
-                None
-            }
-            fn base(&self) -> String {
-                "https://api.zephium.app".into()
-            }
-            fn credential(&self) -> Arc<dyn LeadCredential> {
-                Arc::new(Refused)
-            }
-        }
-        install_cloud_session(Arc::new(Failing));
-        cloud_session_changed();
-        tokio::join!(
-            refresh_cloud_catalog(),
-            refresh_cloud_catalog(),
-            refresh_cloud_catalog()
+        // The removed hosted provider is never usable, choosable or called, and
+        // a choice saved for it before is ignored so the role falls back.
+        let stale = profile_id(43);
+        with_keys(&[P::OpenAi]);
+        let hosted_entry = WorkModelEntry {
+            id: "zephium/fast".into(),
+            model: WorkModelRef {
+                provider: P::Cloud,
+                wire: WorkModelWire::OpenAiResponses,
+                model: "gpt-6-luna".into(),
+            },
+            display_name: "Hosted".into(),
+            roles: vec![WorkModelRole::Lead],
+            recommended: true,
+            context_window: 128_000,
+            max_output: 8_192,
+            supports: WorkModelSupports {
+                tools: true,
+                vision: false,
+                prompt_cache: false,
+                reasoning: false,
+                native_search: false,
+            },
+            price: None,
+        };
+        state().choices.insert(
+            choice_key(stale, WorkModelRole::Lead),
+            StoredChoice {
+                entry: hosted_entry.clone(),
+                local_price: None,
+                pricing_endpoint: None,
+            },
         );
-        refresh_cloud_catalog().await;
-        assert_eq!(ASKED.load(std::sync::atomic::Ordering::SeqCst), 1);
-
-        install_cloud_session(Arc::new(Session));
-        state().cloud = models::parse_cloud(&serde_json::json!({"models": [
-            {"id": "fast", "provider": "openai", "upstream_model": "gpt-6-luna",
-             "display_name": "GPT-6 Luna", "roles": ["lead", "page", "light"], "recommended": true,
-             "supports": {"tools": true, "vision": true}},
-            {"id": "deep", "provider": "anthropic", "upstream_model": "claude-opus-5-5",
-             "display_name": "Claude Opus 5.5", "roles": ["lead"], "recommended": true,
-             "supports": {"tools": true}}
-        ]}));
-        assert!(ready(hosted).await);
-        let lead = effective(&state(), hosted, WorkModelRole::Lead).unwrap();
-        assert_eq!(lead.model.provider, P::Cloud);
-        assert!(client(&state(), &lead).is_ok());
-        let view = view(hosted).await;
-        assert!(view.cloud_signed_in);
-        assert_eq!(view.cloud_plan.as_deref(), Some("free"));
-        assert!(view.entries.iter().any(|entry| entry.id == "zephium/deep"));
-        choose(hosted, WorkModelRole::Lead, Some("zephium/deep")).unwrap();
-        assert_eq!(
-            effective(&state(), hosted, WorkModelRole::Lead).unwrap().id,
-            "zephium/deep"
-        );
-
-        // A plan-locked model stays listed but is never chosen or called, and
-        // the server's defaults decide each role; a null one is not guessed.
-        let catalog = serde_json::json!({
-            "defaults": {"lead": "fast", "page": null, "light": "fast", "decision": null},
-            "models": [
-                {"id": "fast", "provider": "openai", "upstream_model": "gpt-6-luna",
-                 "display_name": "GPT-6 Luna", "roles": ["lead", "page", "light"],
-                 "available": true, "supports": {"tools": true}},
-                {"id": "deep", "provider": "anthropic", "upstream_model": "claude-opus-5-5",
-                 "display_name": "Claude Opus 5.5", "roles": ["lead"], "recommended": true,
-                 "available": false, "supports": {"tools": true}}
-            ]
-        });
-        state().cloud = models::parse_cloud(&catalog);
-        state().cloud_defaults = models::parse_cloud_defaults(&catalog);
-        assert_eq!(effective(&state(), hosted, WorkModelRole::Lead), None);
-        let deep = stored_choice(&state(), hosted, WorkModelRole::Lead).unwrap();
-        assert_eq!(
-            client(&state(), &deep).err(),
-            Some(WorkModelError::BadRequest)
-        );
-        assert_eq!(
-            choose(hosted, WorkModelRole::Lead, Some("zephium/deep")),
-            Err(WorkModelError::BadRequest)
-        );
-        choose(hosted, WorkModelRole::Lead, None).unwrap();
-        let lead = effective(&state(), hosted, WorkModelRole::Lead).unwrap();
-        assert_eq!(lead.id, "zephium/fast");
-        choose(hosted, WorkModelRole::Lead, Some("zephium/fast")).unwrap();
+        assert_eq!(stored_choice(&state(), stale, WorkModelRole::Lead), None);
+        let lead = effective(&state(), stale, WorkModelRole::Lead).unwrap();
+        assert_eq!(lead.model.provider, P::OpenAi);
+        assert!(!usable(&state(), P::Cloud));
         assert_eq!(family_entry(&state(), P::Cloud, WorkModelRole::Page), None);
         assert_eq!(
-            super::view(hosted).await.cloud_locked,
-            vec!["zephium/deep".to_owned()]
+            client(&state(), &hosted_entry).err(),
+            Some(WorkModelError::BadRequest)
         );
-        assert_eq!(
-            super::view(hosted).await.cloud_locked_plans,
-            vec![("zephium/deep".to_owned(), None)]
-        );
-
-        // Signing out takes the hosted catalog with it; the choice stays for later.
-        if let Ok(mut slot) = CLOUD.write() {
-            *slot = None;
-        }
-        cloud_session_changed();
-        assert!(state().cloud.is_empty());
-        assert!(!ready(hosted).await);
-        assert!(stored_choice(&state(), hosted, WorkModelRole::Lead).is_some());
+        assert!(!key_usable(P::Cloud).await);
+        state().choices.clear();
 
         // The lead's effort is the profile's, held to what each model takes.
         let tuned = profile_id(44);

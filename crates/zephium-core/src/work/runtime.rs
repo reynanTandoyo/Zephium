@@ -1719,7 +1719,10 @@ pub enum WorkModelFaultV1 {
     ProviderCredit,
     /// The provider plan's per-minute limit is smaller than one request.
     PlanLimit,
-    /// The account's included Zephium AI usage, and any extra, is spent.
+    // The variants from `HostedUsage` to `SignedOut` are deprecated: the hosted
+    // Zephium AI service was removed in this fork and nothing produces them.
+    // They stay so stored runs that carry them still parse.
+    /// Deprecated, never produced: hosted usage spent.
     HostedUsage,
     /// The chosen Zephium AI model needs another plan.
     PlanRequired,

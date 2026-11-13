@@ -53,8 +53,6 @@ const EMULATION_INSTRUCTIONS: &str = "Answer the code-owned typed questions agai
 pub enum DecisionBackendKind {
     /// Direct TypeSafe BYOK.
     Jev,
-    /// Same Jev wire protocol through the session's cloud endpoint.
-    JevCloud,
     /// Existing OpenAI structured-output transport.
     Emulation,
 }
@@ -417,24 +415,6 @@ impl JevDecisionClient {
         )
     }
 
-    /// Trusted session configuration only: HTTPS base URL, never page/model data.
-    /// The bearer must be the zeroizing cloud-session credential, not a BYOK key.
-    pub fn cloud(
-        transport: AgentProviderTransport,
-        credential: AgentProviderCredential<DecisionCredentialProvider>,
-        base_url: &str,
-    ) -> Result<Self, DecisionCallFailure> {
-        if credential.provider() != DecisionCredentialProvider::ZephiumCloud {
-            return Err(DecisionCallFailure::Unauthorized);
-        }
-        Self::new(
-            transport,
-            credential,
-            cloud_endpoint(base_url)?,
-            DecisionBackendKind::JevCloud,
-        )
-    }
-
     fn new(
         transport: AgentProviderTransport,
         credential: AgentProviderCredential<DecisionCredentialProvider>,
@@ -709,25 +689,6 @@ impl JevDecisionClient {
 
 fn jev_cost(input_tokens: u32) -> u64 {
     (u64::from(input_tokens) * 42).div_ceil(1000)
-}
-
-fn cloud_endpoint(base: &str) -> Result<Url, DecisionCallFailure> {
-    let mut url = Url::parse(base).map_err(|_| DecisionCallFailure::InvalidRequest)?;
-    if url.scheme() != "https"
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || url.port().is_some_and(|port| port != 443)
-        || !matches!(url.host(), Some(url::Host::Domain(host)) if host.contains('.') && host != "localhost" && !host.ends_with(".localhost"))
-    {
-        return Err(DecisionCallFailure::InvalidRequest);
-    }
-    url.set_path(&format!(
-        "{}/v1/systemone",
-        url.path().trim_end_matches('/')
-    ));
-    Ok(url)
 }
 
 fn retry_delay(headers: &HeaderMap, attempt: u8, now: SystemTime) -> Option<Duration> {

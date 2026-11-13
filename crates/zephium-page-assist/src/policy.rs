@@ -17,7 +17,7 @@ pub struct TabFacts<'a> {
     pub sensitive: bool,
     /// The page has not finished its first load.
     pub loading: bool,
-    /// A model is set up: a Zephium account or a key.
+    /// A model is set up: a key or a local server.
     pub has_model: bool,
     /// This platform can read live tabs.
     pub supported: bool,

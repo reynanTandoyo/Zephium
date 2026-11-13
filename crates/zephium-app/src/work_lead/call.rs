@@ -181,10 +181,6 @@ pub(crate) async fn call(
         }
         let wait = match error {
             WorkModelError::RateLimited { retry_after_ms } => rate_limit_wait(retry_after_ms),
-            WorkModelError::Hosted {
-                refusal: HostedRefusal::AlreadySent,
-                ..
-            } => return Err(CallFailure::Lost),
             WorkModelError::Overloaded | WorkModelError::Network => {
                 Some(Duration::from_secs(2 + 3 * attempt as u64))
             }

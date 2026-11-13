@@ -20,13 +20,6 @@ pub enum AgentBrowserDecisionProvider {
     TypeSafe(AgentProviderCredential<DecisionCredentialProvider>),
     /// TypeSafe selects actions only; unresolved choices return to the page planner.
     TypeSafeActions(AgentProviderCredential<DecisionCredentialProvider>),
-    /// Trusted cloud-session endpoint and its separately bound bearer.
-    Cloud {
-        /// HTTPS service base URL supplied by the cloud session, never a page.
-        base_url: String,
-        /// Zeroizing cloud-session credential; a BYOK key is refused.
-        credential: AgentProviderCredential<DecisionCredentialProvider>,
-    },
 }
 
 pub(super) struct BrowserDecisions {
@@ -92,14 +85,6 @@ impl AgentBrowserSession {
             | AgentBrowserDecisionProvider::TypeSafeActions(credential) => Some(
                 JevDecisionClient::direct(self.transport.0.clone(), credential),
             ),
-            AgentBrowserDecisionProvider::Cloud {
-                base_url,
-                credential,
-            } => Some(JevDecisionClient::cloud(
-                self.transport.0.clone(),
-                credential,
-                &base_url,
-            )),
         }
         .transpose();
         let jev = match jev {

@@ -56,7 +56,7 @@ pub enum PageAssistAvailabilityV1 {
     NotWeb,
     /// Banks, payments, health and government sites are never read.
     Sensitive,
-    /// No model is set up: no Zephium account and no key.
+    /// No model is set up: no key and no local server.
     NoModel,
     /// The page is still loading; ask again when it settles.
     Loading,
@@ -74,8 +74,6 @@ pub struct PageAssistModelV1 {
     pub id: String,
     /// Display name, such as GPT-6 Luna.
     pub name: String,
-    /// Zephium AI (credits) rather than the person's own key.
-    pub hosted: bool,
     /// The effort it runs at, such as "high"; null when it has none.
     pub effort: Option<String>,
 }
@@ -425,8 +423,8 @@ pub enum PageAssistBlockV1 {
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PageAssistCostV1 {
-    /// Zephium AI. `credits` is a decimal string such as "0.3"; null while
-    /// the charge is being confirmed.
+    /// Deprecated, never produced: the hosted Zephium AI service was removed in
+    /// this fork. Kept so stored replies that carry it still parse.
     Hosted {
         model: String,
         credits: Option<String>,

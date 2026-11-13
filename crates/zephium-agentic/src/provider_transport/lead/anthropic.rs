@@ -28,8 +28,7 @@ pub(super) fn budget_thinking(model: &str) -> bool {
 }
 
 /// Direct search without dynamic filtering. The filtering versions run search
-/// from provisioned code execution, whose blocks a replay must carry exactly,
-/// and Zephium Cloud admits only this version.
+/// from provisioned code execution, whose blocks a replay must carry exactly.
 const SEARCH_TOOL: &str = "web_search_20250305";
 
 pub(super) fn body(
@@ -133,10 +132,7 @@ pub(super) fn body(
         .collect();
     let model = request.model.model.as_str();
     if target.native_search(request) {
-        let uses = target
-            .search_calls
-            .map_or(SEARCH_MAX_USES, |calls| calls.min(SEARCH_MAX_USES));
-        tools.push(json!({"type": SEARCH_TOOL, "name": "web_search", "max_uses": uses}));
+        tools.push(json!({"type": SEARCH_TOOL, "name": "web_search", "max_uses": SEARCH_MAX_USES}));
     }
     let mut body = Map::new();
     body.insert("model".into(), json!(model));

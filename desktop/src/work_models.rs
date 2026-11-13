@@ -55,23 +55,6 @@ pub(crate) struct WorkModelRolesV1 {
     pub(crate) light: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, specta::Type)]
-pub(crate) struct WorkCloudStatusV1 {
-    pub(crate) signed_in: bool,
-    pub(crate) plan: Option<String>,
-    /// Hosted entries listed for this account but locked by its plan: shown
-    /// to explain the plan, never choosable.
-    pub(crate) locked: Vec<String>,
-    /// The cheapest plan each locked entry needs, when the server states it.
-    pub(crate) required: Vec<WorkLockedPlanV1>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, specta::Type)]
-pub(crate) struct WorkLockedPlanV1 {
-    pub(crate) id: String,
-    pub(crate) plan: Option<String>,
-}
-
 /// The efforts one entry takes as the lead, weakest first.
 #[derive(Clone, Debug, Serialize, Deserialize, specta::Type)]
 pub(crate) struct WorkModelEffortsV1 {
@@ -89,7 +72,6 @@ pub(crate) struct WorkModelsV1 {
     /// What each role runs with now; null when no provider is usable.
     pub(crate) effective: WorkModelRolesV1,
     pub(crate) providers: Vec<WorkProviderStatusV1>,
-    pub(crate) cloud: WorkCloudStatusV1,
     pub(crate) fault: Option<WorkModelsFaultV1>,
     /// Entries that take an effort; the rest take none.
     pub(crate) efforts: Vec<WorkModelEffortsV1>,
@@ -106,7 +88,6 @@ impl WorkModelsV1 {
             chosen: WorkModelRolesV1::default(),
             effective: WorkModelRolesV1::default(),
             providers: Vec::new(),
-            cloud: WorkCloudStatusV1::default(),
             fault: Some(fault),
             efforts: Vec::new(),
             effort: None,
@@ -231,16 +212,6 @@ mod product {
                     base: provider.base,
                 })
                 .collect(),
-            cloud: WorkCloudStatusV1 {
-                signed_in: view.cloud_signed_in,
-                plan: view.cloud_plan,
-                locked: view.cloud_locked,
-                required: view
-                    .cloud_locked_plans
-                    .into_iter()
-                    .map(|(id, plan)| WorkLockedPlanV1 { id, plan })
-                    .collect(),
-            },
             fault,
             efforts: view
                 .efforts
@@ -253,11 +224,7 @@ mod product {
 
     pub(super) async fn act(profile: ProfileId, action: Action) -> Option<WorkModelsFaultV1> {
         let result = match action {
-            Action::Read => {
-                // Refreshes only a stale hosted catalog, at most hourly.
-                tauri::async_runtime::spawn(models::refresh_cloud_catalog());
-                Ok(())
-            }
+            Action::Read => Ok(()),
             Action::Choose(role, id) => models::choose(profile, role, id.as_deref()),
             Action::Effort(effort) => models::set_effort(profile, effort),
             Action::SetKey(provider, secret) => match models::set_key(provider, secret).await {

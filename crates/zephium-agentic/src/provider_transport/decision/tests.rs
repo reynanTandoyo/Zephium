@@ -2648,38 +2648,6 @@ fn retry_after_honors_dates_and_refuses_malformed_values() {
     assert_eq!(retry_delay(&headers, 1, now), None);
 }
 
-#[test]
-fn cloud_endpoint_and_credentials_are_bound_independently_of_page_data() {
-    assert_eq!(
-        cloud_endpoint("https://cloud.zephium.app/decisions/")
-            .unwrap()
-            .path(),
-        "/decisions/v1/systemone"
-    );
-    for base in [
-        "http://cloud.zephium.app",
-        "https://user@cloud.zephium.app",
-        "https://cloud.zephium.app?token=secret",
-        "https://cloud.zephium.app/#fragment",
-        "https://127.0.0.1",
-        "https://localhost",
-        "https://cloud.zephium.app:8443",
-    ] {
-        assert!(cloud_endpoint(base).is_err());
-    }
-    let credential = AgentProviderCredential::try_new(
-        DecisionCredentialProvider::ZephiumCloud,
-        "fixture-secret".into(),
-    )
-    .unwrap();
-    assert!(!format!("{credential:?}").contains("fixture-secret"));
-    assert!(JevDecisionClient::direct(
-        AgentProviderTransport::try_new(AgentProviderTransportConfig::STANDARD).unwrap(),
-        credential
-    )
-    .is_err());
-}
-
 fn search_ranking_fixture(
     count: usize,
 ) -> (

@@ -154,7 +154,6 @@ struct ReplyData {
     outlines: HashMap<usize, Outline>,
     styles: HashMap<u16, PendingStyle>,
     handoffs: HashMap<u16, WorkStart>,
-    credits: Option<String>,
     /// The tab the reply works in: the attached page, then wherever go_to went.
     working: Option<String>,
 }
@@ -475,8 +474,6 @@ impl PageAssist {
             .await
             .map(|choice| PageAssistModelV1 {
                 id: choice.entry.id.clone(),
-                hosted: choice.entry.model.provider
-                    == zephium_core::work::model::WorkModelProvider::Cloud,
                 name: choice.entry.display_name,
                 effort: choice
                     .effort
@@ -1377,36 +1374,6 @@ impl PageAssist {
             self.ports().page.marks_clear(&tab);
         }
         self.emit_all(events);
-    }
-
-    /// A hosted call of a reply is confirmed; the reply's charge adds up.
-    pub fn settle_hosted(&self, conversation: &str, reply: u32, credits: String) {
-        let cost = (|| {
-            let mut state = self.state();
-            let live = state.live.get_mut(conversation)?;
-            let model = live
-                .conversation
-                .messages()
-                .iter()
-                .find_map(|message| match message {
-                    PageAssistMessageV1::Reply {
-                        id,
-                        cost: Some(PageAssistCostV1::Hosted { model, .. }),
-                        ..
-                    } if *id == reply => Some(model.clone()),
-                    _ => None,
-                });
-            let data = live.replies.get_mut(&reply)?;
-            let total = zephium_page_assist::cost::add_credits(data.credits.as_deref(), &credits)?;
-            data.credits = Some(total.clone());
-            model.map(|model| PageAssistCostV1::Hosted {
-                model,
-                credits: Some(total),
-            })
-        })();
-        if let Some(cost) = cost {
-            self.apply(conversation, reply, PageAssistEventV1::Cost { cost });
-        }
     }
 
     // ------------------------------------------------------------ page styles

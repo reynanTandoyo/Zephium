@@ -1,48 +1,32 @@
 //! Model failures and costs in the panel's closed words.
 use zephium_core::work::model::{
-    HostedRefusal, WorkModelEntry, WorkModelError, WorkModelProvider, WorkModelUsage,
+    WorkModelEntry, WorkModelError, WorkModelProvider, WorkModelUsage,
 };
 use zephium_ipc::page_assist::{PageAssistCostV1, PageAssistFaultV1, WorkModelFaultV1};
 use zephium_page_assist::cost;
 
 /// A failed model call as the person can act on it.
-pub(crate) fn model_fault(error: WorkModelError, hosted: bool) -> PageAssistFaultV1 {
+pub(crate) fn model_fault(error: WorkModelError) -> PageAssistFaultV1 {
     let retry_after_ms = match error {
-        WorkModelError::RateLimited { retry_after_ms }
-        | WorkModelError::Hosted { retry_after_ms, .. } => {
+        WorkModelError::RateLimited { retry_after_ms } => {
             retry_after_ms.map(|ms| u32::try_from(ms).unwrap_or(u32::MAX))
         }
         _ => None,
     };
     let fault = match error {
-        WorkModelError::MissingKey | WorkModelError::Unauthorized if hosted => {
-            WorkModelFaultV1::SignedOut
-        }
         WorkModelError::MissingKey => WorkModelFaultV1::MissingKey,
         WorkModelError::Unauthorized => WorkModelFaultV1::KeyRefused,
-        WorkModelError::OverBudget if hosted => WorkModelFaultV1::HostedUsage,
         WorkModelError::OverBudget => WorkModelFaultV1::ProviderCredit,
         WorkModelError::PlanLimit => WorkModelFaultV1::PlanLimit,
-        WorkModelError::Hosted { refusal, .. } => match refusal {
-            HostedRefusal::PlanRequired => WorkModelFaultV1::PlanRequired,
-            HostedRefusal::BillingReview => WorkModelFaultV1::BillingReview,
-            HostedRefusal::OutOfCredits => WorkModelFaultV1::HostedUsage,
-            HostedRefusal::DailyLimit => WorkModelFaultV1::DailyLimit,
-            HostedRefusal::FreeUsagePaused => WorkModelFaultV1::FreeUsagePaused,
-            HostedRefusal::ConfirmationLimited => WorkModelFaultV1::HostedBusy,
-            HostedRefusal::Paused => WorkModelFaultV1::HostedPaused,
-            HostedRefusal::AlreadySent
-            | HostedRefusal::InvalidAudio
-            | HostedRefusal::UnsupportedAudio
-            | HostedRefusal::AudioTooLong => return PageAssistFaultV1::Unavailable,
-        },
         WorkModelError::RateLimited { .. } => WorkModelFaultV1::RateLimited,
         WorkModelError::Overloaded => WorkModelFaultV1::ProviderDown,
         WorkModelError::Network => WorkModelFaultV1::Unreachable,
         WorkModelError::ContextTooLong => WorkModelFaultV1::TooLarge,
-        WorkModelError::BadRequest | WorkModelError::Protocol | WorkModelError::Cancelled => {
-            return PageAssistFaultV1::Unavailable
-        }
+        // `Hosted` belongs to the removed Zephium AI service and is never produced.
+        WorkModelError::BadRequest
+        | WorkModelError::Protocol
+        | WorkModelError::Cancelled
+        | WorkModelError::Hosted { .. } => return PageAssistFaultV1::Unavailable,
     };
     PageAssistFaultV1::Model {
         fault,
@@ -63,18 +47,15 @@ pub(crate) fn provider_name(provider: WorkModelProvider) -> &'static str {
         WorkModelProvider::Groq => "Groq",
         WorkModelProvider::Cerebras => "Cerebras",
         WorkModelProvider::Compatible => "your server",
+        // Deprecated and never offered; named only so the match stays total.
         WorkModelProvider::Cloud => "Zephium",
     }
 }
 
-/// The cost line for a finished call. Hosted charges are confirmed later.
+/// The cost line for a finished call.
 pub(crate) fn cost(entry: &WorkModelEntry, usage: &WorkModelUsage) -> PageAssistCostV1 {
     let model = entry.display_name.clone();
     match entry.model.provider {
-        WorkModelProvider::Cloud => PageAssistCostV1::Hosted {
-            model,
-            credits: None,
-        },
         _ if entry.is_free_compatible() => PageAssistCostV1::Local { model },
         provider => {
             let micros = usage.cost_micros.or_else(|| {
@@ -139,41 +120,25 @@ mod tests {
     }
 
     #[test]
-    fn faults_keep_the_retry_hint_and_hosting() {
+    fn faults_keep_the_retry_hint_and_name_the_providers_key() {
         assert_eq!(
-            model_fault(
-                WorkModelError::RateLimited {
-                    retry_after_ms: Some(7_000)
-                },
-                false
-            ),
+            model_fault(WorkModelError::RateLimited {
+                retry_after_ms: Some(7_000)
+            }),
             PageAssistFaultV1::Model {
                 fault: WorkModelFaultV1::RateLimited,
                 retry_after_ms: Some(7_000)
             }
         );
         assert_eq!(
-            model_fault(WorkModelError::MissingKey, true),
+            model_fault(WorkModelError::MissingKey),
             PageAssistFaultV1::Model {
-                fault: WorkModelFaultV1::SignedOut,
+                fault: WorkModelFaultV1::MissingKey,
                 retry_after_ms: None
             }
         );
         assert_eq!(
-            model_fault(
-                WorkModelError::Hosted {
-                    refusal: HostedRefusal::DailyLimit,
-                    retry_after_ms: Some(u64::MAX)
-                },
-                true
-            ),
-            PageAssistFaultV1::Model {
-                fault: WorkModelFaultV1::DailyLimit,
-                retry_after_ms: Some(u32::MAX)
-            }
-        );
-        assert_eq!(
-            model_fault(WorkModelError::Protocol, false),
+            model_fault(WorkModelError::Protocol),
             PageAssistFaultV1::Unavailable
         );
     }

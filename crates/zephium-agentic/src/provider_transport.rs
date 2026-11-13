@@ -198,8 +198,6 @@ impl AgentCredentialBinding for DecisionCredentialProvider {}
 pub enum DecisionCredentialProvider {
     /// Direct TypeSafe BYOK endpoint.
     TypeSafe,
-    /// Session bearer for the Zephium decision proxy.
-    ZephiumCloud,
 }
 
 impl<P: AgentCredentialBinding> AgentProviderCredential<P> {
