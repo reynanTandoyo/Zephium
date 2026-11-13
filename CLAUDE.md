@@ -74,6 +74,7 @@ Rule precedence, highest first:
 | `TODO.md` | shared task list with lock protocol |
 | `PROJECT_STRUCTURE.md` | repository map and summary |
 | `desktop/tauri.custom.conf.json` | "Zephium Custom" identity (`app.zephium.custom`), updater pointed at this fork, NSIS-only bundle |
+| `NativeApplication::Custom` (`zephium-private-fs` native_storage.rs) and its mapping in `zephium-store` `windows_work_storage.rs` | Windows storage only admits listed identities. Without this entry "Zephium Custom" fails at startup with "private filesystem path or node is unsafe". A new identity must be added here too |
 | `build:custom` script in `package.json` and `desktop/package.json` | builds the custom installer |
 | `.gitignore` (last lines) and the pointer at the end of `AGENTS.md` | fork additions to upstream files |
 | Removal of the Zephium account and hosted "Zephium AI" (T-0007) | deleted `crates/zephium-account`, `desktop/src/account*`, frame `domain/account`, `features/account`, settings account pages; Cloud provider code removed across agentic/app/work-composition/desktop/frame. Upstream changes to these files will conflict: keep them deleted |

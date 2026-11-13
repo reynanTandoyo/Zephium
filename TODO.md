@@ -64,7 +64,7 @@ One task is one bullet in exactly one status section:
   it waits for.
 - Keep entries short. Design notes belong in `docs/` or a PR, not here.
 
-Last ID: T-0008
+Last ID: T-0009
 
 ## In progress
 
@@ -72,12 +72,8 @@ Last ID: T-0008
   - Branch `remove-account` (from `custom`). The account holds only identity, plan, usage, billing and avatar on `api.zephium.app`. Browser settings are local.
   - **Keep** `zephium-app` `work_account*` and `WorkOperationV1::PrepareAccount`: these handle *website* account approvals, not the Zephium account.
   - Keep the persisted serde variants (`WorkModelProvider::Cloud`, hosted `WorkModelFaultV1`, `PageAssistCostV1::Hosted`) as deprecated and never produced, so saved runs and conversations still load.
-  - 2026-11-13: committed on `remove-account`. Passing: `cargo clippy --workspace --all-targets --locked -- -D warnings`, tests for app/agentic/work-composition/page-assist, `pnpm --dir frame run check` (1336 tests), frame build and `check:styles`. 10 `zephium-app` Windows tests (work_files, work_personal, work_lead, export) fail identically on the baseline. Component tests were not run (no browser available). Remaining: build the installer with `pnpm build:custom`, launch it once, then merge into `custom`.
-
-- [ ] T-0001 · Build and verify the "Zephium Custom" installer · area: desktop · owner: user (install check) · updated: 2026-11-13
-  - `pnpm build:custom` → `target\release\bundle\nsis\Zephium Custom_<ver>_x64-setup.exe`.
-  - Done when it installs next to the official Zephium with its own profile (`app.zephium.custom`) and starts.
-  - Built 2026-11-13: `Zephium Custom_1.0.5_x64-setup.exe` (16.1 MiB), release build 9m 44s, exit 0. Not yet installed or launched.
+  - 2026-11-13: committed on `remove-account`. Passing: `cargo clippy --workspace --all-targets --locked -- -D warnings`, tests for app/agentic/work-composition/page-assist, `pnpm --dir frame run check` (1336 tests), frame build and `check:styles`. 10 `zephium-app` Windows tests (work_files, work_personal, work_lead, export) fail identically on the baseline. Component tests were not run (no browser available).
+  - 2026-11-13: the release build launches and shows its window (see T-0009). Remaining: merge `remove-account` into `custom` once the user approves.
 
 ## Open
 
@@ -100,6 +96,12 @@ Last ID: T-0008
 ## Blocked
 
 ## Done
+
+- [x] T-0009 · "Zephium Custom" refused to start: "private filesystem path or node is unsafe" · area: zephium-private-fs, zephium-store · owner: claude-main · updated: 2026-11-13
+  - Cause: Windows Work storage accepts only a closed list of app identities, and `app.zephium.custom` was not on it. Added `NativeApplication::Custom` (folder `app.zephium.custom`), its mapping in `WindowsWorkStorage::for_application` and its test entry. An early theory about the `S-1-15-3-…` ACE on `%USERPROFILE%\AppData` was wrong, and that ACE needs no change.
+  - Verified: `cargo test -p zephium-store --features work-execution application_selection`, workspace clippy, `pnpm build:custom`, then a release launch showed the window after 784 ms.
+- [x] T-0001 · Build and verify the "Zephium Custom" installer · area: desktop · owner: claude-main · updated: 2026-11-13
+  - `Zephium Custom_1.0.5_x64-setup.exe` built and the release executable starts with its own profile `%APPDATA%\app.zephium.custom`. Not yet installed through the installer.
 
 - [x] T-0003 · Commit the fork files and push branch `custom` to `origin` · area: repo root · owner: claude-main · updated: 2026-11-13
   - Commit `0564fa74a` on `custom`, pushed to `origin/custom` and tracking it. `main` stays a clean mirror of upstream.
