@@ -1,0 +1,27 @@
+[package]
+name = "zephium-cli-models"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Fork: AI apps on this computer (Claude Code, Antigravity, OpenCode) as plain model backends"
+
+[[bin]]
+# A stand-in for the AI apps that the tests run instead of the real ones.
+name = "zephium-cli-models-fake"
+path = "src/bin/fake.rs"
+test = false
+
+[dependencies]
+zephium-core.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "time"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["process", "io-util", "time", "rt-multi-thread", "macros"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.186"

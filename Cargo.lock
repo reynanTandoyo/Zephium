@@ -7481,6 +7481,7 @@ dependencies = [
  "zephium-agent-provider-transport",
  "zephium-agent-runtime",
  "zephium-agentic",
+ "zephium-cli-models",
  "zephium-core",
  "zephium-ipc",
  "zephium-mcp",
@@ -7543,6 +7544,18 @@ dependencies = [
  "zephium-blocker",
  "zephium-core",
  "zephium-update-transport",
+]
+
+[[package]]
+name = "zephium-cli-models"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "windows",
+ "zephium-core",
 ]
 
 [[package]]
