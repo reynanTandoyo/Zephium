@@ -207,3 +207,32 @@ fn the_player_follows_its_tab_across_spaces_and_goes_to_it() {
     assert_eq!((window.space, window.active), (home, Some(item)));
     assert_eq!(player(&shell), None);
 }
+
+#[test]
+fn showing_the_player_tab_leaves_mail_and_calendar_but_not_work() {
+    for (mode, stays) in [
+        (crate::BrowserPage::Work, true),
+        (crate::BrowserPage::Mail, false),
+        (crate::BrowserPage::Calendar, false),
+    ] {
+        let (mut shell, _engine, _screen, item) = ready();
+        let home = shell.windows.focused().unwrap().space;
+        report(&mut shell, item, Some(media("1", true)));
+        shell.handle(Command::Space(Box::new(crate::SpaceCommand::Create {
+            name: "Other".into(),
+            look: Default::default(),
+        })));
+        shell.handle_operation(Command::ShowBrowserPage(Some(mode)));
+        assert_eq!(shell.active_browser_page(), Some(mode));
+
+        let shown = shell.operation_media_player(item, MediaPlayerAction::Show);
+        assert_ne!(shown.outcome, OperationOutcome::Rejected, "{mode:?}");
+        let window = shell.windows.focused().unwrap();
+        assert_eq!(
+            (window.space, window.active),
+            (home, Some(item)),
+            "{mode:?}"
+        );
+        assert_eq!(shell.active_browser_page() == Some(mode), stays, "{mode:?}");
+    }
+}

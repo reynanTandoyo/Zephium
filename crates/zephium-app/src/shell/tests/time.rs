@@ -294,3 +294,44 @@ fn time_and_focus_off_records_nothing_ends_a_round_and_refuses_new_ones() {
     shell.handle(Command::Tick);
     assert!(spent(&store).is_empty());
 }
+
+#[test]
+fn mail_and_calendar_count_as_their_own_places() {
+    let store = Arc::new(FakeStore::default());
+    let (mut shell, _engine, screen) = setup_with(store.clone());
+    shell.handle(Command::Bootstrap);
+    let id = active_id(&screen);
+    navigate_and_commit(&mut shell, id, "https://github.com/");
+    shell.handle(Command::SetAppActive(true));
+
+    shell.handle(Command::ShowBrowserPage(Some(crate::BrowserPage::Mail)));
+    pause();
+    shell.handle(Command::ShowBrowserPage(Some(crate::BrowserPage::Calendar)));
+    pause();
+    shell.handle(Command::ShowBrowserPage(Some(crate::BrowserPage::Settings)));
+    pause();
+    shell.handle(Command::ShowBrowserPage(None));
+    shell.handle(Command::Tick);
+
+    let totals = spent(&store);
+    let of = |wanted: Place| {
+        totals
+            .iter()
+            .find(|(place, ..)| *place == wanted)
+            .map(|(_, ms, _)| *ms)
+            .unwrap_or_default()
+    };
+    assert!(of(Place::Mail) >= 40, "mail counted {} ms", of(Place::Mail));
+    assert!(
+        of(Place::Calendar) >= 40,
+        "calendar counted {} ms",
+        of(Place::Calendar)
+    );
+    assert_eq!(of(Place::Work), 0);
+    assert!(
+        !totals
+            .iter()
+            .any(|(place, ..)| matches!(place, Place::Site(site) if site.starts_with('@'))),
+        "a reserved key was stored as a site"
+    );
+}

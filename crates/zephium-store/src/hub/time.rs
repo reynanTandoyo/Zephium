@@ -55,10 +55,7 @@ fn time_batch_digest(
 }
 
 fn place_key(place: &Place) -> &str {
-    match place {
-        Place::Site(site) => site,
-        Place::Work => "",
-    }
+    place.key()
 }
 
 impl Hub {
@@ -352,6 +349,48 @@ mod tests {
         let profile = ProfileId::from(1);
         hub.registry.insert(profile);
         (hub, profile)
+    }
+
+    #[test]
+    fn mail_and_calendar_places_round_trip_beside_work_and_sites() {
+        let (mut hub, profile) = hub();
+        let day = 20_000 * 24;
+        // A row written before Mail and Calendar existed.
+        hub.time_profile(profile)
+            .unwrap()
+            .execute(
+                "INSERT INTO time_spent(hour,place,spent_ms,opens) VALUES (?1,'',1000,0),(?1,'old.test',2000,1)",
+                [day],
+            )
+            .unwrap();
+        hub.record_time(
+            profile,
+            &[
+                tally(day, Place::Mail, 5_000, 0),
+                tally(day, Place::Calendar, 4_000, 0),
+                tally(day, Place::Work, 300, 0),
+            ],
+            0,
+        )
+        .unwrap();
+        let query = |site: Option<&str>| TimeQuery {
+            from_hour: day,
+            bucket_hours: 1,
+            buckets: 1,
+            site: site.map(str::to_owned),
+        };
+        let report = hub.time_report(profile, &query(None)).unwrap();
+        assert_eq!(report.buckets[0].work_ms, 1_300);
+        assert_eq!(report.buckets[0].browse_ms, 11_000);
+        let ranked: Vec<_> = report
+            .sites
+            .iter()
+            .map(|entry| Place::from_key(&entry.site))
+            .collect();
+        assert_eq!(ranked, vec![Place::Mail, Place::Calendar, site("old.test")]);
+        let mail = hub.time_report(profile, &query(Some("@mail"))).unwrap();
+        assert_eq!(mail.buckets[0].browse_ms, 5_000);
+        assert_eq!(mail.buckets[0].work_ms, 0);
     }
 
     #[test]

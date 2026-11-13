@@ -8,6 +8,7 @@ import {
   liveBucket,
   localDay,
   localMs,
+  modePlace,
   normalizeSite,
   reportCall,
   shiftPeriod,
@@ -81,5 +82,15 @@ describe("sites", () => {
     expect(normalizeSite("192.168.1.1")).toBeNull();
     expect(normalizeSite("file:///etc")).toBeNull();
     expect(normalizeSite("")).toBeNull();
+  });
+});
+
+describe("modePlace", () => {
+  it("names Mail and Calendar by their reserved keys only", () => {
+    expect(modePlace("@mail")).toBe("mail");
+    expect(modePlace("@calendar")).toBe("calendar");
+    expect(modePlace("mail.example.com")).toBeNull();
+    expect(modePlace("")).toBeNull();
+    expect(normalizeSite("@mail")).toBeNull();
   });
 });

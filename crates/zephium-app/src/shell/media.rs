@@ -131,7 +131,8 @@ impl Shell {
     }
 
     /// The player can show a tab of another space; going to it shows that
-    /// space, arriving on the tab.
+    /// space, arriving on the tab. Work follows the space and stays up; every
+    /// other page, including Mail and Calendar, hides tabs and steps back first.
     pub(super) fn show_media_tab(&mut self, id: ItemId) -> OperationDisposition {
         if self.item_in_focused_scope(id) {
             return self.operation_activate(id);
@@ -143,7 +144,7 @@ impl Shell {
         };
         if self
             .active_browser_page()
-            .is_some_and(|page| !page.is_mode())
+            .is_some_and(|page| page != crate::BrowserPage::Work)
             && !self.browser_return_ready
         {
             self.browser_after_return = Some(Box::new(Command::MediaPlayer {

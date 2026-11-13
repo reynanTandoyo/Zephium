@@ -386,10 +386,9 @@ impl Shell {
         }
         let mut native = NativeWork::default();
         if id == current {
-            if self
-                .active_browser_page()
-                .is_some_and(crate::BrowserPage::is_mode)
-            {
+            // Work's canvas follows the space it is deleted from; Mail and
+            // Calendar belong to no space, so they stay up across the change.
+            if self.active_browser_page() == Some(crate::BrowserPage::Work) {
                 return rejected(OperationReason::InvalidScope);
             }
             let at = order.iter().position(|space| *space == id).unwrap_or(0);
