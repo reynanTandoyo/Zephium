@@ -2,6 +2,7 @@ import chatgpt from "../marks/chatgpt.svg";
 import chatgptDark from "../marks/chatgpt-dark.svg";
 import claude from "../marks/claude.svg";
 import figma from "../marks/figma.svg";
+import gemini from "../marks/gemini.svg";
 import github from "../marks/github.svg";
 import githubDark from "../marks/github-dark.svg";
 import gmail from "../marks/gmail.svg";
@@ -33,9 +34,22 @@ export const SITES: readonly Site[] = [
   { id: "figma", name: "Figma", mark: { light: figma } },
   { id: "chatgpt", name: "ChatGPT", mark: { light: chatgpt, dark: chatgptDark } },
   { id: "claude", name: "Claude", mark: { light: claude } },
+  { id: "gemini", name: "Gemini", mark: { light: gemini } },
   { id: "youtube", name: "YouTube", mark: { light: youtube } },
   { id: "spotify", name: "Spotify", mark: { light: spotify } },
   { id: "whatsapp", name: "WhatsApp", mark: { light: whatsapp } },
+];
+
+/** Fork: the sites already kept when the Essentials step first opens on a
+ *  run that has none yet, in dock order. The person can let any of them go
+ *  there, keep more, or drag tabs into Essentials later. */
+export const DEFAULT_ESSENTIALS: readonly string[] = [
+  "whatsapp",
+  "github",
+  "youtube",
+  "claude",
+  "gemini",
+  "spotify",
 ];
 
 /** The address native keeps for each site, so chrome can tell which of them
@@ -52,6 +66,7 @@ export const SITE_URLS: Readonly<Record<string, string>> = {
   figma: "https://www.figma.com/files",
   chatgpt: "https://chatgpt.com/",
   claude: "https://claude.ai/",
+  gemini: "https://gemini.google.com/app",
   youtube: "https://www.youtube.com/",
   spotify: "https://open.spotify.com/",
 };

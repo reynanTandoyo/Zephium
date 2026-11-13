@@ -38,6 +38,8 @@ pub(super) const KEPT_SITES: &[KeptSite] = &[
     site!("figma", "Figma", "https://www.figma.com/files"),
     site!("chatgpt", "ChatGPT", "https://chatgpt.com/"),
     site!("claude", "Claude", "https://claude.ai/"),
+    // Fork: Gemini joins the catalog.
+    site!("gemini", "Gemini", "https://gemini.google.com/app"),
     site!("youtube", "YouTube", "https://www.youtube.com/"),
     site!("spotify", "Spotify", "https://open.spotify.com/"),
     site!("whatsapp", "WhatsApp", "https://web.whatsapp.com/"),
