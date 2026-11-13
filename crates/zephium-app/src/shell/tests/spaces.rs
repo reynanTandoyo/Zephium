@@ -601,3 +601,30 @@ fn imported_essentials_keep_the_admitted_space_after_switching() {
     assert_eq!(essentials_of(&shell, studio).len(), 2);
     assert!(essentials_of(&shell, home).is_empty());
 }
+
+#[test]
+fn deleting_the_current_space_is_refused_in_work_but_not_in_mail_or_calendar() {
+    for (mode, refused) in [
+        (crate::BrowserPage::Work, true),
+        (crate::BrowserPage::Mail, false),
+        (crate::BrowserPage::Calendar, false),
+    ] {
+        let (mut shell, _engine, screen, _store) = browsed();
+        navigate_and_commit(&mut shell, active_id(&screen), "home.example");
+        let home = current(&shell);
+        let studio = create(&mut shell, "Studio", SpaceLook::default());
+        shell.handle_operation(Command::ShowBrowserPage(Some(mode)));
+        assert_eq!(shell.active_browser_page(), Some(mode));
+
+        let deleted = space_op(&mut shell, SpaceCommand::Delete(studio));
+        if refused {
+            assert_eq!(deleted.outcome, OperationOutcome::Rejected, "{mode:?}");
+            assert!(shell.spaces.get(studio).is_some(), "{mode:?}");
+        } else {
+            assert_ne!(deleted.outcome, OperationOutcome::Rejected, "{mode:?}");
+            assert!(shell.spaces.get(studio).is_none(), "{mode:?}");
+            assert_eq!(current(&shell), home, "{mode:?}");
+            assert_eq!(shell.active_browser_page(), Some(mode), "{mode:?}");
+        }
+    }
+}
