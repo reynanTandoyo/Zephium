@@ -3393,6 +3393,7 @@
   "model_app_needed": "{provider} 尚未就緒。請開啟設定進行安裝或登入。",
   "model_app_open": "開啟設定",
   "model_character_app": "使用你的 {app} 帳號",
+  "model_in_use": "使用中",
   "model_search_clear": "清除搜尋",
   "model_empty": "這裡還沒有可以選擇的模型。",
   "about_link_website": "網站",

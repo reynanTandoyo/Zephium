@@ -3393,6 +3393,7 @@
   "model_app_needed": "{provider} 尚未就绪。请打开设置进行安装或登录。",
   "model_app_open": "打开设置",
   "model_character_app": "使用你的 {app} 账号",
+  "model_in_use": "使用中",
   "model_search_clear": "清除搜索",
   "model_empty": "这里还没有可供选择的模型。",
   "about_link_website": "网站",

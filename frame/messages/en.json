@@ -3435,6 +3435,7 @@
   "model_app_needed": "{provider} isn’t ready yet. Open Settings to install it or sign in.",
   "model_app_open": "Open Settings",
   "model_character_app": "Uses your {app} account",
+  "model_in_use": "In use",
   "model_search_clear": "Clear search",
   "model_empty": "No models to choose from here yet.",
   "about_link_website": "Website",

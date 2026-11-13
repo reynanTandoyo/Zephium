@@ -3393,6 +3393,7 @@
   "model_app_needed": "{provider} はまだ準備できていません。設定を開いてインストールまたはサインインしてください。",
   "model_app_open": "設定を開く",
   "model_character_app": "{app} のアカウントを使用",
+  "model_in_use": "使用中",
   "model_search_clear": "検索をクリア",
   "model_empty": "ここにはまだ選択できるモデルがありません。",
   "about_link_website": "ウェブサイト",

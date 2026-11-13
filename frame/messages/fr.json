@@ -3393,6 +3393,7 @@
   "model_app_needed": "{provider} n’est pas encore prêt. Ouvrez les Réglages pour l’installer ou vous connecter.",
   "model_app_open": "Ouvrir les Réglages",
   "model_character_app": "Utilise votre compte {app}",
+  "model_in_use": "Utilisé",
   "model_search_clear": "Effacer la recherche",
   "model_empty": "Aucun modèle à choisir ici pour le moment.",
   "about_link_website": "Site web",

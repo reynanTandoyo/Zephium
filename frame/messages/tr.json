@@ -3393,6 +3393,7 @@
   "model_app_needed": "{provider} henüz hazır değil. Yüklemek veya oturum açmak için Ayarlar’ı açın.",
   "model_app_open": "Ayarlar’ı aç",
   "model_character_app": "{app} hesabınızı kullanır",
+  "model_in_use": "Kullanımda",
   "model_search_clear": "Aramayı temizle",
   "model_empty": "Henüz seçilecek model yok.",
   "about_link_website": "Web Sitesi",

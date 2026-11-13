@@ -100,7 +100,11 @@
           ><ProviderMark provider={subject.entry.model.provider} size={20} /></span
         >
         <span class="who">
-          <span class="name" title={price}>{name}</span>
+          <span class="title"
+            ><span class="name" title={price}>{name}</span><span class="in-use"
+              >{m.model_in_use()}</span
+            ></span
+          >
           {#if character}<span class="character">{character}</span>{/if}
         </span>
       </div>{/key}
@@ -215,6 +219,25 @@
     line-height: 18px;
     letter-spacing: -0.01em;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The name, then a tag saying this card is the model in use, not the tab browsed. */
+  .title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-inline-size: 0;
+  }
+
+  .in-use {
+    flex: none;
+    padding-inline: 6px;
+    border-radius: var(--radius-control-compact);
+    background: var(--color-fill);
+    color: var(--color-muted);
+    font-size: var(--text-caption);
+    line-height: 16px;
     white-space: nowrap;
   }
 

@@ -3393,6 +3393,7 @@
   "model_app_needed": "{provider} ещё не готов. Откройте Настройки, чтобы установить его или войти.",
   "model_app_open": "Открыть Настройки",
   "model_character_app": "Использует вашу учётную запись {app}",
+  "model_in_use": "Используется",
   "model_search_clear": "Очистить поиск",
   "model_empty": "Здесь пока нет моделей для выбора.",
   "about_link_website": "Сайт",

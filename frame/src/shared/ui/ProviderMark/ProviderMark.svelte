@@ -25,7 +25,9 @@
    *  surrounding ink, so it holds on a light tile and a dark one. */
   let { provider, size = 16 }: { provider: Provider; size?: number } = $props();
   const uid = $props.id();
-  let mark = $derived(MARKS[provider] ?? null);
+  /** Claude Code wears the familiar Claude (Anthropic) mark. */
+  const OF: Partial<Record<Provider, string>> = { claude_code: "anthropic" };
+  let mark = $derived(MARKS[OF[provider] ?? provider] ?? null);
 </script>
 
 {#if mark}<svg
