@@ -105,6 +105,39 @@ export const commands = {
 	workAiAppInstall: (app: WorkAiAppIdV1) => typedError<null, WorkModelsFaultV1>(__TAURI_INVOKE("work_ai_app_install", { app })),
 	/**  Opens a visible terminal running the app so the person can sign in once. */
 	workAiAppSignIn: (app: WorkAiAppIdV1) => typedError<null, WorkModelsFaultV1>(__TAURI_INVOKE("work_ai_app_sign_in", { app })),
+	/**  Finds the CalDAV login address for an email address or URL. */
+	calendarDiscover: (emailOrUrl: string) => typedError<CalendarDiscoveryV1, CalendarError>(__TAURI_INVOKE("calendar_discover", { emailOrUrl })),
+	/**
+	 *  Signs in to a CalDAV server and records the account; calendars load in the
+	 *  background and `zephium:calendar-changed` follows.
+	 */
+	calendarAddAccount: (serverUrl: string, username: string, password: string, name: string | null) => typedError<CalendarAccountV1, CalendarError>(__TAURI_INVOKE("calendar_add_account", { serverUrl, username, password, name })),
+	/**  Adds a read-only calendar from an `https://` or `webcal://` address. */
+	calendarAddSubscription: (url: string, name: string) => typedError<CalendarAccountV1, CalendarError>(__TAURI_INVOKE("calendar_add_subscription", { url, name })),
+	/**  Accounts and subscriptions (no secrets). */
+	calendarAccounts: () => typedError<CalendarAccountV1[], CalendarError>(__TAURI_INVOKE("calendar_accounts")),
+	/**  Removes an account with its calendars, cached events and saved password. */
+	calendarRemoveAccount: (account: string) => typedError<null, CalendarError>(__TAURI_INVOKE("calendar_remove_account", { account })),
+	/**  All calendars with colour, read-only and visibility flags. */
+	calendarCalendars: () => typedError<CalendarV1[], CalendarError>(__TAURI_INVOKE("calendar_calendars")),
+	/**  Shows or hides a calendar. */
+	calendarSetVisible: (calendar: string, visible: boolean) => typedError<null, CalendarError>(__TAURI_INVOKE("calendar_set_visible", { calendar, visible })),
+	/**
+	 *  Occurrences overlapping `[from, to)` (RFC 3339 instants) in visible
+	 *  calendars, bounded in count and range.
+	 */
+	calendarEvents: (from: string, to: string) => typedError<CalendarEventsV1, CalendarError>(__TAURI_INVOKE("calendar_events", { from, to })),
+	/**  Creates an event in a writable calendar. */
+	calendarCreateEvent: (calendar: string, draft: CalendarEventDraftV1) => typedError<CalendarEventRefV1, CalendarError>(__TAURI_INVOKE("calendar_create_event", { calendar, draft })),
+	/**
+	 *  Changes an event. A concurrent server change answers `conflict`; run
+	 *  `calendar_sync` and retry.
+	 */
+	calendarUpdateEvent: (calendar: string, uid: string, draft: CalendarEventDraftV1) => typedError<CalendarEventRefV1, CalendarError>(__TAURI_INVOKE("calendar_update_event", { calendar, uid, draft })),
+	/**  Deletes an event (the whole series when it repeats). */
+	calendarDeleteEvent: (calendar: string, uid: string) => typedError<null, CalendarError>(__TAURI_INVOKE("calendar_delete_event", { calendar, uid })),
+	/**  Refreshes every calendar now. */
+	calendarSync: () => typedError<CalendarSyncReportV1, CalendarError>(__TAURI_INVOKE("calendar_sync")),
 	voiceStatus: () => __TAURI_INVOKE<VoiceStatusV1>("voice_status"),
 	voiceChooseEngine: (engine: "on_device" | "open_ai" | "groq" | null) => __TAURI_INVOKE<VoiceStatusV1>("voice_choose_engine", { engine }),
 	voiceChooseLanguage: (language: string | null) => __TAURI_INVOKE<VoiceStatusV1>("voice_choose_language", { language }),
@@ -679,6 +712,7 @@ export const events = {
 	webExtensionStoreClicked: makeEvent<WebExtensionStoreClicked>("web-extension-store-clicked"),
 	workChanged: makeEvent<WorkChanged>("work-changed"),
 	workEnvironmentChanged: makeEvent<WorkEnvironmentChanged>("work-environment-changed"),
+	zephiumCalendarChanged: makeEvent<CalendarChanged>("zephium:calendar-changed"),
 	zephiumImportProgress: makeEvent<ImportJobView>("zephium:import-progress"),
 	zephiumKeymapChanged: makeEvent<KeymapChanged>("zephium:keymap-changed"),
 	zephiumPageAssistChanged: makeEvent<PageAssistChanged>("zephium:page-assist-changed"),
@@ -968,6 +1002,206 @@ export type BrowsingDataResponse = { kind: "cleared" } |
  *  with only storage and no cookies are missing from the list.
  */
 partial: boolean } | { kind: "error"; error: BrowsingDataError };
+
+/**  Where a calendar comes from. */
+export type CalendarAccountKindV1 =
+/**  A CalDAV server with a user name and password. */
+"caldav" |
+/**  A read-only `.ics` address. */
+"subscription";
+
+/**  A CalDAV account or an ICS subscription. Never holds a secret. */
+export type CalendarAccountV1 = {
+	/**  Stable id. */
+	id: string,
+	/**  Account or subscription kind. */
+	kind: CalendarAccountKindV1,
+	/**  Display name. */
+	name: string,
+	/**  Server or feed address. */
+	server_url: string,
+	/**  CalDAV user name. */
+	username: string | null,
+};
+
+/**  Calendars, accounts or events changed; read them again. */
+export type CalendarChanged = {
+	version: number,
+};
+
+/**  Where a login address was found. */
+export type CalendarDiscoveryV1 = {
+	/**  Address to sign in at. */
+	server_url: string,
+	/**  Suggested user name (the email address when one was given). */
+	username: string,
+};
+
+/**  Why a calendar operation failed. */
+export type CalendarError =
+/**  The caller passed a value that is malformed or out of range. */
+"invalid_input" |
+/**  A document or response exceeds the hard size limit. */
+"too_large" |
+/**  A limit on counts (events, occurrences, calendars) was reached. */
+"limit" |
+/**  iCalendar or XML content could not be understood. */
+"parse" |
+/**  The server could not be reached. */
+"network" |
+/**  The server did not answer in time. */
+"timeout" |
+/**  The address is not `https` (or loopback `http`). */
+"insecure" |
+/**  The server rejected the user name or password. */
+"unauthorized" |
+/**  The server refuses this operation. */
+"forbidden" |
+/**  The server or the item does not exist. */
+"not_found" |
+/**  Someone else changed the event first (ETag mismatch). */
+"conflict" |
+/**  The server answered with an error or an unexpected shape. */
+"server" |
+/**  The server does not speak CalDAV. */
+"unsupported" |
+/**  The calendar is read-only. */
+"read_only" |
+/**  Reading or writing the local calendar file failed. */
+"storage" |
+/**  The OS credential vault refused or is unavailable. */
+"credentials";
+
+/**
+ *  Fields the user edits. Times are `YYYY-MM-DD` (all-day, `end` exclusive) or
+ *  `YYYY-MM-DDTHH:MM:SS`: wall-clock in `tzid` when given, UTC with a `Z`
+ *  suffix, otherwise floating.
+ */
+export type CalendarEventDraftV1 = {
+	/**  Title. */
+	summary: string,
+	/**  Notes. */
+	description: string,
+	/**  Place. */
+	location: string,
+	/**  Start. */
+	start: string,
+	/**  End. */
+	end: string,
+	/**  Whole-day event. */
+	all_day: boolean,
+	/**  IANA zone for wall-clock times. */
+	tzid: string | null,
+	/**  RRULE value such as `FREQ=WEEKLY;BYDAY=MO`. */
+	rrule: string | null,
+	/**  Reminders as minutes before the start. */
+	reminders: number[],
+	/**  Link. */
+	url: string | null,
+};
+
+/**  An event on a calendar. */
+export type CalendarEventRefV1 = {
+	/**  Calendar id. */
+	calendar_id: string,
+	/**  Event UID. */
+	uid: string,
+};
+
+/**  Occurrences across the visible calendars. */
+export type CalendarEventsV1 = {
+	/**  Sorted by start. */
+	occurrences: CalendarOccurrenceV1[],
+	/**  A size limit cut the list short. */
+	truncated: boolean,
+};
+
+/**
+ *  One concrete instance of an event.
+ *
+ *  `start`/`end` are `YYYY-MM-DD` for all-day events, `YYYY-MM-DDTHH:MM:SSZ`
+ *  for instants, and `YYYY-MM-DDTHH:MM:SS` for floating (viewer-local) times.
+ */
+export type CalendarOccurrenceV1 = {
+	/**  Calendar holding the event. */
+	calendar_id: string,
+	/**  Event UID. */
+	uid: string,
+	/**  Start of this instance in its series, same format as `start`. */
+	recurrence_id: string | null,
+	/**  Title. */
+	summary: string,
+	/**  Notes. */
+	description: string,
+	/**  Place. */
+	location: string,
+	/**  Start. */
+	start: string,
+	/**  End (exclusive for all-day). */
+	end: string,
+	/**  Whole-day event. */
+	all_day: boolean,
+	/**  IANA zone of the event, when it has one. */
+	tzid: string | null,
+	/**  Calendar colour. */
+	color: string | null,
+	/**  `none`, `confirmed`, `tentative` or `cancelled`. */
+	status: string,
+	/**  The event repeats. */
+	recurring: boolean,
+	/**  The calendar is read-only. */
+	read_only: boolean,
+	/**  Link (for example a meeting). */
+	url: string | null,
+	/**  Organizer. */
+	organizer: CalendarPersonV1 | null,
+	/**  Attendees. */
+	attendees: CalendarPersonV1[],
+	/**  Reminders as minutes before the start. */
+	reminders: number[],
+};
+
+/**  A person on an event. */
+export type CalendarPersonV1 = {
+	/**  Address. */
+	email: string,
+	/**  Display name. */
+	name: string | null,
+	/**  `needs_action`, `accepted`, `declined`, `tentative` or `delegated`. */
+	partstat: string,
+};
+
+/**  What one calendar's refresh did. */
+export type CalendarSyncOutcomeV1 = {
+	/**  Calendar id. */
+	calendar_id: string,
+	/**  Why it failed, when it did. */
+	error: CalendarError | null,
+};
+
+/**  Result of a refresh. */
+export type CalendarSyncReportV1 = {
+	/**  One entry per calendar that was refreshed. */
+	outcomes: CalendarSyncOutcomeV1[],
+};
+
+/**  One calendar of an account. */
+export type CalendarV1 = {
+	/**  Stable id. */
+	id: string,
+	/**  Owning account. */
+	account_id: string,
+	/**  Collection address. */
+	url: string,
+	/**  Display name. */
+	name: string,
+	/**  `#RRGGBB`. */
+	color: string | null,
+	/**  Events cannot be changed. */
+	read_only: boolean,
+	/**  Shown in `calendar_events`. */
+	visible: boolean,
+};
 
 export type CaptureDeviceStateView = "none" | "active" | "muted";
 

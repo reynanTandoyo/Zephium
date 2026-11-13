@@ -131,6 +131,7 @@ zephium-agent-controller = { workspace = true, optional = true }
 zephium-agent-runtime = { workspace = true, optional = true }
 zephium-agent-provider-transport = { workspace = true, optional = true }
 zephium-engine.workspace = true
+zephium-calendar = { workspace = true, features = ["ipc-types"] }
 zephium-store.workspace = true
 zephium-notes.workspace = true
 zephium-import.workspace = true
