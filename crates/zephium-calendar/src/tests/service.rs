@@ -68,6 +68,7 @@ fn draft(summary: &str) -> CalendarEventDraftV1 {
         rrule: None,
         reminders: vec![10],
         url: None,
+        recurrence: None,
     }
 }
 
@@ -624,6 +625,7 @@ fn series_draft(summary: &str, start_hour: u32) -> CalendarEventDraftV1 {
         rrule: Some("FREQ=DAILY;COUNT=5".to_owned()),
         reminders: Vec::new(),
         url: None,
+        recurrence: None,
     }
 }
 
@@ -1004,4 +1006,129 @@ async fn a_restart_serves_saved_events_and_continues_with_the_saved_sync_token()
     assert!(asked.iter().all(|b| !b.contains("calendar-query")));
     let occurrences = second.events(range.0, range.1).expect("events").occurrences;
     assert_eq!(occurrences[0].summary, "Planning v3");
+}
+
+#[tokio::test]
+async fn occurrences_carry_the_series_and_the_whole_series_can_be_edited_from_them() {
+    let h = signed_in_on(harness(), series_report("\"e1\"")).await;
+    h.service.sync_all().await;
+    let work = h.service.calendars()[0].id.clone();
+    h.fake.route(
+        Method::Put,
+        "/dav/calendars/ann/work/one.ics",
+        "",
+        response(204, &[("etag", "\"e2\"")], ""),
+    );
+    let listed = week(&h);
+    assert_eq!(listed.len(), 5);
+    let third = &listed[2];
+    // Every instance reports the series as a whole.
+    assert_eq!(third.recurrence_id.as_deref(), Some("2026-01-14T08:00:00Z"));
+    assert_eq!(third.start, "2026-01-14T08:00:00Z");
+    assert_eq!(third.series_start.as_deref(), Some("2026-01-12T08:00:00Z"));
+    assert_eq!(third.series_end.as_deref(), Some("2026-01-12T09:00:00Z"));
+    assert_eq!(third.series_tzid.as_deref(), Some("Europe/Berlin"));
+    assert_eq!(third.rrule.as_deref(), Some("FREQ=DAILY;COUNT=5"));
+    let rule = third.recurrence.clone().expect("simple rule");
+    assert_eq!(
+        (rule.freq.as_str(), rule.interval, rule.count),
+        ("daily", 1, Some(5))
+    );
+    assert!(!rule.custom);
+
+    // Edit one occurrence, delete another, then edit the series the way the
+    // frame does: from the occurrence's own fields.
+    h.service
+        .update_occurrence(
+            &work,
+            "one@x",
+            "2026-01-14T08:00:00Z",
+            &series_draft("Moved", 15),
+        )
+        .await
+        .expect("occurrence");
+    h.service
+        .delete_occurrence(&work, "one@x", "2026-01-15T08:00:00Z")
+        .await
+        .expect("deleted");
+    let first = week(&h).remove(0);
+    let mut draft = series_draft("Whole series", 9);
+    draft.start = first.series_start.clone().expect("series start");
+    draft.end = first.series_end.clone().expect("series end");
+    draft.tzid = first.series_tzid.clone();
+    draft.rrule = None;
+    draft.recurrence = first.recurrence.clone();
+    h.service
+        .update_event(&work, "one@x", &draft)
+        .await
+        .expect("series");
+    let body = last_put_body(&h);
+    assert!(
+        body.contains("RRULE:FREQ=DAILY;COUNT=5"),
+        "the rule survives"
+    );
+    assert!(body.contains("DTSTART;TZID=Europe/Berlin:20260112T090000"));
+    assert!(body.contains("EXDATE;TZID=Europe/Berlin:20260115T090000"));
+    assert!(body.contains("RECURRENCE-ID;TZID=Europe/Berlin:20260114T090000"));
+    let listed = week(&h);
+    assert_eq!(listed.len(), 4);
+    assert!(listed.iter().any(|o| o.summary == "Moved"));
+    assert_eq!(
+        listed
+            .iter()
+            .filter(|o| o.summary == "Whole series")
+            .count(),
+        3
+    );
+    // The edited occurrence still names its series.
+    let moved = listed.iter().find(|o| o.summary == "Moved").expect("moved");
+    assert_eq!(moved.series_start.as_deref(), Some("2026-01-12T08:00:00Z"));
+    assert_eq!(moved.recurrence_id.as_deref(), Some("2026-01-14T08:00:00Z"));
+
+    // A new rule in simple form replaces the old one and wins over `rrule`.
+    let mut weekly = series_draft("Weekly", 9);
+    weekly.rrule = Some("FREQ=DAILY".to_owned());
+    weekly.recurrence = Some(crate::api::CalendarRecurrenceV1 {
+        freq: "weekly".to_owned(),
+        interval: 2,
+        count: None,
+        until: Some("2026-03-01".to_owned()),
+        by_day: vec!["MO".to_owned(), "TH".to_owned()],
+        by_month_day: Vec::new(),
+        by_month: Vec::new(),
+        custom: false,
+    });
+    h.service
+        .update_event(&work, "one@x", &weekly)
+        .await
+        .expect("weekly");
+    assert!(last_put_body(&h)
+        .contains("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH;UNTIL=20260301T225959Z"));
+    // A malformed simple rule is refused before anything is sent.
+    let puts = || {
+        h.fake
+            .requests()
+            .iter()
+            .filter(|r| r.method == Method::Put)
+            .count()
+    };
+    let sent = puts();
+    weekly.recurrence.as_mut().expect("rule").interval = 0;
+    assert_eq!(
+        h.service.update_event(&work, "one@x", &weekly).await.err(),
+        Some(CalendarError::InvalidInput)
+    );
+    assert_eq!(puts(), sent);
+}
+
+#[tokio::test]
+async fn a_single_event_reports_no_series() {
+    let h = signed_in().await;
+    h.service.sync_all().await;
+    let listed = week(&h);
+    assert_eq!(listed.len(), 1);
+    let only = &listed[0];
+    assert!(!only.recurring && only.recurrence_id.is_none());
+    assert!(only.series_start.is_none() && only.series_end.is_none());
+    assert!(only.series_tzid.is_none() && only.rrule.is_none() && only.recurrence.is_none());
 }

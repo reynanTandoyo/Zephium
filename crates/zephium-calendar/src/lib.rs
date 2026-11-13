@@ -17,6 +17,7 @@ pub mod ical;
 pub mod model;
 pub mod persist;
 pub mod recur;
+pub mod recurrence;
 pub mod service;
 pub mod store;
 pub mod tz;

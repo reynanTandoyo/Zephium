@@ -5,6 +5,7 @@ mod caldav;
 mod ical;
 mod persist;
 mod recur;
+mod recurrence;
 mod service;
 
 use crate::error::{CalendarError, Result};

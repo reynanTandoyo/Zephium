@@ -120,6 +120,64 @@ pub struct CalendarOccurrenceV1 {
     pub attendees: Vec<CalendarPersonV1>,
     /// Reminders as minutes before the start.
     pub reminders: Vec<i32>,
+    /// Series only: start of the whole series (the master event), same
+    /// format as `start`; with `series_end` and `series_tzid` it is what an
+    /// edit of the whole series sends back as `start`, `end` and `tzid`.
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", specta(optional))]
+    pub series_start: Option<String>,
+    /// Series only: end of the series' first instance, same format as `end`.
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", specta(optional))]
+    pub series_end: Option<String>,
+    /// Series only: IANA zone of the series, when it has one.
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", specta(optional))]
+    pub series_tzid: Option<String>,
+    /// Series only: the RRULE value as stored, for rules `recurrence` cannot
+    /// express.
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", specta(optional))]
+    pub rrule: Option<String>,
+    /// Series only: the repeat rule in simple form; absent when the rule is
+    /// outside daily/weekly/monthly/yearly.
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", specta(optional))]
+    pub recurrence: Option<CalendarRecurrenceV1>,
+}
+
+/// A repeat rule in simple form. Part of an occurrence (read) and of a draft
+/// (write): when a draft carries it, it replaces the draft's `rrule`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(specta::Type))]
+pub struct CalendarRecurrenceV1 {
+    /// `daily`, `weekly`, `monthly` or `yearly`.
+    pub freq: String,
+    /// Every n-th period, 1 to 1000.
+    pub interval: u32,
+    /// Stop after this many instances (1 to 1000); excludes `until`.
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", specta(optional))]
+    pub count: Option<u32>,
+    /// Last day or instant: `YYYY-MM-DD` (the whole day counts),
+    /// `YYYY-MM-DDTHH:MM:SSZ` or `YYYY-MM-DDTHH:MM:SS` (wall clock).
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", specta(optional))]
+    pub until: Option<String>,
+    /// Weekdays `MO`..`SU`; monthly and yearly rules may prefix a number
+    /// from 1 to 5 or a sign (`2TU`, `-1FR`).
+    #[serde(default)]
+    pub by_day: Vec<String>,
+    /// Days of the month, 1 to 31 or -31 to -1.
+    #[serde(default)]
+    pub by_month_day: Vec<i32>,
+    /// Months, 1 to 12.
+    #[serde(default)]
+    pub by_month: Vec<u32>,
+    /// Read only: the stored rule has parts this description cannot express
+    /// (for example BYSETPOS); send `rrule` back to keep it as it is.
+    #[serde(default)]
+    pub custom: bool,
 }
 
 /// Occurrences across the visible calendars.
@@ -156,6 +214,10 @@ pub struct CalendarEventDraftV1 {
     pub rrule: Option<String>,
     /// Reminders as minutes before the start.
     pub reminders: Vec<u32>,
+    /// Repeat rule in simple form; replaces `rrule` when present.
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", specta(optional))]
+    pub recurrence: Option<CalendarRecurrenceV1>,
     /// Link.
     pub url: Option<String>,
 }
@@ -206,15 +268,18 @@ fn person(value: &crate::model::Person) -> CalendarPersonV1 {
     }
 }
 
-/// Builds the wire form of one occurrence.
+/// Builds the wire form of one occurrence; `master` is the series the
+/// occurrence belongs to (the event itself when it does not repeat).
 pub fn occurrence_wire(
     occurrence: &Occurrence<'_>,
     calendar_id: &str,
     color: Option<&str>,
     read_only: bool,
-    recurring: bool,
+    master: &Event,
 ) -> CalendarOccurrenceV1 {
     let event = occurrence.event;
+    let recurring = master.is_recurring();
+    let series = recurring.then_some(master);
     CalendarOccurrenceV1 {
         calendar_id: calendar_id.to_owned(),
         uid: event.uid.clone(),
@@ -242,6 +307,19 @@ pub fn occurrence_wire(
             .filter(|alarm| !alarm.from_end)
             .filter_map(|alarm| i32::try_from(alarm.minutes_before).ok())
             .collect(),
+        series_start: series.map(|master| format_time(&master.start)),
+        series_end: series.map(|master| format_time(&master.end)),
+        series_tzid: series.and_then(|master| match &master.start.kind {
+            TimeKind::Zoned(zone) => Some(zone.name().to_owned()),
+            _ => None,
+        }),
+        rrule: series.and_then(|master| master.rrule.clone()),
+        recurrence: series.and_then(|master| {
+            master
+                .rrule
+                .as_deref()
+                .and_then(|rule| crate::recurrence::describe(rule, &master.start))
+        }),
     }
 }
 
@@ -299,8 +377,12 @@ pub fn apply_draft(uid: &str, draft: &CalendarEventDraftV1, base: Option<&Event>
     if end.to_utc() < start.to_utc() || (draft.all_day && end.local <= start.local) {
         return Err(CalendarError::InvalidInput);
     }
-    let rrule = draft
-        .rrule
+    // The simple form wins over a raw rule.
+    let rule_text = match &draft.recurrence {
+        Some(recurrence) => Some(crate::recurrence::build(recurrence, &start)?),
+        None => draft.rrule.clone(),
+    };
+    let rrule = rule_text
         .as_ref()
         .map(|rule| rule.trim().to_owned())
         .filter(|rule| !rule.is_empty())

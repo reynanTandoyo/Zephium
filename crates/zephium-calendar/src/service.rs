@@ -515,7 +515,7 @@ impl CalendarService {
                                 &calendar.id,
                                 calendar.color.as_deref(),
                                 calendar.read_only,
-                                event.is_recurring(),
+                                event,
                             ),
                         ));
                     }
@@ -936,6 +936,7 @@ impl CalendarService {
             });
         let mut draft = draft.clone();
         draft.rrule = None;
+        draft.recurrence = None;
         let mut item = apply_draft(uid, &draft, Some(&base))?;
         item.recurrence_id = Some(instance.clone());
         item.rrule = None;
