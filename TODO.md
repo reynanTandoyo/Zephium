@@ -76,8 +76,6 @@ Last ID: T-0046
 - [ ] T-0028 · Mail: safe reading pane · area: frame/src/features/mail, desktop (locked-down view) · owner: - · updated: 2026-11-13
   - Text and HTML with no scripts; remote images blocked until "Load images"; links open as browser tabs and show their real target; attachments save/open. Follow docs/security-model.md.
   - 2026-11-13: sanitiser + sandboxed srcdoc iframe with CSP done, links listed below the message (inert inside the iframe). Open: "Load images" cannot work because the frame CSP has no https: in img-src (fix: fetch through the backend into data: URLs, no CSP change); verify the srcdoc iframe renders natively. Wave 3.
-- [ ] T-0033 · Mail: new-mail notifications and unread badge · area: desktop/src/focus_alerts.rs, frame/src/features/sidebar · owner: - · updated: 2026-11-13
-  - Windows toast; unread count on the Mail mode button.
 - [ ] T-0034 · Mail: Microsoft 365 / Gmail sign-in (OAuth2, XOAUTH2) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
   - Needs app registrations with Microsoft and Google (client IDs), done by the user. Only if T-0019 shows it is needed, or for personal accounts.
   - 2026-11-13: backend done (`87203452b`..`87d55badd`): `zephium-oauth` (PKCE, loopback redirect, refresh tokens + optional user-pasted client secret only in the OS vault), XOAUTH2 for IMAP/SMTP, IPC `oauth_sign_in`/`oauth_cancel_sign_in`/`oauth_discard_grant`/`oauth_sign_out`, guide `docs/fork-oauth.md`. Tests: oauth 38, mail 53, desktop 13 pass; clippy clean (Windows, fakes only). Open: the sign-in fields in the Mail account setup UI (wave 3, after mail-ui).
@@ -105,6 +103,9 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0033 · Mail: new-mail notifications and unread badge · area: desktop/src/focus_alerts.rs, frame/src/features/sidebar · owner: orca w3-mail-notify · updated: 2026-11-13
+  - Windows toast; unread count on the Mail mode button.
+  - `85b6fcfcf`, `0783cfaaa`, `17d3f12bf` + app-level hold in `BrowserApp.svelte`: count-only toast via `focus_alerts` (no sender/subject/body), switch `mail.notifications`, unread badge on ModeTabs/ModeWord. clippy, focus_alerts 6 + preferences 19 tests, frame gates, 69 unit + 49 component tests pass (Windows). Not done: clicking the toast does not open Mail (no activation path). Not observed natively.
 - [x] T-0015 · Modes: make Work-only Rust branches mode-aware · area: crates/zephium-app/src/shell/{spaces,operations,time,media,browser_pages}.rs · owner: orca w1-modes + w3-time-modes · updated: 2026-11-13
   - Switching space keeps the mode, typing an address returns to Browse, time tracking records the mode. Update the Rust tests in `shell/tests`.
   - 2026-11-13: `5a86ca30c` made spaces/operations/browser_pages mode-aware. Open: time tracking for Mail/Calendar (`Place` only has Site/Work; needs a store change), and media/space/address branches treat every mode like Work.
