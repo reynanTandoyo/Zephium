@@ -86,6 +86,24 @@ export function frameConfig(pages: readonly Page[]): UserConfig {
                 tags: ["$initial"],
               },
               {
+                // Fork: without the account feature the bundler no longer keeps
+                // these small browser-startup modules in the browser entry; as
+                // separate chunks they push the browser past the native startup
+                // request budget. The launcher panel may load these lazily.
+                name: "browser-controls",
+                test: /[\\/]src[\\/](?:shared[\\/](?:ui[\\/](?:SegmentedControl|LazyView|IconButton)[\\/]|lib[\\/](?:accelerator|search-shortcuts)\.ts)|domain[\\/](?:updates|runtime)[\\/]|features[\\/](?:tabs[\\/](?:lib[\\/]space-look\.ts|components[\\/]space-hue\.css)|bookmarks[\\/]lib[\\/](?:compose|reveal)\.svelte\.ts))/u,
+                tags: ["$initial"],
+                includeDependenciesRecursively: false,
+              },
+              {
+                // Fork: download modules shared by the browser and the downloads
+                // destinations; the launcher panel must never reach these.
+                name: "browser-downloads",
+                test: /[\\/]src[\\/]features[\\/]downloads[\\/](?:lib[\\/](?:errors|transfer)\.ts|components[\\/]FileGlyph\.svelte)/u,
+                tags: ["$initial"],
+                includeDependenciesRecursively: false,
+              },
+              {
                 name: "chrome-shared",
                 priority: 2,
                 // Preferences are read by lazy destinations too; kept here they
