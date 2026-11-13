@@ -29,6 +29,7 @@
     duration,
     hourLabel,
     liveBucket,
+    modePlace,
     weekLabel,
     weekdayShort,
     type Span,
@@ -48,6 +49,7 @@
     describeBucket,
     totals,
   } from "../lib/overview";
+  import { placeLabel } from "../lib/place";
   import FocusCard from "./FocusCard.svelte";
   import ShutSites from "./ShutSites.svelte";
   import SiteList from "./SiteList.svelte";
@@ -120,10 +122,15 @@
     ),
   );
   let suggestions = $derived(
-    (overview?.sites ?? []).map((entry) => ({ site: entry.site, icon: entry.icon })),
+    (overview?.sites ?? [])
+      .filter((entry) => modePlace(entry.site) === null)
+      .map((entry) => ({ site: entry.site, icon: entry.icon })),
   );
   let siteEntry = $derived(overview?.sites.find((entry) => entry.site === site) ?? null);
-  let siteMark = $derived(site ? favicons.mark(siteEntry?.icon, `https://${site}/`) : null);
+  let place = $derived(site === null ? null : modePlace(site));
+  let siteMark = $derived(
+    site && !place ? favicons.mark(siteEntry?.icon, `https://${site}/`) : null,
+  );
   let shut = $derived(
     site !== null &&
       preferences
@@ -222,7 +229,7 @@
                       lit
                       fallback={Globe02Icon}
                     />
-                    <h2>{site}</h2>
+                    <h2>{placeLabel(site)}</h2>
                   </div>
                 </div>
               {/if}
@@ -231,7 +238,7 @@
                   <p class="total">{duration(sum.all)}</p>
                   <p class="sub">
                     {#if site !== null}{m.time_site_total({
-                        site,
+                        site: placeLabel(site),
                       })}{:else}{m.time_on_web()}{#if sum.work >= 60}<span
                           class="dot"
                           aria-hidden="true">·</span
@@ -263,7 +270,7 @@
                   ? (index) => session.view({ span: "day", start: period.start + index })
                   : undefined}
               />
-              {#if site !== null}
+              {#if site !== null && !place}
                 <div class="site-actions">
                   <Button
                     size="compact"

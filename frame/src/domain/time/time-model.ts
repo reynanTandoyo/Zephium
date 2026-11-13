@@ -159,6 +159,14 @@ export function breakMinutes(minutes: number): { short: number; long: number } {
   return { short, long: Math.min(30, short * 3) };
 }
 
+/** Native lists Mail and Calendar beside sites under these reserved keys. A
+ *  domain always holds a dot and never starts with `@`, so they cannot clash. */
+export type ModePlace = "mail" | "calendar";
+
+export function modePlace(site: string): ModePlace | null {
+  return site === "@mail" ? "mail" : site === "@calendar" ? "calendar" : null;
+}
+
 /** Seconds as a share of a whole, clamped to 0..1. */
 export function share(part: number, whole: number): number {
   return whole > 0 ? Math.min(1, Math.max(0, part / whole)) : 0;

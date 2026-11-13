@@ -12,6 +12,7 @@
     duration,
     hourLabel,
     liveBucket,
+    modePlace,
     weekdayLetter,
     type Span,
   } from "$domain/time";
@@ -138,7 +139,9 @@
     />
 
     <FocusCard
-      suggestions={(report?.sites ?? []).map((entry) => ({ site: entry.site, icon: entry.icon }))}
+      suggestions={(report?.sites ?? [])
+        .filter((entry) => modePlace(entry.site) === null)
+        .map((entry) => ({ site: entry.site, icon: entry.icon }))}
     />
 
     {#if session.failed}
