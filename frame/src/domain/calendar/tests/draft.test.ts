@@ -7,6 +7,7 @@ import {
   formFromEvent,
   formToDraft,
   movedForm,
+  noRecurrence,
   wallClock,
 } from "../draft";
 import type { EventForm } from "../draft";
@@ -26,7 +27,7 @@ const base: EventForm = {
   endTime: "10:30",
   location: " Room 4 ",
   description: "Notes",
-  recurrence: "none",
+  recurrence: noRecurrence(),
   reminder: "15",
   url: null,
   moreReminders: [],
@@ -68,6 +69,7 @@ describe("event drafts", () => {
         all_day: false,
         tzid: "Europe/Berlin",
         rrule: null,
+        recurrence: null,
         reminders: [15],
         url: null,
       },
@@ -106,18 +108,69 @@ describe("event drafts", () => {
     ]);
   });
 
-  it("maps recurrence to an RRULE", () => {
-    const rule = (recurrence: EventForm["recurrence"]) => {
-      const result = formToDraft({ ...base, recurrence });
-      return result.ok ? result.draft.rrule : "error";
+  it("sends a structured recurrence and no RRULE", () => {
+    const send = (patch: Partial<EventForm["recurrence"]>) => {
+      const result = formToDraft({ ...base, recurrence: { ...noRecurrence(), ...patch } });
+      return result.ok ? [result.draft.recurrence, result.draft.rrule] : result.error;
     };
-    expect([rule("none"), rule("daily"), rule("weekly"), rule("monthly"), rule("yearly")]).toEqual([
+    expect(send({})).toEqual([null, null]);
+    expect(send({ freq: "daily" })).toEqual([{ freq: "daily", interval: 1 }, null]);
+    expect(send({ freq: "weekly", interval: "2", byDay: ["MO", "WE"] })).toEqual([
+      { freq: "weekly", interval: 2, by_day: ["MO", "WE"] },
       null,
-      "FREQ=DAILY",
-      "FREQ=WEEKLY",
-      "FREQ=MONTHLY",
-      "FREQ=YEARLY",
     ]);
+    expect(send({ freq: "monthly", ends: "count", count: "5" })).toEqual([
+      { freq: "monthly", interval: 1, count: 5 },
+      null,
+    ]);
+    expect(send({ freq: "yearly", ends: "until", until: "2027-01-01" })).toEqual([
+      { freq: "yearly", interval: 1, until: "2027-01-01" },
+      null,
+    ]);
+  });
+
+  it("refuses an invalid interval, count or end date", () => {
+    const send = (patch: Partial<EventForm["recurrence"]>) =>
+      formToDraft({ ...base, recurrence: { ...noRecurrence(), freq: "daily", ...patch } });
+    const refused = { ok: false, error: "recurrence" };
+    expect(send({ interval: "0" })).toEqual(refused);
+    expect(send({ interval: "1.5" })).toEqual(refused);
+    expect(send({ interval: "1001" })).toEqual(refused);
+    expect(send({ ends: "count", count: "" })).toEqual(refused);
+    expect(send({ ends: "until", until: "" })).toEqual(refused);
+    expect(send({ ends: "until", until: "2026-10-01" })).toEqual(refused);
+  });
+
+  it("keeps a custom rule through its RRULE and the day selectors of a kept frequency", () => {
+    const custom = formToDraft({
+      ...base,
+      recurrence: {
+        ...noRecurrence(),
+        freq: "custom",
+        rrule: "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU",
+      },
+    });
+    expect(custom.ok && [custom.draft.recurrence, custom.draft.rrule]).toEqual([
+      null,
+      "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU",
+    ]);
+    const keep = { freq: "monthly", by_day: ["2TU"], by_month_day: [], by_month: [] };
+    const same = formToDraft({
+      ...base,
+      recurrence: { ...noRecurrence(), freq: "monthly", keep },
+    });
+    expect(same.ok && same.draft.recurrence).toEqual({
+      freq: "monthly",
+      interval: 1,
+      by_day: ["2TU"],
+      by_month_day: [],
+      by_month: [],
+    });
+    const changed = formToDraft({
+      ...base,
+      recurrence: { ...noRecurrence(), freq: "yearly", keep },
+    });
+    expect(changed.ok && changed.draft.recurrence).toEqual({ freq: "yearly", interval: 1 });
   });
 
   it("refuses an end before the start and a bad reminder", () => {
@@ -163,10 +216,89 @@ describe("event drafts", () => {
   });
 });
 
-describe("edit policy", () => {
-  it("allows plain events, locks series and honours read-only calendars", () => {
+const series = (patch: Partial<CalendarOccurrenceV1> = {}) =>
+  place(
+    occurrence({
+      recurring: true,
+      recurrence_id: "2026-10-14T09:00:00",
+      start: "2026-10-14T09:00:00",
+      end: "2026-10-14T10:00:00",
+      series_start: "2026-10-07T09:00:00",
+      series_end: "2026-10-07T10:00:00",
+      series_tzid: "Europe/Berlin",
+      rrule: "FREQ=WEEKLY;BYDAY=WE;COUNT=8",
+      recurrence: { freq: "weekly", interval: 1, count: 8, by_day: ["WE"] },
+      ...patch,
+    }),
+  )!;
+
+describe("repeating events", () => {
+  it("edits the series from its own start and rule, or the occurrence from its own times", () => {
+    const all = formFromEvent(series(), "all");
+    expect([all.startDate, all.startTime, all.endTime, all.zone]).toEqual([
+      "2026-10-07",
+      "09:00",
+      "10:00",
+      "Europe/Berlin",
+    ]);
+    expect(all.recurrence).toMatchObject({
+      freq: "weekly",
+      interval: "1",
+      ends: "count",
+      count: "8",
+      byDay: ["WE"],
+    });
+    const sent = formToDraft(all, "Europe/Berlin");
+    expect(sent.ok && [sent.draft.start, sent.draft.recurrence]).toEqual([
+      "2026-10-07T09:00:00",
+      { freq: "weekly", interval: 1, count: 8, by_day: ["WE"] },
+    ]);
+    const one = formFromEvent(series(), "this");
+    expect([one.startDate, one.recurrence.freq]).toEqual(["2026-10-14", "none"]);
+  });
+
+  it("shows a rule the form cannot express as custom, with its RRULE", () => {
+    const form = formFromEvent(
+      series({
+        rrule: "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU",
+        recurrence: { freq: "monthly", interval: 1, custom: true },
+      }),
+      "all",
+    );
+    expect(form.recurrence).toMatchObject({
+      freq: "custom",
+      rrule: "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU",
+    });
+  });
+
+  it("moves the series by the distance the occurrence moved", () => {
+    const moved = movedForm(series(), new Date(2026, 9, 15, 11, 30), "all");
+    expect([moved.startDate, moved.startTime, moved.endDate, moved.endTime]).toEqual([
+      "2026-10-08",
+      "11:30",
+      "2026-10-08",
+      "12:30",
+    ]);
+    const one = movedForm(series(), new Date(2026, 9, 15, 11, 30), "this");
+    expect([one.startDate, one.startTime]).toEqual(["2026-10-15", "11:30"]);
+  });
+
+  it("moves an all-day series by days only", () => {
+    const allDay = series({
+      all_day: true,
+      start: "2026-10-14",
+      end: "2026-10-15",
+      series_start: "2026-10-07",
+      series_end: "2026-10-08",
+      series_tzid: null,
+    });
+    const moved = movedForm(allDay, new Date(2026, 9, 16), "all");
+    expect([moved.startDate, moved.endDate]).toEqual(["2026-10-09", "2026-10-09"]);
+  });
+
+  it("only treats read-only calendars as not editable", () => {
     expect(editPolicy(occurrence())).toBe("edit");
-    expect(editPolicy(occurrence({ recurring: true }))).toBe("series-locked");
+    expect(editPolicy(occurrence({ recurring: true }))).toBe("edit");
     expect(editPolicy(occurrence({ read_only: true, recurring: true }))).toBe("read-only");
   });
 });

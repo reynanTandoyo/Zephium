@@ -96,17 +96,13 @@
 
   {#if policy === "read-only"}
     <p class="note">{m.calendar_read_only_note()}</p>
-  {:else if policy === "series-locked"}
-    <p class="note">{m.calendar_series_locked()}</p>
   {/if}
 
   {#if fault}<p class="error" role="alert">{faultText(fault)}</p>{/if}
 
-  {#if policy !== "read-only"}
+  {#if policy === "edit"}
     {#if confirming}
-      <p class="note" role="alert">
-        {occurrence.recurring ? m.calendar_delete_series_confirm() : m.calendar_delete_confirm()}
-      </p>
+      <p class="note" role="alert">{m.calendar_delete_confirm()}</p>
       <div class="actions">
         <Button variant="danger" {pending} onclick={ondelete}>{m.calendar_delete()}</Button>
         <Button disabled={pending} onclick={() => (confirming = false)}
@@ -115,10 +111,13 @@
       </div>
     {:else}
       <div class="actions">
-        {#if policy === "edit"}
-          <Button onclick={onedit}>{m.calendar_edit()}</Button>
-        {/if}
-        <Button variant="ghost" onclick={() => (confirming = true)}>{m.calendar_delete()}</Button>
+        <Button onclick={onedit}>{m.calendar_edit()}</Button>
+        <!-- A repeating event asks which events instead of confirming here. -->
+        <Button
+          variant="ghost"
+          onclick={() => (occurrence.recurring ? ondelete() : (confirming = true))}
+          >{m.calendar_delete()}</Button
+        >
       </div>
     {/if}
   {/if}
