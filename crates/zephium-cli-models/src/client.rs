@@ -49,20 +49,22 @@ const CLAUDE_TOOLS: &[&str] = &[
 /// The Antigravity agent each call runs as: no default prompt sections or
 /// built-in tools, none of the person's skills, rules, plugins, subagents or
 /// MCP servers. Checked with agy 1.5.8: such an agent can still list MCP
-/// resources and its background tasks, and nothing else.
+/// resources and its background tasks, and nothing else. Its one tool is
+/// `finish`: agy delivers a `--json-schema` answer only through `finish`, so
+/// without it every call loops until it gives up and has no structured output.
 const AGY_AGENT_FILE: &str = "---\n\
 name: zephium-model\n\
-description: Zephium's plain language model, with no tools.\n\
+description: Zephium's plain language model; its only tool is finish.\n\
 excludeDefaultComponents: true\n\
 inheritCustomizations: false\n\
 inheritMcp: false\n\
-tools: []\n\
+tools: [finish]\n\
 ---\n\
 # Zephium model\n\
 \n\
-You are a language model answering for Zephium. You have no tools: never run \
-commands, read or write files, browse, or call MCP servers. Answer only with \
-the JSON object the request asks for.\n";
+You are a language model answering for Zephium. Your only tool is finish, \
+which delivers your answer: never run commands, read or write files, browse, \
+or call MCP servers. Give the answer the request asks for through finish.\n";
 
 /// Session-only Antigravity settings that deny every tool family even if the
 /// person's own settings allow them, and keep file access in the workspace.
@@ -497,7 +499,7 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("command(*)")));
-        assert!(AGY_AGENT_FILE.contains("tools: []"));
+        assert!(AGY_AGENT_FILE.contains("tools: [finish]"));
     }
 
     #[test]

@@ -242,6 +242,22 @@ fn call_id() -> String {
 pub(crate) fn parse(answer: &Value, request: &WorkModelRequest) -> Result<Answer, WorkModelError> {
     let names = offered(request)?;
     let object = answer.as_object().ok_or(WorkModelError::Protocol)?;
+    // Some models (seen with agy) put the whole answer object, as JSON text,
+    // into `text`. Read that inner object instead when it is the only content.
+    if let Some(Value::String(text)) = object.get("text") {
+        let calls_empty = match object.get("calls") {
+            None | Some(Value::Null) => true,
+            Some(Value::Array(calls)) => calls.is_empty(),
+            Some(_) => false,
+        };
+        if calls_empty && text.trim_start().starts_with('{') {
+            if let Ok(inner @ Value::Object(_)) = serde_json::from_str::<Value>(text.trim()) {
+                if inner.get("text").is_some_and(Value::is_string) {
+                    return parse(&inner, request);
+                }
+            }
+        }
+    }
     let text = match object.get("text") {
         None | Some(Value::Null) => String::new(),
         Some(Value::String(text)) => text.clone(),
@@ -424,6 +440,19 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(stringly.calls[0].arguments, json!({"q": "y"}));
         assert_ne!(answer.calls[0].id, stringly.calls[0].id);
+        // An answer object wrapped as JSON text in `text` (seen with agy) is unwrapped.
+        let wrapped = parse(&json!({"text": "{\"text\": \"Hi there\"}"}), &auto).unwrap();
+        assert_eq!(wrapped.text, "Hi there");
+        assert!(wrapped.calls.is_empty());
+        let wrapped_call = parse(
+            &json!({"text": "{\"text\": \"\", \"calls\": [{\"name\": \"search\", \"arguments\": {\"q\": \"z\"}}]}"}),
+            &auto,
+        )
+        .unwrap();
+        assert_eq!(wrapped_call.calls[0].arguments, json!({"q": "z"}));
+        // Ordinary text that merely looks like JSON stays as it is.
+        let plain = parse(&json!({"text": "{\"a\": 1}"}), &auto).unwrap();
+        assert_eq!(plain.text, "{\"a\": 1}");
         for bad in [
             json!("text"),
             json!({"text": 5}),

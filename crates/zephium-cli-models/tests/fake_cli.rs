@@ -130,7 +130,7 @@ async fn prompt_goes_on_stdin_with_a_private_folder_and_allowlisted_environment(
                 assert!(args.iter().any(|arg| arg == "--tools"));
             }
             _ => {
-                assert!(echo["agent"].as_str().unwrap().contains("tools: []"));
+                assert!(echo["agent"].as_str().unwrap().contains("tools: [finish]"));
                 assert!(args.iter().any(|arg| arg == "zephium-model"));
             }
         }
