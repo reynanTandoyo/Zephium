@@ -233,11 +233,14 @@ pub(crate) mod fakes {
     use crate::http::HttpResponse;
     use crate::BoxFuture;
 
+    /// One recorded post: URL and form.
+    pub type Post = (String, Vec<(String, String)>);
+
     /// Answers posts from a queue and records them.
     #[derive(Default)]
     pub struct FakeHttp {
         pub answers: Mutex<VecDeque<Result<HttpResponse>>>,
-        pub posts: Mutex<Vec<(String, Vec<(String, String)>)>>,
+        pub posts: Mutex<Vec<Post>>,
     }
 
     impl FakeHttp {

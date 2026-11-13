@@ -103,14 +103,16 @@ pub fn parse_request(head: &[u8], port: u16) -> Parsed {
     for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
         match key.as_ref() {
             "code" => {
-                if code.replace(value.into_owned()).is_some() {
+                if code.is_some() {
                     return Parsed::Ignore(400);
                 }
+                code = Some(value.into_owned());
             }
             "state" => {
-                if state.replace(value.into_owned()).is_some() {
+                if state.is_some() {
                     return Parsed::Ignore(400);
                 }
+                state = Some(value.into_owned());
             }
             "error" => error = true,
             _ => {}
@@ -359,7 +361,7 @@ mod tests {
         assert!(ignore(get(&long_state, ok_host)));
         // Oversized head.
         let mut big = get("/?code=c&state=s", ok_host);
-        big.extend(std::iter::repeat(b'x').take(MAX_REQUEST_BYTES));
+        big.extend(std::iter::repeat_n(b'x', MAX_REQUEST_BYTES));
         assert_eq!(parse_request(&big, 7), Parsed::Ignore(431));
     }
 
