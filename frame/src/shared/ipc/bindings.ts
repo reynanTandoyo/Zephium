@@ -148,7 +148,10 @@ export const commands = {
 	mailUpdateAccount: (update: MailAccountUpdateV1) => typedError<MailAccountV1, MailErrorV1>(__TAURI_INVOKE("mail_update_account", { update })),
 	/**  Removes an account, its password and everything cached for it. */
 	mailRemoveAccount: (account: string) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_remove_account", { account })),
-	/**  The accounts, in the order they were added. No secrets. */
+	/**
+	 *  The accounts in the person's order (`mail.account_order`), then any
+	 *  others in the order they were added. No secrets.
+	 */
 	mailAccounts: () => typedError<MailAccountV1[], MailErrorV1>(__TAURI_INVOKE("mail_accounts")),
 	/**  Folders from the local cache; reads the server only when nothing is cached. */
 	mailFolders: (account: string) => typedError<MailFolderV1[], MailErrorV1>(__TAURI_INVOKE("mail_folders", { account })),
@@ -158,6 +161,19 @@ export const commands = {
 	mailMessages: (account: string, folder: string, page: MailPageRequestV1) => typedError<MailPageV1, MailErrorV1>(__TAURI_INVOKE("mail_messages", { account, folder, page })),
 	/**  One message with its body. Bodies are cached after the first read. */
 	mailMessage: (account: string, folder: string, uid: number) => typedError<MailBodyV1, MailErrorV1>(__TAURI_INVOKE("mail_message", { account, folder, uid })),
+	/**
+	 *  Fetches the remote images ("Load images") of one message as `data:` URLs.
+	 *  Only `https:` images that the message's own HTML references are fetched,
+	 *  with bounded count, size, time and redirects, from public addresses only,
+	 *  without cookies or credentials; anything that cannot be fetched safely is
+	 *  left out. The frame's CSP stays closed: it only ever shows `data:` images.
+	 */
+	mailFetchRemoteImages: (account: string, folder: string, uid: number, urls: string[]) => typedError<MailRemoteImageV1[], MailErrorV1>(__TAURI_INVOKE("mail_fetch_remote_images", { account, folder, uid, urls })),
+	/**
+	 *  Saves the order the person arranged the accounts in. Unknown ids are
+	 *  harmless (ignored when reading); malformed ones are refused.
+	 */
+	mailSetAccountOrder: (order: string[]) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_set_account_order", { order })),
 	/**  Saves one attachment where the person chooses. The bytes never reach the frame. */
 	mailAttachment: (account: string, folder: string, uid: number, part: number) => typedError<MailSaveOutcomeV1, MailErrorV1>(__TAURI_INVOKE("mail_attachment", { account, folder, uid, part })),
 	/**  Sets or clears `\Seen`, `\Flagged` or `\Deleted` on messages. */
@@ -182,8 +198,9 @@ export const commands = {
 	 *  three minutes) for the person to finish. One sign-in at a time. The
 	 *  `client_id` is the one the person registered; `client_secret` is only for
 	 *  Google "Desktop app" clients, which Google also issues a secret for.
+	 *  `purposes` says what the grant may be used for: `None` or empty means mail.
 	 */
-	oauthSignIn: (provider: OAuthProviderV1, clientId: string, tenant: string | null, clientSecret: string | null) => typedError<OAuthGrantV1, OAuthErrorV1>(__TAURI_INVOKE("oauth_sign_in", { provider, clientId, tenant, clientSecret })),
+	oauthSignIn: (provider: OAuthProviderV1, clientId: string, tenant: string | null, clientSecret: string | null, purposes: OAuthPurposeV1[] | null) => typedError<OAuthGrantV1, OAuthErrorV1>(__TAURI_INVOKE("oauth_sign_in", { provider, clientId, tenant, clientSecret, purposes })),
 	/**  Stops a sign-in that is waiting for the browser (the person gave up). */
 	oauthCancelSignIn: () => typedError<null, OAuthErrorV1>(__TAURI_INVOKE("oauth_cancel_sign_in")),
 	/**  Throws away a grant that was not attached to an account. */
@@ -1992,6 +2009,17 @@ export type MailPageV1 = {
 	from_cache: boolean,
 };
 
+/**
+ *  A remote image the backend fetched for a message, as a `data:` URL. The
+ *  frame substitutes it for `url` in the sanitised HTML.
+ */
+export type MailRemoteImageV1 = {
+	/**  The address exactly as the message wrote it. */
+	url: string,
+	/**  `data:image/{png,jpeg,gif,webp};base64,...` */
+	data_url: string,
+};
+
 export type MailSaveOutcomeV1 = "saved" | "cancelled";
 
 export type MailSecurityV1 = "tls" | "start_tls";
@@ -2228,6 +2256,9 @@ export type OAuthGrantV1 = {
 
 /**  The identity provider. */
 export type OAuthProviderV1 = "microsoft" | "google";
+
+/**  What a sign-in asks permission for. */
+export type OAuthPurposeV1 = "mail" | "calendar";
 
 /**
  *  Immediate result returned by a privileged IPC command. `accepted` with an

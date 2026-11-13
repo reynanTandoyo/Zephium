@@ -24,6 +24,8 @@ const MAX_GRANTS: usize = 4;
 /// How long an unused grant stays valid.
 const GRANT_TTL: Duration = Duration::from_secs(10 * 60);
 const TOKEN_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+/// Distinct purposes one sign-in may ask for (mail and calendar).
+const MAX_PURPOSES: usize = 2;
 
 // ---------------------------------------------------------------------------
 // Wire types
@@ -94,6 +96,42 @@ impl From<Provider> for OAuthProviderV1 {
             Provider::Google => Self::Google,
         }
     }
+}
+
+/// What a sign-in asks permission for.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum OAuthPurposeV1 {
+    Mail,
+    Calendar,
+}
+
+impl From<OAuthPurposeV1> for Purpose {
+    fn from(purpose: OAuthPurposeV1) -> Self {
+        match purpose {
+            OAuthPurposeV1::Mail => Self::Mail,
+            OAuthPurposeV1::Calendar => Self::Calendar,
+        }
+    }
+}
+
+/// The purposes a sign-in asks for: none or an empty list means mail only
+/// (the behaviour before purposes existed); repeats are dropped.
+fn purposes_of(requested: Option<Vec<OAuthPurposeV1>>) -> Result<Vec<Purpose>, OAuthError> {
+    let mut purposes: Vec<Purpose> = Vec::with_capacity(MAX_PURPOSES);
+    for purpose in requested.unwrap_or_default() {
+        let purpose = Purpose::from(purpose);
+        if !purposes.contains(&purpose) {
+            purposes.push(purpose);
+        }
+    }
+    if purposes.len() > MAX_PURPOSES {
+        return Err(OAuthError::InvalidInput);
+    }
+    if purposes.is_empty() {
+        purposes.push(Purpose::Mail);
+    }
+    Ok(purposes)
 }
 
 /// The result of a completed sign-in. The handle is opaque and single-use:
@@ -317,6 +355,7 @@ fn gate(caller: &WebviewWindow, command: &'static str) -> Reply<()> {
 /// three minutes) for the person to finish. One sign-in at a time. The
 /// `client_id` is the one the person registered; `client_secret` is only for
 /// Google "Desktop app" clients, which Google also issues a secret for.
+/// `purposes` says what the grant may be used for: `None` or empty means mail.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn oauth_sign_in(
@@ -325,10 +364,23 @@ pub(crate) async fn oauth_sign_in(
     client_id: String,
     tenant: Option<String>,
     client_secret: Option<String>,
+    purposes: Option<Vec<OAuthPurposeV1>>,
 ) -> Reply<OAuthGrantV1> {
     gate(&caller, "oauth_sign_in")?;
     let mut client_secret = client_secret.filter(|secret| !secret.trim().is_empty());
-    let outcome = sign_in(provider, client_id, tenant, client_secret.as_deref()).await;
+    let outcome = match purposes_of(purposes) {
+        Ok(purposes) => {
+            sign_in(
+                provider,
+                client_id,
+                tenant,
+                client_secret.as_deref(),
+                &purposes,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
     client_secret.zeroize();
     log("sign_in", outcome.is_ok());
     outcome.map_err(Into::into)
@@ -339,6 +391,7 @@ async fn sign_in(
     client_id: String,
     tenant: Option<String>,
     client_secret: Option<&str>,
+    purposes: &[Purpose],
 ) -> Result<OAuthGrantV1, OAuthError> {
     let tenant = tenant
         .map(|tenant| tenant.trim().to_owned())
@@ -365,7 +418,7 @@ async fn sign_in(
         SignInRequest {
             config: &config,
             client_secret,
-            purposes: &[Purpose::Mail],
+            purposes,
             wait: DEFAULT_WAIT,
         },
         &cancel,
@@ -467,6 +520,41 @@ mod tests {
         assert!(!SystemBrowser.open("http://example.com/"));
         assert!(!SystemBrowser.open("file:///c:/windows/system32/calc.exe"));
         assert!(!SystemBrowser.open("https://example.com/\r\nx"));
+    }
+
+    #[test]
+    fn purposes_default_to_mail_and_are_deduplicated() {
+        use OAuthPurposeV1::{Calendar, Mail};
+        assert_eq!(purposes_of(None), Ok(vec![Purpose::Mail]));
+        assert_eq!(purposes_of(Some(Vec::new())), Ok(vec![Purpose::Mail]));
+        assert_eq!(purposes_of(Some(vec![Mail])), Ok(vec![Purpose::Mail]));
+        assert_eq!(
+            purposes_of(Some(vec![Calendar])),
+            Ok(vec![Purpose::Calendar])
+        );
+        assert_eq!(
+            purposes_of(Some(vec![Calendar, Mail, Calendar, Mail, Mail])),
+            Ok(vec![Purpose::Calendar, Purpose::Mail])
+        );
+        assert!(
+            purposes_of(Some(vec![Mail; 500])).is_ok(),
+            "repeats collapse before the bound"
+        );
+    }
+
+    #[test]
+    fn purposes_serialize_as_snake_case_words() {
+        assert_eq!(
+            serde_json::to_string(&OAuthPurposeV1::Calendar).unwrap(),
+            "\"calendar\""
+        );
+        assert_eq!(
+            serde_json::to_string(&OAuthPurposeV1::Mail).unwrap(),
+            "\"mail\""
+        );
+        assert!(serde_json::from_str::<OAuthPurposeV1>("\"contacts\"").is_err());
+        assert_eq!(Purpose::from(OAuthPurposeV1::Mail), Purpose::Mail);
+        assert_eq!(Purpose::from(OAuthPurposeV1::Calendar), Purpose::Calendar);
     }
 
     #[test]
