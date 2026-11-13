@@ -11,6 +11,7 @@ import linear from "../marks/linear.svg";
 import notion from "../marks/notion.svg";
 import slack from "../marks/slack.svg";
 import spotify from "../marks/spotify.svg";
+import teams from "../marks/teams.svg";
 import whatsapp from "../marks/whatsapp.svg";
 import youtube from "../marks/youtube.svg";
 
@@ -38,6 +39,7 @@ export const SITES: readonly Site[] = [
   { id: "youtube", name: "YouTube", mark: { light: youtube } },
   { id: "spotify", name: "Spotify", mark: { light: spotify } },
   { id: "whatsapp", name: "WhatsApp", mark: { light: whatsapp } },
+  { id: "teams", name: "Teams", mark: { light: teams } },
 ];
 
 /** Fork: the sites already kept when the Essentials step first opens on a
@@ -52,6 +54,7 @@ export const DEFAULT_ESSENTIALS: readonly string[] = [
   "claude",
   "gemini",
   "spotify",
+  "teams",
 ];
 
 /** The address native keeps for each site, so chrome can tell which of them
@@ -71,6 +74,7 @@ export const SITE_URLS: Readonly<Record<string, string>> = {
   gemini: "https://gemini.google.com/app",
   youtube: "https://www.youtube.com/",
   spotify: "https://open.spotify.com/",
+  teams: "https://teams.microsoft.com/",
 };
 
 /** The browsers people most often come from, in the order they are offered

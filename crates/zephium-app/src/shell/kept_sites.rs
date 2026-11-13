@@ -43,6 +43,8 @@ pub(super) const KEPT_SITES: &[KeptSite] = &[
     site!("youtube", "YouTube", "https://www.youtube.com/"),
     site!("spotify", "Spotify", "https://open.spotify.com/"),
     site!("whatsapp", "WhatsApp", "https://web.whatsapp.com/"),
+    // Fork: Microsoft Teams joins the catalog.
+    site!("teams", "Teams", "https://teams.microsoft.com/"),
 ];
 
 /// Fork: the catalog sites kept once per install, in dock order, when the
@@ -51,7 +53,7 @@ pub(super) const KEPT_SITES: &[KeptSite] = &[
 /// Onboarding pre-selects the same list (`DEFAULT_ESSENTIALS` in
 /// `frame/src/features/onboarding/lib/catalog.ts`); keep the two equal.
 pub(super) const DEFAULT_ESSENTIALS: &[&str] = &[
-    "whatsapp", "github", "youtube", "claude", "gemini", "spotify",
+    "whatsapp", "github", "youtube", "claude", "gemini", "spotify", "teams",
 ];
 const DEFAULT_ESSENTIALS_SETTING: &str = "fork.default_essentials";
 

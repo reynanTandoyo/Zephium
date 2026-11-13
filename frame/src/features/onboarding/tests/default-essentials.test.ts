@@ -11,7 +11,7 @@ describe("DEFAULT_ESSENTIALS", () => {
     }
   });
 
-  test("keeps the fork's six sites in dock order", () => {
+  test("keeps the fork's seven sites in dock order", () => {
     expect(DEFAULT_ESSENTIALS).toEqual([
       "whatsapp",
       "github",
@@ -19,6 +19,7 @@ describe("DEFAULT_ESSENTIALS", () => {
       "claude",
       "gemini",
       "spotify",
+      "teams",
     ]);
   });
 });
