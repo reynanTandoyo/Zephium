@@ -1813,6 +1813,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             mail::mail_sync,
             mail::mail_messages,
             mail::mail_message,
+            mail::mail_fetch_remote_images,
+            mail::mail_set_account_order,
             mail::mail_attachment,
             mail::mail_set_flags,
             mail::mail_move,

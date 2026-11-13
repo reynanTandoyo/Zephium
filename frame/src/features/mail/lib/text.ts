@@ -1,6 +1,6 @@
 import type { MailFolderV1 } from "$shared/ipc/bindings";
 import * as m from "$shared/i18n/messages";
-import type { MailFailure } from "$domain/mail";
+import type { MailFailure, OAuthFailure } from "$domain/mail";
 
 /** What the person reads for a failed mail request. */
 export function reasonText(error: MailFailure | "no_folder"): string {
@@ -37,6 +37,30 @@ export function reasonText(error: MailFailure | "no_folder"): string {
       return m.mail_error_unavailable();
     default:
       return m.mail_error_internal();
+  }
+}
+
+/** What the person reads for a failed sign-in. Server and browser text never gets here. */
+export function oauthReasonText(error: OAuthFailure): string {
+  switch (error) {
+    case "invalid_input":
+      return m.mail_oauth_error_invalid_input();
+    case "denied":
+      return m.mail_oauth_error_denied();
+    case "rejected":
+      return m.mail_oauth_error_rejected();
+    case "timeout":
+      return m.mail_error_timeout();
+    case "offline":
+      return m.mail_error_offline();
+    case "busy":
+      return m.mail_error_busy();
+    case "credentials":
+      return m.mail_error_credentials();
+    case "unavailable":
+      return m.mail_error_unavailable();
+    default:
+      return m.mail_oauth_error_failed();
   }
 }
 

@@ -1,6 +1,6 @@
 <!--
   Mail settings: the accounts with their display name, colour and signature,
-  and removing one after a confirmation. The server and password are not
+  their order, and removing one after a confirmation. The server and password are not
   edited here; removing and adding the account again changes them.
 -->
 <script lang="ts">
@@ -23,15 +23,15 @@
     </div>
   </header>
 
-  {#if store.notice?.action === "account"}
+  {#if store.notice?.action === "account" || store.notice?.action === "order"}
     <p class="bad" role="alert">
       {m.mail_notice_failed({ reason: reasonText(store.notice.error) })}
     </p>
   {/if}
 
   <ul>
-    {#each store.accounts as account (account.id)}
-      <AccountEditor {store} {account} />
+    {#each store.accounts as account, index (account.id)}
+      <AccountEditor {store} {account} {index} count={store.accounts.length} />
     {/each}
   </ul>
 </section>

@@ -17,6 +17,7 @@ use zephium_mail::model::{
     self as mail, Account, Address, AttachmentInfo, Draft, Endpoint, FlagKind, FolderRole,
     MessageBody, MessageHeader, OutgoingAttachment, Security, WatchOutcome,
 };
+use zephium_mail::remote_images::{self, FetchedImage, ImageFetcher};
 use zephium_mail::smtp::LettreSender;
 use zephium_mail::transport::TlsConnectorImpl;
 use zephium_mail::vault::{OsVault, PasswordVault};
@@ -33,6 +34,10 @@ const SETTING_ENABLED: &str = "mail.enabled";
 /// JSON map of account id to [`AuthKind`] for OAuth accounts. Holds client
 /// IDs and tenants only, never a token; absent means a password account.
 const SETTING_AUTH: &str = "mail.auth";
+/// JSON array of account ids in the order the person arranged them. Ids that
+/// are missing from it (new accounts) follow in the order they were added;
+/// ids that no longer exist are ignored.
+const SETTING_ORDER: &str = "mail.account_order";
 const MAX_IN_FLIGHT: usize = 8;
 const MAX_DRAFT_BYTES: usize = 48 * 1024 * 1024;
 
@@ -310,6 +315,16 @@ pub(crate) struct MailBodyV1 {
     pub(crate) inline_images: Vec<MailInlineImageV1>,
 }
 
+/// A remote image the backend fetched for a message, as a `data:` URL. The
+/// frame substitutes it for `url` in the sanitised HTML.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+pub(crate) struct MailRemoteImageV1 {
+    /// The address exactly as the message wrote it.
+    pub(crate) url: String,
+    /// `data:image/{png,jpeg,gif,webp};base64,...`
+    pub(crate) data_url: String,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MailFlagV1 {
@@ -505,6 +520,58 @@ fn set_auth(id: &str, auth: Option<AuthKind>) -> bool {
     APP_STORE
         .get()
         .is_some_and(|store| store.set_app_setting(SETTING_AUTH.to_owned(), json))
+}
+
+/// Serializes the read-modify-write of the order list.
+static ORDER_LOCK: Mutex<()> = Mutex::new(());
+
+fn account_order() -> Vec<String> {
+    use zephium_core::ports::store::Store;
+    APP_STORE
+        .get()
+        .and_then(|store| store.app_setting(SETTING_ORDER))
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default()
+}
+
+fn store_account_order(order: &[String]) -> bool {
+    use zephium_core::ports::store::Store;
+    let Ok(json) = serde_json::to_string(order) else {
+        return false;
+    };
+    APP_STORE
+        .get()
+        .is_some_and(|store| store.set_app_setting(SETTING_ORDER.to_owned(), json))
+}
+
+/// Puts `items` in the order of `order`; items the list does not name keep
+/// their relative order after the named ones. Unknown ids are ignored.
+fn apply_order<T>(mut items: Vec<T>, order: &[String], id: impl Fn(&T) -> &str) -> Vec<T> {
+    // A stable sort keeps the added order among the unnamed ones.
+    items.sort_by_key(|item| {
+        order
+            .iter()
+            .position(|wanted| wanted == id(item))
+            .unwrap_or(usize::MAX)
+    });
+    items
+}
+
+/// A validated, de-duplicated copy of an order the frame sent.
+fn clean_order(order: Vec<String>) -> Result<Vec<String>, MailError> {
+    if order.len() > MAX_ACCOUNTS {
+        return Err(MailError::InvalidInput);
+    }
+    let mut seen: Vec<String> = Vec::with_capacity(order.len());
+    for id in order {
+        if !mail::id_ok(&id) {
+            return Err(MailError::InvalidInput);
+        }
+        if !seen.contains(&id) {
+            seen.push(id);
+        }
+    }
+    Ok(seen)
 }
 
 fn account_from_record(record: MailAccountRecord) -> Option<Account> {
@@ -1076,6 +1143,125 @@ impl ConfigFetcher for HttpsFetcher {
 }
 
 // ---------------------------------------------------------------------------
+// Remote images over HTTPS
+// ---------------------------------------------------------------------------
+
+/// Resolves a host name and keeps only public addresses, so a name that
+/// points inside the person's network (or changes its answer between a check
+/// and the connection) cannot be used to reach it.
+struct PublicOnlyResolver;
+
+fn public_only(addresses: Vec<std::net::SocketAddr>) -> Vec<std::net::SocketAddr> {
+    addresses
+        .into_iter()
+        .filter(|address| remote_images::is_public_ip(address.ip()))
+        .collect()
+}
+
+impl reqwest::dns::Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let found = tokio::task::spawn_blocking(move || {
+                std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), 0))
+                    .map(|addresses| addresses.collect::<Vec<_>>())
+            })
+            .await
+            .map_err(|error| Box::new(error) as Box<dyn std::error::Error + Send + Sync>)??;
+            let public = public_only(found);
+            if public.is_empty() {
+                return Err("no public address".into());
+            }
+            Ok(Box::new(public.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// Fetches remote images: no cookies, no referrer, no proxy (a proxy would
+/// resolve names where the address check cannot see), `https` only, a bounded
+/// number of redirects that each pass the same URL policy.
+struct ReqwestImages(reqwest::Client);
+
+impl ReqwestImages {
+    fn new() -> Option<Self> {
+        let client = reqwest::Client::builder()
+            .user_agent("Zephium")
+            .no_proxy()
+            .https_only(true)
+            .referer(false)
+            .connect_timeout(Duration::from_secs(6))
+            .timeout(remote_images::REMOTE_IMAGE_TIMEOUT)
+            .dns_resolver(std::sync::Arc::new(PublicOnlyResolver))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                // `previous` includes the first request.
+                let followed = attempt.previous().len().saturating_sub(1);
+                if remote_images::redirect_allowed(followed, attempt.url()) {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
+            .build()
+            .ok()?;
+        Some(Self(client))
+    }
+}
+
+impl ImageFetcher for ReqwestImages {
+    fn fetch<'a>(
+        &'a self,
+        url: &'a reqwest::Url,
+        max_bytes: usize,
+    ) -> BoxFuture<'a, Result<FetchedImage, MailError>> {
+        Box::pin(async move {
+            // The policy again, in case a caller skipped it.
+            remote_images::check_url(url.as_str())?;
+            let mut response = self
+                .0
+                .get(url.clone())
+                .header("accept", "image/png,image/jpeg,image/gif,image/webp")
+                .send()
+                .await
+                .map_err(|error| {
+                    if error.is_timeout() {
+                        MailError::Timeout
+                    } else {
+                        MailError::Offline
+                    }
+                })?;
+            // A redirect that the policy stopped arrives as a 3xx: not an image.
+            if !response.status().is_success()
+                || remote_images::check_url(response.url().as_str()).is_err()
+            {
+                return Err(MailError::NotFound);
+            }
+            if response
+                .content_length()
+                .is_some_and(|length| length > max_bytes as u64)
+            {
+                return Err(MailError::TooLarge);
+            }
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response.chunk().await.map_err(|_| MailError::Offline)? {
+                if bytes.len() + chunk.len() > max_bytes {
+                    return Err(MailError::TooLarge);
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(FetchedImage {
+                content_type,
+                bytes,
+            })
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
@@ -1360,6 +1546,15 @@ pub(crate) async fn mail_remove_account(caller: WebviewWindow, account: String) 
         OsVault.remove(&account)?;
         oauth::token_manager().sign_out(&account).await?;
         set_auth(&account, None);
+        {
+            // Forget its place in the order (best effort).
+            let _guard = ORDER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let order = account_order();
+            if order.contains(&account) {
+                let kept: Vec<String> = order.into_iter().filter(|id| *id != account).collect();
+                store_account_order(&kept);
+            }
+        }
         let id = account.clone();
         if !db(move |cache| cache.remove_account(&id)).await? {
             return Err(MailError::NotFound);
@@ -1381,17 +1576,41 @@ pub(crate) async fn mail_remove_account(caller: WebviewWindow, account: String) 
     outcome.map_err(Into::into)
 }
 
-/// The accounts, in the order they were added. No secrets.
+/// The accounts in the person's order (`mail.account_order`), then any
+/// others in the order they were added. No secrets.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn mail_accounts(caller: WebviewWindow) -> Reply<Vec<MailAccountV1>> {
     let _permit = gate(&caller, "mail_accounts")?;
     let records = db(|cache| cache.accounts()).await?;
-    Ok(records
+    let accounts: Vec<MailAccountV1> = records
         .into_iter()
         .filter_map(account_from_record)
         .map(|account| account_out(&account))
-        .collect())
+        .collect();
+    Ok(apply_order(accounts, &account_order(), |account| {
+        &account.id
+    }))
+}
+
+/// Saves the order the person arranged the accounts in. Unknown ids are
+/// harmless (ignored when reading); malformed ones are refused.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn mail_set_account_order(caller: WebviewWindow, order: Vec<String>) -> Reply<()> {
+    let _permit = gate(&caller, "mail_set_account_order")?;
+    let outcome = async {
+        let order = clean_order(order)?;
+        let _guard = ORDER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if store_account_order(&order) {
+            Ok(())
+        } else {
+            Err(MailError::Busy)
+        }
+    }
+    .await;
+    log("set_account_order", outcome.is_ok());
+    outcome.map_err(Into::into)
 }
 
 /// Folders from the local cache; reads the server only when nothing is cached.
@@ -1506,35 +1725,77 @@ pub(crate) async fn mail_message(
     let _permit = gate(&caller, "mail_message")?;
     let outcome = async {
         let account = load_account(&account).await?;
-        let (id, path) = (account.id.clone(), folder.clone());
-        let cached = db(move |cache| {
-            let body = cache.cached_body(&id, &path, uid)?;
-            let header = cache
-                .cached_headers(&id, &path, uid.checked_add(1), 1)?
-                .into_iter()
-                .find(|row| row.uid == uid);
-            Ok(body.zip(header))
-        })
-        .await
-        .unwrap_or(None);
-        if let Some((record, header)) = cached {
-            if let Some(body) = body_from_cache(&header_from_record(&header), &record) {
-                return Ok(body_out(&body));
-            }
-        }
-        let body = runtime().engine.message(&account, &folder, uid).await?;
-        if let Some(record) = body_record(&body) {
-            let (id, path) = (account.id.clone(), folder.clone());
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(0));
-            let _ = db(move |cache| cache.store_body(&id, &path, uid, &record, now)).await;
-        }
-        Ok::<_, MailError>(body_out(&body))
+        Ok::<_, MailError>(body_out(&read_body(&account, &folder, uid).await?))
     }
     .await;
     log("message", outcome.is_ok());
     outcome.map_err(Into::into)
+}
+
+/// A message body from the cache, or from the server (and then cached).
+async fn read_body(account: &Account, folder: &str, uid: u32) -> Result<MessageBody, MailError> {
+    let (id, path) = (account.id.clone(), folder.to_owned());
+    let cached = db(move |cache| {
+        let body = cache.cached_body(&id, &path, uid)?;
+        let header = cache
+            .cached_headers(&id, &path, uid.checked_add(1), 1)?
+            .into_iter()
+            .find(|row| row.uid == uid);
+        Ok(body.zip(header))
+    })
+    .await
+    .unwrap_or(None);
+    if let Some((record, header)) = cached {
+        if let Some(body) = body_from_cache(&header_from_record(&header), &record) {
+            return Ok(body);
+        }
+    }
+    let body = runtime().engine.message(account, folder, uid).await?;
+    if let Some(record) = body_record(&body) {
+        let (id, path) = (account.id.clone(), folder.to_owned());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(0));
+        let _ = db(move |cache| cache.store_body(&id, &path, uid, &record, now)).await;
+    }
+    Ok(body)
+}
+
+/// Fetches the remote images ("Load images") of one message as `data:` URLs.
+/// Only `https:` images that the message's own HTML references are fetched,
+/// with bounded count, size, time and redirects, from public addresses only,
+/// without cookies or credentials; anything that cannot be fetched safely is
+/// left out. The frame's CSP stays closed: it only ever shows `data:` images.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn mail_fetch_remote_images(
+    caller: WebviewWindow,
+    account: String,
+    folder: String,
+    uid: u32,
+    urls: Vec<String>,
+) -> Reply<Vec<MailRemoteImageV1>> {
+    let _permit = gate(&caller, "mail_fetch_remote_images")?;
+    let outcome = async {
+        let account = load_account(&account).await?;
+        let body = read_body(&account, &folder, uid).await?;
+        let html = body.html.as_deref().ok_or(MailError::InvalidInput)?;
+        let fetcher = ReqwestImages::new().ok_or(MailError::Internal)?;
+        remote_images::fetch_remote_images(html, &urls, &fetcher).await
+    }
+    .await;
+    log("fetch_remote_images", outcome.is_ok());
+    outcome
+        .map(|images| {
+            images
+                .into_iter()
+                .map(|image| MailRemoteImageV1 {
+                    url: image.url,
+                    data_url: image.data_url,
+                })
+                .collect()
+        })
+        .map_err(Into::into)
 }
 
 /// Saves one attachment where the person chooses. The bytes never reach the frame.
@@ -2047,6 +2308,72 @@ mod tests {
         let second = new_account_id().expect("id");
         assert!(mail::id_ok(&first));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn accounts_follow_the_saved_order_and_the_rest_keep_their_place() {
+        let ids = |items: Vec<&str>| items.into_iter().map(str::to_owned).collect::<Vec<_>>();
+        let order = ids(vec!["c", "gone", "a"]);
+        let sorted = apply_order(ids(vec!["a", "b", "c", "d"]), &order, |id| id.as_str());
+        assert_eq!(sorted, ids(vec!["c", "a", "b", "d"]));
+        let untouched = apply_order(ids(vec!["a", "b"]), &[], |id| id.as_str());
+        assert_eq!(untouched, ids(vec!["a", "b"]));
+    }
+
+    #[test]
+    fn a_saved_order_is_validated_bounded_and_deduplicated() {
+        let ids = |items: &[&str]| items.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            clean_order(ids(&["m1", "m2", "m1"])).expect("order"),
+            ids(&["m1", "m2"])
+        );
+        assert_eq!(
+            clean_order(Vec::new()).expect("empty"),
+            Vec::<String>::new()
+        );
+        assert_eq!(clean_order(ids(&["bad id"])), Err(MailError::InvalidInput));
+        assert_eq!(clean_order(ids(&[""])), Err(MailError::InvalidInput));
+        assert_eq!(clean_order(ids(&["../x"])), Err(MailError::InvalidInput));
+        let many = (0..=MAX_ACCOUNTS).map(|n| format!("m{n}")).collect();
+        assert_eq!(clean_order(many), Err(MailError::InvalidInput));
+    }
+
+    #[test]
+    fn the_image_resolver_drops_every_non_public_address() {
+        let addresses = [
+            "127.0.0.1",
+            "10.1.2.3",
+            "192.168.0.9",
+            "169.254.1.1",
+            "::1",
+            "fe80::1",
+            "93.184.216.34",
+        ]
+        .iter()
+        .map(|ip| std::net::SocketAddr::new(ip.parse().expect("ip"), 0))
+        .collect();
+        let kept = public_only(addresses);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].ip().to_string(), "93.184.216.34");
+        assert!(public_only(vec!["10.0.0.1:0".parse().expect("addr")]).is_empty());
+    }
+
+    #[test]
+    fn the_image_client_builds_and_refuses_unsafe_urls_before_any_request() {
+        let fetcher = ReqwestImages::new().expect("client");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        for url in [
+            "http://example.com/a.png",
+            "https://127.0.0.1/a.png",
+            "https://localhost/a.png",
+        ] {
+            let parsed = reqwest::Url::parse(url).expect("url");
+            let result = runtime.block_on(fetcher.fetch(&parsed, 1024));
+            assert_eq!(result, Err(MailError::InvalidInput), "{url}");
+        }
     }
 
     #[test]

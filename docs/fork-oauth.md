@@ -1,6 +1,6 @@
 # Fork guide: sign in to Gmail and Microsoft 365 with OAuth (T-0034)
 
-Status: **backend implemented**, interface pending. Owner: fork
+Status: **implemented** (backend and the sign-in fields in Mail setup). Owner: fork
 `reynanTandoyo/Zephium`.
 
 This page is for the person who wants to add a **Gmail** or **Microsoft 365 /

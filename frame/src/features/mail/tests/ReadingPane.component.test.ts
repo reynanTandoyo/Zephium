@@ -3,7 +3,7 @@ import { render } from "vitest-browser-svelte";
 import { page } from "vitest/browser";
 import "$styles/global.css";
 import MailPage from "../components/MailPage.svelte";
-import { account, body, folders, message, ok, pageOf } from "./fixtures";
+import { account, body, failed, folders, message, ok, pageOf } from "./fixtures";
 
 const native = vi.hoisted(() => ({
   accounts: vi.fn(),
@@ -13,6 +13,7 @@ const native = vi.hoisted(() => ({
   setFlags: vi.fn(),
   openUrl: vi.fn(),
   attachment: vi.fn(),
+  images: vi.fn(),
 }));
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
@@ -24,6 +25,7 @@ vi.mock("$shared/ipc/bindings", async () => {
     mailSetFlags: native.setFlags,
     browserOpenUrl: native.openUrl,
     mailAttachment: native.attachment,
+    mailFetchRemoteImages: native.images,
   });
 });
 
@@ -63,17 +65,55 @@ test("html mail is sanitised into a sandboxed frame with no script and a no-netw
   expect(doc).not.toMatch(/<script|onclick|javascript:|<base/iu);
 });
 
-test("remote images stay blocked until Load images, which applies to that message", async () => {
+const PIXEL = "data:image/png;base64,iVBORw0KGgo=";
+
+test("remote images stay blocked until Load images, which fetches them through the backend as data urls", async () => {
+  native.images.mockResolvedValue(ok([{ url: "https://tracker.example/p.gif", data_url: PIXEL }]));
   await openWith({ html: '<p>Hi</p><img src="https://tracker.example/p.gif" alt="t">' });
   await expect.element(page.getByText("Remote images are blocked.")).toBeVisible();
   await vi.waitFor(() => expect(frame()).not.toBeNull());
   expect(frame()!.getAttribute("srcdoc")).not.toContain("tracker.example");
+  expect(native.images).not.toHaveBeenCalled();
   await page.getByRole("button", { name: "Load images" }).click();
-  await vi.waitFor(() =>
-    expect(frame()!.getAttribute("srcdoc")).toContain("https://tracker.example/p.gif"),
-  );
-  expect(frame()!.getAttribute("srcdoc")).toContain("img-src data: https:");
+  expect(native.images).toHaveBeenCalledExactlyOnceWith("acc-1", "INBOX", 1, [
+    "https://tracker.example/p.gif",
+  ]);
+  await vi.waitFor(() => expect(frame()!.getAttribute("srcdoc")).toContain(`src="${PIXEL}"`));
+  // The frame itself still reaches nothing: the policy is unchanged and the address is gone.
+  const doc = frame()!.getAttribute("srcdoc")!;
+  expect(doc).toContain("default-src 'none'; img-src data:; style-src 'unsafe-inline'");
+  expect(doc).not.toMatch(/https:|tracker\.example/u);
   await expect.element(page.getByText("Remote images are blocked.")).not.toBeInTheDocument();
+});
+
+test("images the backend left out are reported, and http images offer no load", async () => {
+  native.images.mockResolvedValue(ok([{ url: "https://a.example/a.png", data_url: PIXEL }]));
+  await openWith({
+    html: '<img src="https://a.example/a.png"><img src="https://b.example/b.png"><img src="http://c.example/c.png">',
+  });
+  await page.getByRole("button", { name: "Load images" }).click();
+  await expect.element(page.getByText(/Some images were left out/u)).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "Load images" })).not.toBeInTheDocument();
+  expect(frame()!.getAttribute("srcdoc")).toContain(PIXEL);
+  expect(frame()!.getAttribute("srcdoc")).not.toMatch(/b\.example|c\.example/u);
+});
+
+test("a message with only http images has nothing to load", async () => {
+  await openWith({ html: '<img src="http://c.example/c.png">' });
+  await expect.element(page.getByText("Remote images are blocked.")).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "Load images" })).not.toBeInTheDocument();
+  expect(native.images).not.toHaveBeenCalled();
+});
+
+test("a failed image fetch says why and can be retried", async () => {
+  native.images.mockResolvedValueOnce(failed("offline"));
+  native.images.mockResolvedValueOnce(ok([{ url: "https://a.example/a.png", data_url: PIXEL }]));
+  await openWith({ html: '<img src="https://a.example/a.png">' });
+  await page.getByRole("button", { name: "Load images" }).click();
+  await expect.element(page.getByText(/Images could not be loaded/u)).toBeVisible();
+  expect(frame()!.getAttribute("srcdoc")).not.toContain(PIXEL);
+  await page.getByRole("button", { name: "Load images" }).click();
+  await vi.waitFor(() => expect(frame()!.getAttribute("srcdoc")).toContain(PIXEL));
 });
 
 test("cid images come from the message's own attachments as data urls", async () => {
