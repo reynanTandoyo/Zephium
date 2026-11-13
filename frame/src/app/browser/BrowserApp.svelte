@@ -82,6 +82,22 @@
 
   $effect(() => void applyLanguage(preferences.value("ui.language")));
 
+  // New-mail alerts and the unread count must run whatever the sidebar
+  // layout shows, so the app holds them while Mail is on. The mail domain
+  // loads on first need to keep it out of the startup bundle.
+  $effect(() => {
+    if (!preferences.enabled("mail")) return;
+    let alive = true;
+    let release: (() => void) | undefined;
+    void import("$domain/mail").then((mail) => {
+      if (alive) release = mail.mailUnread.hold();
+    });
+    return () => {
+      alive = false;
+      release?.();
+    };
+  });
+
   $effect(() => {
     theme.applyLayout({
       density: preferences.value("ui.density") === "compact" ? "compact" : "comfortable",
