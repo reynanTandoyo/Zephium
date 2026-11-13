@@ -597,6 +597,12 @@ export const fields = {
     description: m.feature_mail_on,
     initial: true,
   },
+  "mail.notifications": {
+    section: "features",
+    label: m.mail_notifications_title,
+    description: m.mail_notifications_on,
+    initial: true,
+  },
   "calendar.enabled": {
     section: "features",
     label: m.feature_calendar_title,

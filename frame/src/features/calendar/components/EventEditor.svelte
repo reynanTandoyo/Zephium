@@ -1,8 +1,8 @@
 <!--
   Create or change an event. The form holds a local draft; saving is a native
   call the page makes and settles, so a failure stays here with its reason and
-  nothing is shown as saved until the backend says so. Occurrence-only editing
-  would add a scope choice at the top of this form.
+  nothing is shown as saved until the backend says so. A repeating event is
+  edited with a scope chosen beforehand: `this` leaves the repeat rule alone.
 -->
 <script lang="ts">
   import { Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -11,9 +11,10 @@
   import Field from "$shared/ui/Field";
   import IconButton from "$shared/ui/IconButton";
   import Select from "$shared/ui/Select";
+  import RecurrenceFields from "./RecurrenceFields.svelte";
   import Switch from "$shared/ui/Switch";
   import TextArea from "$shared/ui/TextArea";
-  import { RECURRENCES, formToDraft, type EventForm, type Recurrence } from "$domain/calendar";
+  import { formToDraft, type EventForm, type Scope } from "$domain/calendar";
   import type { CalendarFault } from "$domain/calendar";
   import type { CalendarEventDraftV1 } from "$shared/ipc/bindings";
   import { faultText, reminderLabel } from "../lib/format";
@@ -21,6 +22,7 @@
   let {
     initial,
     editing,
+    scope,
     calendars,
     pending,
     fault,
@@ -30,6 +32,8 @@
     initial: EventForm;
     /** An existing event is being changed, not a new one made. */
     editing: boolean;
+    /** Which events a repeating event's change applies to; null when it does not repeat. */
+    scope: Scope | null;
     calendars: readonly { id: string; name: string }[];
     pending: boolean;
     fault: CalendarFault | null;
@@ -40,18 +44,8 @@
   // The draft is the person's to change; `initial` only seeds it.
   // svelte-ignore state_referenced_locally
   let form = $state<EventForm>({ ...initial });
-  let invalid = $state<"range" | "reminder" | null>(null);
+  let invalid = $state<"range" | "reminder" | "recurrence" | null>(null);
 
-  const recurrenceLabel: Record<Recurrence, () => string> = {
-    none: m.calendar_repeat_none,
-    daily: m.calendar_repeat_daily,
-    weekly: m.calendar_repeat_weekly,
-    monthly: m.calendar_repeat_monthly,
-    yearly: m.calendar_repeat_yearly,
-  };
-  const repeatOptions = $derived(
-    RECURRENCES.map((value) => ({ value, label: recurrenceLabel[value]() })),
-  );
   const reminderOptions = $derived([
     { value: "", label: m.calendar_reminder_none() },
     ...[0, 5, 10, 15, 30, 60, 1440].map((minutes) => ({
@@ -137,9 +131,16 @@
   <Field label={m.calendar_field_location()} bind:value={form.location} autocomplete="off" />
   <TextArea label={m.calendar_field_notes()} bind:value={form.description} />
 
-  <Select label={m.calendar_field_repeat()} options={repeatOptions} bind:value={form.recurrence} />
-  {#if form.recurrence !== "none"}
-    <p class="hint">{m.calendar_apply_all()}</p>
+  {#if scope === "this"}
+    <p class="hint">{m.calendar_scope_this_hint()}</p>
+  {:else}
+    <RecurrenceFields
+      bind:recurrence={form.recurrence}
+      error={invalid === "recurrence" ? m.calendar_error_recurrence() : undefined}
+    />
+    {#if scope === "all"}
+      <p class="hint">{m.calendar_apply_all()}</p>
+    {/if}
   {/if}
   <Select
     label={m.calendar_field_reminder()}

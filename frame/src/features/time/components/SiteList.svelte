@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { Globe02Icon } from "@hugeicons/core-free-icons";
+  import { Calendar01Icon, Globe02Icon, Mail01Icon } from "@hugeicons/core-free-icons";
   import type { SiteTimeView } from "$shared/ipc/bindings";
   import * as m from "$shared/i18n/messages";
   import { favicons } from "$domain/favicons";
-  import { duration, share } from "$domain/time";
+  import { duration, modePlace, share } from "$domain/time";
+  import { placeLabel } from "../lib/place";
   import FavIcon from "$shared/ui/FavIcon";
 
   let {
@@ -41,7 +42,8 @@
     </li>
   {/if}
   {#each shown as site, index (site.site)}
-    {@const mark = favicons.mark(site.icon, `https://${site.site}/`)}
+    {@const place = modePlace(site.site)}
+    {@const mark = place ? null : favicons.mark(site.icon, `https://${site.site}/`)}
     <li style:--enter={`${Math.min(index, 12) * 22}ms`}>
       <button
         type="button"
@@ -59,9 +61,9 @@
           tone={mark?.tone}
           size={size === "page" ? 18 : 16}
           lit
-          fallback={Globe02Icon}
+          fallback={place === "mail" ? Mail01Icon : place === "calendar" ? Calendar01Icon : Globe02Icon}
         />
-        <span class="name">{site.site}</span>
+        <span class="name">{placeLabel(site.site)}</span>
         {#if size === "page"}
           <span class="number">{site.opens}</span>
           <span class="number">{percent.format(share(site.seconds, total))}</span>

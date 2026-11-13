@@ -156,6 +156,52 @@
     );
     if (shifted.getTime() !== start.getTime()) onmove(current.event, shifted);
   }
+  // Moving a banner: only the day changes, read from where the pointer is
+  // across the banner area.
+  let bannerArea = $state<HTMLElement>();
+  let bannerMoving = $state<{ id: string; x: number } | null>(null);
+  let bannerPress: { event: PlacedEvent; column: number; x: number; active: boolean } | null = null;
+
+  function columnAt(clientX: number): number {
+    const box = bannerArea!.getBoundingClientRect();
+    const index = Math.floor(((clientX - box.left) / box.width) * days.length);
+    const clamped = Math.min(days.length - 1, Math.max(0, index));
+    return getComputedStyle(bannerArea!).direction === "rtl" ? days.length - 1 - clamped : clamped;
+  }
+  function bannerDown(pointer: PointerEvent, event: PlacedEvent) {
+    if (pointer.button !== 0 || !canMove(event)) return;
+    (pointer.currentTarget as HTMLElement).setPointerCapture(pointer.pointerId);
+    bannerPress = { event, column: columnAt(pointer.clientX), x: pointer.clientX, active: false };
+  }
+  function bannerMove(pointer: PointerEvent) {
+    if (!bannerPress) return;
+    const dx = pointer.clientX - bannerPress.x;
+    if (!bannerPress.active && Math.abs(dx) < DRAG_SLOP) return;
+    bannerPress.active = true;
+    bannerMoving = { id: bannerPress.event.id, x: dx };
+  }
+  function bannerUp(pointer: PointerEvent) {
+    const current = bannerPress;
+    bannerPress = null;
+    bannerMoving = null;
+    if (!current?.active) return;
+    suppressClick = true;
+    setTimeout(() => (suppressClick = false), 0);
+    const by = columnAt(pointer.clientX) - current.column;
+    if (by === 0) return;
+    const { start } = current.event;
+    onmove(
+      current.event,
+      new Date(
+        start.getFullYear(),
+        start.getMonth(),
+        start.getDate() + by,
+        start.getHours(),
+        start.getMinutes(),
+      ),
+    );
+  }
+
   const pick = (event: PlacedEvent) => {
     if (!suppressClick) onselect(event);
   };
@@ -178,7 +224,7 @@
   {#if bannerLanes > 0}
     <div class="banners" style:--lanes={bannerLanes}>
       <div class="gutter"></div>
-      <div class="banner-area">
+      <div class="banner-area" bind:this={bannerArea}>
         {#each days as day, index (dayKey(day))}
           <div class="banner-column" data-day={dayKey(day)} style:grid-column={index + 1}></div>
         {/each}
@@ -188,12 +234,24 @@
             type="button"
             class="chip"
             data-selected={selected === event.id || undefined}
+            data-movable={canMove(event) || undefined}
+            data-dragging={bannerMoving?.id === event.id || undefined}
             data-continues-before={segment.continuesBefore || undefined}
             data-continues-after={segment.continuesAfter || undefined}
+            style:transform={bannerMoving?.id === event.id
+              ? `translateX(${bannerMoving.x}px)`
+              : undefined}
             style:grid-column="{segment.column + 1} / span {segment.span}"
             style:grid-row={segment.lane + 1}
             style:--event-color={safeColor(event.occurrence.color)}
             aria-label={label(event)}
+            onpointerdown={(pointer) => bannerDown(pointer, event)}
+            onpointermove={bannerMove}
+            onpointerup={bannerUp}
+            onpointercancel={() => {
+              bannerPress = null;
+              bannerMoving = null;
+            }}
             onclick={() => pick(event)}
           >
             {event.occurrence.summary || m.calendar_untitled()}
@@ -368,6 +426,18 @@
     cursor: pointer;
   }
 
+  .chip[data-movable] {
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .chip[data-dragging] {
+    z-index: 3;
+    box-shadow: var(--shadow-card);
+    cursor: grabbing;
+    pointer-events: none;
+  }
+
   .chip[data-continues-before] {
     margin-inline-start: 0;
     border-start-start-radius: 0;
@@ -470,6 +540,7 @@
 
   .event[data-dragging] {
     z-index: 3;
+    pointer-events: none;
     box-shadow: var(--shadow-card);
     cursor: grabbing;
   }

@@ -32,6 +32,35 @@ pub enum Place {
     /// A registrable domain, such as `youtube.com`.
     Site(String),
     Work,
+    Mail,
+    Calendar,
+}
+
+/// Stored key of Mail and Calendar. A site key is a domain, which always holds
+/// a dot and never starts with `@`, so these cannot meet one; Work stays `""`.
+pub const MAIL_PLACE_KEY: &str = "@mail";
+pub const CALENDAR_PLACE_KEY: &str = "@calendar";
+
+impl Place {
+    /// The text a store keeps for this place.
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Site(site) => site,
+            Self::Work => "",
+            Self::Mail => MAIL_PLACE_KEY,
+            Self::Calendar => CALENDAR_PLACE_KEY,
+        }
+    }
+
+    /// The place a stored key names; any other text is a site.
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "" => Self::Work,
+            MAIL_PLACE_KEY => Self::Mail,
+            CALENDAR_PLACE_KEY => Self::Calendar,
+            site => Self::Site(site.to_owned()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -560,6 +589,21 @@ mod tests {
             profile: profile(),
             place: Place::Site(name.into()),
         })
+    }
+
+    #[test]
+    fn place_keys_round_trip_and_never_collide_with_a_site() {
+        for place in [
+            Place::Work,
+            Place::Mail,
+            Place::Calendar,
+            Place::Site("example.com".into()),
+        ] {
+            assert_eq!(Place::from_key(place.key()), place);
+        }
+        assert_eq!(Place::from_key(""), Place::Work);
+        assert!(normalize_site(MAIL_PLACE_KEY).is_none_or(|site| site != MAIL_PLACE_KEY));
+        assert!(!MAIL_PLACE_KEY.contains('.') && !CALENDAR_PLACE_KEY.contains('.'));
     }
 
     #[test]

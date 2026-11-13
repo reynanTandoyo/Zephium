@@ -169,6 +169,8 @@ impl Shell {
         }
         let place = match self.active_browser_page() {
             Some(crate::BrowserPage::Work) => Place::Work,
+            Some(crate::BrowserPage::Mail) => Place::Mail,
+            Some(crate::BrowserPage::Calendar) => Place::Calendar,
             Some(_) => return None,
             None => {
                 let tab = self.items.tab(window.active?)?;
@@ -381,17 +383,24 @@ impl Shell {
             browse: seconds(bucket.browse_ms),
             work: seconds(bucket.work_ms),
         };
+        // Mail and Calendar are listed under their reserved keys and have no
+        // site icon to look up.
         let pages: Vec<String> = report
             .sites
             .iter()
-            .map(|entry| format!("https://{}/", entry.site))
+            .map(|entry| match Place::from_key(&entry.site) {
+                Place::Site(site) => format!("https://{site}/"),
+                _ => String::new(),
+            })
             .collect();
         let sites = report
             .sites
             .into_iter()
             .zip(&pages)
             .map(|(entry, page)| SiteTimeView {
-                icon: self.icon_ref_for_url(IconSurface::Chrome, profile, page),
+                icon: (!page.is_empty())
+                    .then(|| self.icon_ref_for_url(IconSurface::Chrome, profile, page))
+                    .flatten(),
                 site: entry.site,
                 seconds: seconds(entry.spent_ms),
                 opens: entry.opens,
@@ -404,7 +413,7 @@ impl Shell {
             sites
                 .iter()
                 .zip(&pages)
-                .filter(|(site, _)| site.icon.is_none())
+                .filter(|(site, page)| site.icon.is_none() && !page.is_empty())
                 .map(|(_, page)| page.as_str()),
         );
         self.publish_icons();

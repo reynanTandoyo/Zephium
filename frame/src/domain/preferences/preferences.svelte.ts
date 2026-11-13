@@ -64,6 +64,7 @@ const defaults = {
   "tabs.external-position": "new-tab",
   "tabs.close-button": "hover",
   "mail.enabled": "true",
+  "mail.notifications": "true",
   "calendar.enabled": "true",
   "notes.enabled": "true",
   "tasks.enabled": "true",

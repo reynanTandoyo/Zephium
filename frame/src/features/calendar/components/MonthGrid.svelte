@@ -69,8 +69,21 @@
 
   const canMove = (event: PlacedEvent) => editPolicy(event.occurrence) === "edit";
 
-  function down(pointer: PointerEvent, event: PlacedEvent, day: Date) {
+  /** The day of the week row a press landed on, so a bar spanning several
+   *  days moves by how far it was dragged, not from its first day. */
+  function dayPressed(pointer: PointerEvent, row: readonly Date[]): Date {
+    const week = (pointer.currentTarget as HTMLElement).parentElement!;
+    const box = week.getBoundingClientRect();
+    const index = Math.min(
+      6,
+      Math.max(0, Math.floor(((pointer.clientX - box.left) / box.width) * 7)),
+    );
+    return row[getComputedStyle(week).direction === "rtl" ? 6 - index : index]!;
+  }
+
+  function down(pointer: PointerEvent, event: PlacedEvent, row: readonly Date[]) {
     if (pointer.button !== 0 || !canMove(event)) return;
+    const day = dayPressed(pointer, row);
     (pointer.currentTarget as HTMLElement).setPointerCapture(pointer.pointerId);
     press = { event, day, x: pointer.clientX, y: pointer.clientY, active: false };
   }
@@ -163,7 +176,7 @@
             style:--event-color={safeColor(event.occurrence.color)}
             style:transform={dragged ? `translate(${moving!.x}px, ${moving!.y}px)` : undefined}
             aria-label="{event.occurrence.summary || m.calendar_untitled()}, {eventWhen(event)}"
-            onpointerdown={(pointer) => down(pointer, event, week.row[segment.column]!)}
+            onpointerdown={(pointer) => down(pointer, event, week.row)}
             onpointermove={drag}
             onpointerup={up}
             onpointercancel={() => {
@@ -327,6 +340,7 @@
 
   .bar[data-dragging] {
     z-index: 3;
+    pointer-events: none;
     background: var(--color-card);
     box-shadow: var(--shadow-card);
   }
