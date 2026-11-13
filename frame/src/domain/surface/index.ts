@@ -1,3 +1,3 @@
 export * as surface from "./surface.svelte";
-export type { ModeEntry, ModeId, ModePage } from "./modes";
+export type { ModeId } from "./modes";
 export { holdChromeModal } from "./chrome-modal";

@@ -6,7 +6,6 @@ import { events } from "$shared/ipc/native-events";
 import { isModePage } from "./modes";
 
 export { MODES, enabledModes, isModePage, modeOf } from "./modes";
-export type { ModeEntry, ModeId, ModePage } from "./modes";
 
 export type BrowserPage =
   | "settings"

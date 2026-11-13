@@ -91,6 +91,7 @@ mod launcher_trigger;
 mod legacy_vault;
 // Fork (T-0008): AI apps on this computer as model backends.
 mod ai_apps;
+mod calendar;
 #[cfg(target_os = "linux")]
 mod linux_global_shortcuts;
 #[cfg(any(target_os = "linux", test))]
@@ -155,7 +156,6 @@ mod work_diagnostics;
 mod work_folders;
 mod work_memory;
 mod work_models;
-mod calendar;
 #[cfg(any(feature = "work-product", test))]
 mod work_operations;
 mod work_personal;

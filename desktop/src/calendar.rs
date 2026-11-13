@@ -105,7 +105,12 @@ pub(crate) async fn calendar_add_account(
 ) -> Result<CalendarAccountV1, CalendarError> {
     let service = service(&app, &caller, "calendar_add_account")?;
     let account = service
-        .add_account(&server_url, &username, Secret::new(password), name.as_deref())
+        .add_account(
+            &server_url,
+            &username,
+            Secret::new(password),
+            name.as_deref(),
+        )
         .await?;
     changed(&app);
     tauri::async_runtime::spawn(async move {
