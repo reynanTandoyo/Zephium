@@ -70,9 +70,6 @@ Last ID: T-0046
 
 ## Open
 
-- [ ] T-0015 · Modes: make Work-only Rust branches mode-aware · area: crates/zephium-app/src/shell/{spaces,operations,time,media,browser_pages}.rs · owner: - · updated: 2026-11-13
-  - Switching space keeps the mode, typing an address returns to Browse, time tracking records the mode. Update the Rust tests in `shell/tests`.
-  - 2026-11-13: `5a86ca30c` made spaces/operations/browser_pages mode-aware. Open: time tracking for Mail/Calendar (`Place` only has Site/Work; needs a store change), and media/space/address branches treat every mode like Work.
 - [ ] T-0024 · Mail: several accounts per profile · area: zephium-store, frame/src/features/mail · owner: - · updated: 2026-11-13
   - Display name, colour, signature; reorder and remove accounts.
   - 2026-11-13: several accounts, display name/colour/signature/remove done in the UI; reorder missing (no backend command). Wave 3.
@@ -108,6 +105,10 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0015 · Modes: make Work-only Rust branches mode-aware · area: crates/zephium-app/src/shell/{spaces,operations,time,media,browser_pages}.rs · owner: orca w1-modes + w3-time-modes · updated: 2026-11-13
+  - Switching space keeps the mode, typing an address returns to Browse, time tracking records the mode. Update the Rust tests in `shell/tests`.
+  - 2026-11-13: `5a86ca30c` made spaces/operations/browser_pages mode-aware. Open: time tracking for Mail/Calendar (`Place` only has Site/Work; needs a store change), and media/space/address branches treat every mode like Work.
+  - `284890e65`, `661d7fc58`, `132ea35bd`: `Place::Mail`/`Calendar` stored as reserved keys `@mail`/`@calendar` (no migration, old rows load); media show-tab and delete-space kept Work-only, switch_space/typed address shared. clippy clean; core+store time tests 39, app shell tests 766 pass (1 load timeout passes alone); frame typecheck/lint/unit pass (Windows).
 - [x] T-0043 · Calendar: create, edit, move and delete events · area: frame/src/features/calendar, crates/zephium-calendar · owner: orca w2-calendar-ui + w2-calendar-store · updated: 2026-11-13
   - Writable CalDAV calendars; title, time, all-day, location, notes, recurrence, reminders; drag to move.
   - 2026-11-13: UI for create/edit/move/delete done (`6727a4639`); recurring events are view/delete-only until the backend exposes series info and `calendar_update_occurrence` (calendar-store worker). All-day banner drag not done.
