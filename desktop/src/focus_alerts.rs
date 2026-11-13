@@ -247,9 +247,83 @@ pub fn phase_ended(app: &tauri::AppHandle, alert: &str) {
     notify("app.zephium.focus", title, body);
 }
 
+/// One identifier for every mail batch: a newer batch replaces the last
+/// toast rather than stacking a column of counts.
+const MAIL_ALERT: &str = "app.zephium.mail";
+/// Longest title or body a mail toast may carry; a count sentence is far shorter.
+const MAIL_TEXT_MAX: usize = 120;
+
+/// A toast for a batch of new mail. The frame counts the batch and words it
+/// in the person's language; this only checks the text is a short line. No
+/// sender, subject or message body ever reaches this function.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn mail_notify_new(caller: tauri::WebviewWindow, title: String, body: String) {
+    if !super::authorize(&caller, super::CallerPolicy::Main, "mail_notify_new") {
+        return;
+    }
+    let Some((title, body)) = mail_toast(&title, &body) else {
+        return;
+    };
+    ask_to_notify();
+    notify(MAIL_ALERT, &title, &body);
+}
+
+/// The toast a mail batch shows, or nothing when the text is empty, too long
+/// or carries a line break a single-line toast cannot show.
+fn mail_toast(title: &str, body: &str) -> Option<(String, String)> {
+    let line = |text: &str| {
+        // A carriage return or line feed anywhere is refused, not trimmed away.
+        let fits = !text.contains(['\n', '\r']) && text.chars().count() <= MAIL_TEXT_MAX;
+        let text = text.trim();
+        (fits && !text.is_empty()).then(|| text.to_owned())
+    };
+    Some((line(title)?, line(body)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mail_batch_is_one_short_count_line_and_nothing_else() {
+        assert_eq!(
+            mail_toast("New mail", "3 new messages"),
+            Some(("New mail".into(), "3 new messages".into()))
+        );
+        // One toast per batch: every batch shares the one identifier.
+        assert_eq!(toast_tag(MAIL_ALERT), toast_tag(MAIL_ALERT));
+        assert_ne!(toast_tag(MAIL_ALERT), toast_tag("app.zephium.focus"));
+    }
+
+    #[test]
+    fn empty_long_or_multiline_mail_text_posts_nothing() {
+        assert_eq!(mail_toast("", "1 new message"), None);
+        assert_eq!(mail_toast("New mail", "   "), None);
+        assert_eq!(mail_toast("New mail", "1 new message\nFrom: someone"), None);
+        assert_eq!(mail_toast("New mail\r", "1 new message"), None);
+        let long = "n".repeat(MAIL_TEXT_MAX + 1);
+        assert_eq!(mail_toast("New mail", &long), None);
+        let exact = "n".repeat(MAIL_TEXT_MAX);
+        assert_eq!(
+            mail_toast("New mail", &exact),
+            Some(("New mail".into(), exact))
+        );
+    }
+
+    #[test]
+    fn a_mail_toast_is_escaped_text_only() {
+        let (title, body) = mail_toast("New mail", "2 new messages <b>&</b>").expect("short line");
+        assert_eq!(
+            toast_xml(&title, &body),
+            concat!(
+                "<toast><visual><binding template=\"ToastGeneric\">",
+                "<text>New mail</text>",
+                "<text>2 new messages &lt;b&gt;&amp;&lt;/b&gt;</text>",
+                "</binding></visual></toast>"
+            )
+        );
+    }
 
     #[test]
     fn toast_text_is_escaped_and_nothing_else_is_added() {

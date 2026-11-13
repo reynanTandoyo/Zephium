@@ -71,6 +71,7 @@ pub const KEYS: &[&str] = &[
     "work.favourite-models",
     "zoom.default",
     "privacy.smartscreen",
+    "mail.notifications",
 ];
 
 /// SmartScreen ships on. Only an explicit persisted false disables the
@@ -342,6 +343,7 @@ pub fn value_allowed(key: &str, value: &str) -> bool {
         | "performance.sleep"
         | "updates.auto-check"
         | "privacy.smartscreen"
+        | "mail.notifications"
         | "focus.breaks" => {
             matches!(value, "true" | "false")
         }
