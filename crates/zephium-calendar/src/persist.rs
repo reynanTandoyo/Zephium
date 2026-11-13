@@ -8,7 +8,7 @@
 //! deleted, and if that fails too it stays where it is but is ignored from then
 //! on because the database is no longer empty.
 
-use crate::api::{CalendarAccountKindV1, CalendarAccountV1, CalendarV1};
+use crate::api::{CalendarAccountKindV1, CalendarAccountV1, CalendarOAuthV1, CalendarV1};
 use crate::error::{CalendarError, Result};
 use crate::store::{
     CacheMeta, CachedRecord, CalendarStorage, EventCache, JsonFileStorage, StoredState,
@@ -23,6 +23,40 @@ use zephium_store::calendar_cache::{
 use zephium_store::SqliteStore;
 
 const STATE_VERSION: u32 = 1;
+/// The store only knows the kinds `caldav` and `subscription`, so an OAuth
+/// account is saved as `caldav` with this marker in its user-name column:
+/// `oauth1<TAB>provider<TAB>client id<TAB>tenant<TAB>address`. Neither the
+/// client ID nor the tenant can hold a tab (both are validated), so the split
+/// is unambiguous.
+const OAUTH_MARK: &str = "oauth1\t";
+
+fn encode_oauth(account: &CalendarAccountV1) -> Option<String> {
+    let oauth = account.oauth.as_ref()?;
+    let provider = match account.kind {
+        CalendarAccountKindV1::Google => "google",
+        CalendarAccountKindV1::Microsoft => "microsoft",
+        _ => return None,
+    };
+    Some(format!(
+        "{OAUTH_MARK}{provider}\t{}\t{}\t{}",
+        oauth.client_id,
+        oauth.tenant.as_deref().unwrap_or(""),
+        account.username.as_deref().unwrap_or("")
+    ))
+}
+
+fn decode_oauth(text: &str) -> Option<(CalendarAccountKindV1, CalendarOAuthV1, Option<String>)> {
+    let mut parts = text.strip_prefix(OAUTH_MARK)?.splitn(4, '\t');
+    let kind = match parts.next()? {
+        "google" => CalendarAccountKindV1::Google,
+        "microsoft" => CalendarAccountKindV1::Microsoft,
+        _ => return None,
+    };
+    let client_id = parts.next()?.to_owned();
+    let tenant = Some(parts.next()?.to_owned()).filter(|tenant| !tenant.is_empty());
+    let address = Some(parts.next()?.to_owned()).filter(|address| !address.is_empty());
+    (!client_id.is_empty()).then_some((kind, CalendarOAuthV1 { client_id, tenant }, address))
+}
 /// Name a migrated `calendar.json` is renamed to.
 pub const MIGRATED_FILE: &str = "calendar.json.migrated";
 
@@ -56,16 +90,31 @@ impl StoreCalendar {
             accounts: accounts
                 .into_iter()
                 .filter_map(|record| {
+                    let oauth = record.username.as_deref().and_then(decode_oauth);
+                    if record.kind == "caldav"
+                        && record
+                            .username
+                            .as_deref()
+                            .is_some_and(|name| name.starts_with(OAUTH_MARK))
+                        && oauth.is_none()
+                    {
+                        return None;
+                    }
+                    let (kind, oauth, username) = match (record.kind.as_str(), oauth) {
+                        ("caldav", Some((kind, oauth, address))) => (kind, Some(oauth), address),
+                        ("caldav", None) => (CalendarAccountKindV1::Caldav, None, record.username),
+                        ("subscription", _) => {
+                            (CalendarAccountKindV1::Subscription, None, record.username)
+                        }
+                        _ => return None,
+                    };
                     Some(CalendarAccountV1 {
                         id: record.id,
-                        kind: match record.kind.as_str() {
-                            "caldav" => CalendarAccountKindV1::Caldav,
-                            "subscription" => CalendarAccountKindV1::Subscription,
-                            _ => return None,
-                        },
+                        kind,
                         name: record.name,
                         server_url: record.server_url,
-                        username: record.username,
+                        username,
+                        oauth,
                     })
                 })
                 .collect(),
@@ -91,13 +140,13 @@ impl StoreCalendar {
             .map(|account| CalendarAccountRecord {
                 id: account.id.clone(),
                 kind: match account.kind {
-                    CalendarAccountKindV1::Caldav => "caldav",
                     CalendarAccountKindV1::Subscription => "subscription",
+                    _ => "caldav",
                 }
                 .to_owned(),
                 name: account.name.clone(),
                 server_url: account.server_url.clone(),
-                username: account.username.clone(),
+                username: encode_oauth(account).or_else(|| account.username.clone()),
             })
             .collect();
         let calendars: Vec<CalendarRecord> = state

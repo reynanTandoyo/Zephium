@@ -23,6 +23,9 @@ use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use url::Url;
+use zephium_oauth::manager::TokenSessions;
+
+mod oauth;
 
 /// Most occurrences returned by one query.
 pub const MAX_OCCURRENCES_PER_QUERY: usize = 5_000;
@@ -36,6 +39,7 @@ const SYNC_FUTURE_DAYS: i64 = 730;
 /// How old a calendar may get before a periodic refresh re-reads it.
 const CALDAV_STALE_MINUTES: i64 = 15;
 const SUBSCRIPTION_STALE_MINUTES: i64 = 60;
+const OAUTH_STALE_MINUTES: i64 = 10;
 
 const PALETTE: [&str; 8] = [
     "#4285F4", "#0B8043", "#E67C73", "#F6BF26", "#8E24AA", "#039BE5", "#F4511E", "#616161",
@@ -74,6 +78,9 @@ pub struct CalendarService {
     secrets: Arc<dyn SecretStore>,
     cache: Arc<dyn EventCache>,
     clock: Clock,
+    /// Sign-in port for Google and Microsoft accounts; absent when the host
+    /// has none.
+    tokens: Option<Arc<dyn TokenSessions>>,
     inner: Mutex<Inner>,
     sync_gate: tokio::sync::Mutex<()>,
 }
@@ -142,6 +149,7 @@ impl CalendarService {
             secrets,
             cache,
             clock,
+            tokens: None,
             inner: Mutex::new(Inner {
                 state,
                 caches: HashMap::new(),
@@ -339,6 +347,7 @@ impl CalendarService {
                 .unwrap_or_else(|| server.host_str().unwrap_or("CalDAV").to_owned()),
             server_url: server.to_string(),
             username: Some(username.to_owned()),
+            oauth: None,
         };
         let result = {
             let mut inner = self.lock();
@@ -398,6 +407,7 @@ impl CalendarService {
             name: name.clone(),
             server_url: address.to_string(),
             username: None,
+            oauth: None,
         };
         let calendar = CalendarV1 {
             id: new_id(),
@@ -572,6 +582,9 @@ impl CalendarService {
                         .map_or(CALDAV_STALE_MINUTES, |account| match account.kind {
                             CalendarAccountKindV1::Caldav => CALDAV_STALE_MINUTES,
                             CalendarAccountKindV1::Subscription => SUBSCRIPTION_STALE_MINUTES,
+                            CalendarAccountKindV1::Google | CalendarAccountKindV1::Microsoft => {
+                                OAUTH_STALE_MINUTES
+                            }
                         });
                     inner
                         .caches
@@ -630,6 +643,9 @@ impl CalendarService {
             cache.synced_at = Some(self.now());
             self.save_all(&calendar.id, cache);
             return Ok(());
+        }
+        if account.kind.is_oauth() {
+            return self.sync_oauth(&calendar, &account).await;
         }
         let credentials = self.credentials_for(&account)?;
         let client = CaldavClient::new(self.http.as_ref(), credentials);
@@ -756,7 +772,7 @@ impl CalendarService {
             .find(|account| account.id == calendar.account_id)
             .cloned()
             .ok_or(CalendarError::NotFound)?;
-        if calendar.read_only || account.kind != CalendarAccountKindV1::Caldav {
+        if calendar.read_only || account.kind == CalendarAccountKindV1::Subscription {
             return Err(CalendarError::ReadOnly);
         }
         Ok((calendar, account))
@@ -812,6 +828,9 @@ impl CalendarService {
         draft: &CalendarEventDraftV1,
     ) -> Result<CalendarEventRefV1> {
         let (calendar, account) = self.writable(calendar_id)?;
+        if account.kind.is_oauth() {
+            return self.oauth_create(&calendar, &account, draft).await;
+        }
         let uid = format!("{}@zephium", new_id().to_ascii_lowercase());
         let event = apply_draft(&uid, draft, None)?;
         let ics = ical::serialize_event(&event, self.now());
@@ -873,7 +892,10 @@ impl CalendarService {
         uid: &str,
         draft: &CalendarEventDraftV1,
     ) -> Result<CalendarEventRefV1> {
-        self.writable(calendar_id)?;
+        let (calendar, account) = self.writable(calendar_id)?;
+        if account.kind.is_oauth() {
+            return self.oauth_update(&calendar, &account, uid, draft).await;
+        }
         let (href, resource, master) = self.master_of(calendar_id, uid)?;
         let updated = apply_draft(uid, draft, Some(&master))?;
         self.put_master(calendar_id, uid, &href, &resource, updated)
@@ -900,24 +922,17 @@ impl CalendarService {
         Ok(instance)
     }
 
-    /// Changes one occurrence of a recurring event by writing a
-    /// RECURRENCE-ID override; the series and its other exceptions stay.
-    /// `recurrence_id` is the occurrence's `recurrence_id` as listed. The
-    /// draft's `rrule` is ignored.
-    pub async fn update_occurrence(
-        &self,
-        calendar_id: &str,
-        uid: &str,
-        recurrence_id: &str,
+    /// The RECURRENCE-ID override that `draft` makes of the instance of
+    /// `master` starting at `instance` (an existing override is the base).
+    fn occurrence_override(
+        master: &Event,
+        instance: &EventTime,
         draft: &CalendarEventDraftV1,
-    ) -> Result<CalendarEventRefV1> {
-        self.writable(calendar_id)?;
-        let (href, resource, mut master) = self.master_of(calendar_id, uid)?;
-        let instance = Self::instance_of(&master, recurrence_id)?;
+    ) -> Result<Event> {
         let same = |item: &Event| {
             item.recurrence_id
                 .as_ref()
-                .is_some_and(|id| recur::same_time(id, &instance))
+                .is_some_and(|id| recur::same_time(id, instance))
         };
         let base = master
             .overrides
@@ -930,19 +945,47 @@ impl CalendarService {
                 base.rrule = None;
                 base.rdates.clear();
                 base.exdates.clear();
-                base.end = recur::instance_end(&master, &instance);
+                base.end = recur::instance_end(master, instance);
                 base.start = instance.clone();
                 base
             });
         let mut draft = draft.clone();
         draft.rrule = None;
         draft.recurrence = None;
-        let mut item = apply_draft(uid, &draft, Some(&base))?;
+        let mut item = apply_draft(&master.uid, &draft, Some(&base))?;
         item.recurrence_id = Some(instance.clone());
         item.rrule = None;
         item.rdates.clear();
         item.exdates.clear();
         item.overrides.clear();
+        Ok(item)
+    }
+
+    /// Changes one occurrence of a recurring event by writing a
+    /// RECURRENCE-ID override; the series and its other exceptions stay.
+    /// `recurrence_id` is the occurrence's `recurrence_id` as listed. The
+    /// draft's `rrule` is ignored.
+    pub async fn update_occurrence(
+        &self,
+        calendar_id: &str,
+        uid: &str,
+        recurrence_id: &str,
+        draft: &CalendarEventDraftV1,
+    ) -> Result<CalendarEventRefV1> {
+        let (calendar, account) = self.writable(calendar_id)?;
+        if account.kind.is_oauth() {
+            return self
+                .oauth_update_occurrence(&calendar, &account, uid, recurrence_id, draft)
+                .await;
+        }
+        let (href, resource, mut master) = self.master_of(calendar_id, uid)?;
+        let instance = Self::instance_of(&master, recurrence_id)?;
+        let same = |item: &Event| {
+            item.recurrence_id
+                .as_ref()
+                .is_some_and(|id| recur::same_time(id, &instance))
+        };
+        let item = Self::occurrence_override(&master, &instance, draft)?;
         master.overrides.retain(|existing| !same(existing));
         if master.overrides.len() >= ical::MAX_LIST {
             return Err(CalendarError::Limit);
@@ -965,7 +1008,12 @@ impl CalendarService {
         uid: &str,
         recurrence_id: &str,
     ) -> Result<()> {
-        self.writable(calendar_id)?;
+        let (calendar, account) = self.writable(calendar_id)?;
+        if account.kind.is_oauth() {
+            return self
+                .oauth_delete_occurrence(&calendar, &account, uid, recurrence_id)
+                .await;
+        }
         let (href, resource, mut master) = self.master_of(calendar_id, uid)?;
         let instance = Self::instance_of(&master, recurrence_id)?;
         master.overrides.retain(|item| {
@@ -992,7 +1040,10 @@ impl CalendarService {
 
     /// Deletes an event (the whole series for recurring events).
     pub async fn delete_event(&self, calendar_id: &str, uid: &str) -> Result<()> {
-        let (_, account) = self.writable(calendar_id)?;
+        let (calendar, account) = self.writable(calendar_id)?;
+        if account.kind.is_oauth() {
+            return self.oauth_delete(&calendar, &account, uid).await;
+        }
         let (href, resource) = self
             .locate(calendar_id, uid)
             .ok_or(CalendarError::NotFound)?;

@@ -1,6 +1,7 @@
 //! Fork-owned calendar backend: iCalendar parsing and recurrence expansion,
-//! CalDAV accounts, read-only ICS subscriptions and an event cache that is
-//! kept in memory and persisted through [`store::EventCache`].
+//! CalDAV accounts, Google Calendar and Microsoft Graph accounts (OAuth),
+//! read-only ICS subscriptions and an event cache that is kept in memory and
+//! persisted through [`store::EventCache`].
 //!
 //! Network access goes through [`http::HttpClient`], durable bookkeeping
 //! through [`store::CalendarStorage`] and passwords through
@@ -16,6 +17,7 @@ pub mod http;
 pub mod ical;
 pub mod model;
 pub mod persist;
+pub mod provider;
 pub mod recur;
 pub mod recurrence;
 pub mod service;

@@ -26,6 +26,7 @@ fn state() -> StoredState {
                 name: "Work".to_owned(),
                 server_url: "https://dav.example.com/".to_owned(),
                 username: Some("ann".to_owned()),
+                oauth: None,
             },
             CalendarAccountV1 {
                 id: "A2".to_owned(),
@@ -33,6 +34,7 @@ fn state() -> StoredState {
                 name: "Holidays".to_owned(),
                 server_url: "https://example.org/h.ics".to_owned(),
                 username: None,
+                oauth: None,
             },
         ],
         calendars: vec![

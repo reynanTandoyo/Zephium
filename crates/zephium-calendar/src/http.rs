@@ -19,6 +19,10 @@ pub enum Method {
     Get,
     /// `PUT`
     Put,
+    /// `POST`
+    Post,
+    /// `PATCH`
+    Patch,
     /// `DELETE`
     Delete,
     /// `PROPFIND`
@@ -33,6 +37,8 @@ impl Method {
         match self {
             Self::Get => "GET",
             Self::Put => "PUT",
+            Self::Post => "POST",
+            Self::Patch => "PATCH",
             Self::Delete => "DELETE",
             Self::Propfind => "PROPFIND",
             Self::Report => "REPORT",
@@ -84,6 +90,8 @@ pub struct HttpRequest {
     pub body: Vec<u8>,
     /// Basic credentials, sent only to the origin they were given for.
     pub credentials: Option<Credentials>,
+    /// OAuth bearer token, sent only to the origin it was given for.
+    pub bearer: Option<Secret>,
 }
 
 impl HttpRequest {
@@ -95,6 +103,7 @@ impl HttpRequest {
             headers: Vec::new(),
             body: Vec::new(),
             credentials: None,
+            bearer: None,
         }
     }
 
@@ -108,6 +117,12 @@ impl HttpRequest {
     pub fn body(mut self, content_type: &'static str, body: Vec<u8>) -> Self {
         self.headers.push(("content-type", content_type.to_owned()));
         self.body = body;
+        self
+    }
+
+    /// Sets the OAuth bearer token.
+    pub fn bearer(mut self, token: Option<Secret>) -> Self {
+        self.bearer = token;
         self
     }
 
@@ -222,6 +237,7 @@ pub async fn send(client: &dyn HttpClient, mut request: HttpRequest) -> Result<H
         check_url(&next)?;
         if !same_origin(&request.url, &next) {
             request.credentials = None;
+            request.bearer = None;
         }
         if response.status == 303 && request.method != Method::Get {
             request.method = Method::Get;
@@ -233,7 +249,8 @@ pub async fn send(client: &dyn HttpClient, mut request: HttpRequest) -> Result<H
     Err(CalendarError::Server)
 }
 
-/// Maps a final status to the closed error set.
+/// Maps a final status to the closed error set. A rate limit (429) is
+/// [`CalendarError::Limit`].
 pub fn check_status(status: u16) -> Result<()> {
     match status {
         200..=299 => Ok(()),
@@ -243,6 +260,7 @@ pub fn check_status(status: u16) -> Result<()> {
         405 | 501 => Err(CalendarError::Unsupported),
         409 | 412 => Err(CalendarError::Conflict),
         413 | 507 => Err(CalendarError::TooLarge),
+        429 => Err(CalendarError::Limit),
         _ => Err(CalendarError::Server),
     }
 }
@@ -286,6 +304,9 @@ impl HttpClient for ReqwestClient {
         if let Some(credentials) = &request.credentials {
             builder =
                 builder.basic_auth(&credentials.username, Some(credentials.password.expose()));
+        }
+        if let Some(token) = &request.bearer {
+            builder = builder.bearer_auth(token.expose());
         }
         if !request.body.is_empty() {
             builder = builder.body(request.body);
