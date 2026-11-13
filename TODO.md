@@ -64,12 +64,85 @@ One task is one bullet in exactly one status section:
   it waits for.
 - Keep entries short. Design notes belong in `docs/` or a PR, not here.
 
-Last ID: T-0009
+Last ID: T-0046
 
 ## In progress
 
 ## Open
 
+- [ ] T-0010 · Modes: define the mode list as data · area: frame/src/domain/surface, frame/src/features/sidebar · owner: - · updated: 2026-11-13
+  - `{ page, label, icon, feature }` in order Browse, Work, Mail, Calendar; a mode is hidden when its feature is off. Today "Browse" means no full-window page and "Work" is `BrowserPage::Work`.
+- [ ] T-0011 · Modes: `ModeTabs` shows N modes · area: frame/src/features/sidebar/components/ModeTabs.svelte · owner: - · updated: 2026-11-13
+  - Replace the two-option segmented control with one driven by T-0010; update `ModeTabs.component.test.ts`.
+- [ ] T-0012 · Modes: `ModeWord` rail switch shows N modes · area: frame/src/features/sidebar/components/ModeWord.svelte · owner: - · updated: 2026-11-13
+  - N-cell grid and moving thumb instead of `repeat(2, …)` and `data-work=true/false`.
+- [ ] T-0013 · Modes: generalise "in Work" into "in a full-window mode" · area: frame/src/app/browser/Shell.svelte, Sidebar.svelte, session/tools.svelte.ts, AddressField, SidebarSearch, BrowserApp · owner: - · updated: 2026-11-13
+  - About 60 frontend lines check `inWork` / `=== "work"`. Shared mode behaviour: compact rail, no address field, tabs open over the mode, follows space changes. Keep Work-only parts (canvas, Work pane, tool redirect) for Work. Update `Shell` and `surface` tests.
+- [ ] T-0014 · Modes: Rust `BrowserPage::Mail` and `BrowserPage::Calendar` · area: crates/zephium-app/src/api.rs, desktop/src/lib.rs (`browser.*` match), crates/zephium-core/src/commands.rs · owner: - · updated: 2026-11-13
+  - Variants, `command_id`, `feature()`, `feature_of`, the `browser.*` match, and regenerated bindings.
+- [ ] T-0015 · Modes: make Work-only Rust branches mode-aware · area: crates/zephium-app/src/shell/{spaces,operations,time,media,browser_pages}.rs · owner: - · updated: 2026-11-13
+  - Switching space keeps the mode, typing an address returns to Browse, time tracking records the mode. Update the Rust tests in `shell/tests`.
+- [ ] T-0016 · Modes: generated native `mode.choose` menu · area: desktop/src/lib.rs (~4024-4044) · owner: - · updated: 2026-11-13
+  - Today it is hard-coded to Browse and Work.
+- [ ] T-0017 · Modes: Mail and Calendar switches in Settings → Features · area: frame/src/features/settings/lib/catalog.ts, frame/src/domain/preferences · owner: - · updated: 2026-11-13
+  - `mail.enabled`, `calendar.enabled`; turning one off while in its mode returns to Browse (like `operations.rs` does for Work).
+- [ ] T-0018 · Modes: texts and the onboarding mock switch · area: frame/messages (13 locales), frame/src/features/onboarding/components/Window.svelte · owner: - · updated: 2026-11-13
+  - `mode_mail`, `mode_calendar`, update `ui_mode_work_hint`; the onboarding window draws a fake two-tab switch.
+- [ ] T-0019 · Mail: check the company server type in Thunderbird · area: (user) · owner: user · updated: 2026-11-13
+  - Thunderbird → Account Settings → Server Settings: IMAP / POP / Exchange, and the server names; also whether the work calendar is CalDAV or Exchange. Decides T-0034 and T-0040.
+- [ ] T-0020 · Mail: crate `zephium-mail` with IMAP over TLS · area: new crates/zephium-mail · owner: - · updated: 2026-11-13
+  - `async-imap` + rustls; IDLE for push; bounded reads; all server data is untrusted input. Unit tests against a fake IMAP server.
+- [ ] T-0021 · Mail: MIME parsing · area: crates/zephium-mail · owner: - · updated: 2026-11-13
+  - `mail-parser`: headers, text, HTML, inline images, attachments, encodings; size limits.
+- [ ] T-0022 · Mail: account setup with automatic server lookup · area: crates/zephium-mail, desktop IPC `mail_*`, frame/src/features/mail · owner: - · updated: 2026-11-13
+  - Address + password; Mozilla ISPDB / `autoconfig.<domain>` / `.well-known/autoconfig` / SRV lookup; manual host, port and security fallback; "Test connection".
+- [ ] T-0023 · Mail: passwords in Windows Credential Manager · area: crates/zephium-credentials, crates/zephium-mail · owner: - · updated: 2026-11-13
+  - Never in the store, logs, diagnostics or IPC.
+- [ ] T-0024 · Mail: several accounts per profile · area: zephium-store, frame/src/features/mail · owner: - · updated: 2026-11-13
+  - Display name, colour, signature; reorder and remove accounts.
+- [ ] T-0025 · Mail: local cache in the store · area: crates/zephium-store (new mail tables + migration) · owner: - · updated: 2026-11-13
+  - Headers, flags, bodies on demand; bounded size; sync state per folder (UIDVALIDITY, MODSEQ/CONDSTORE).
+- [ ] T-0026 · Mail: folder list and combined inbox · area: frame/src/features/mail, crates/zephium-mail · owner: - · updated: 2026-11-13
+  - Inbox, Sent, Drafts, Trash, Archive, Junk via SPECIAL-USE; unread counts; "All inboxes".
+- [ ] T-0027 · Mail: message list with threads · area: frame/src/features/mail · owner: - · updated: 2026-11-13
+  - Sender, subject, date, snippet, unread/flag/attachment marks; threading by `References`/`In-Reply-To`; virtual scrolling (`shared/lib/virtual-window`).
+- [ ] T-0028 · Mail: safe reading pane · area: frame/src/features/mail, desktop (locked-down view) · owner: - · updated: 2026-11-13
+  - Text and HTML with no scripts; remote images blocked until "Load images"; links open as browser tabs and show their real target; attachments save/open. Follow docs/security-model.md.
+- [ ] T-0029 · Mail: sending via SMTP · area: crates/zephium-mail · owner: - · updated: 2026-11-13
+  - `lettre`, STARTTLS/SSL, auth; store a copy in Sent where the server does not.
+- [ ] T-0030 · Mail: compose, reply, reply all, forward · area: frame/src/features/mail · owner: - · updated: 2026-11-13
+  - Plain text first, simple rich text later; attachments; signatures; "From" picker across accounts; drafts saved to the Drafts folder.
+- [ ] T-0031 · Mail: message actions · area: frame/src/features/mail, crates/zephium-mail · owner: - · updated: 2026-11-13
+  - Mark read/unread, flag, move/copy (drag to folder), delete to Trash, archive, mark junk; keyboard shortcuts.
+- [ ] T-0032 · Mail: search · area: crates/zephium-mail, zephium-store · owner: - · updated: 2026-11-13
+  - Local search of cached mail plus server-side IMAP SEARCH.
+- [ ] T-0033 · Mail: new-mail notifications and unread badge · area: desktop/src/focus_alerts.rs, frame/src/features/sidebar · owner: - · updated: 2026-11-13
+  - Windows toast; unread count on the Mail mode button.
+- [ ] T-0034 · Mail: Microsoft 365 / Gmail sign-in (OAuth2, XOAUTH2) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
+  - Needs app registrations with Microsoft and Google (client IDs), done by the user. Only if T-0019 shows it is needed, or for personal accounts.
+- [ ] T-0035 · Mail: Exchange support (EWS or Microsoft Graph) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
+  - Only if the company server is Exchange without IMAP (see T-0019).
+- [ ] T-0036 · Mail: extras · area: crates/zephium-mail, frame/src/features/mail · owner: - · updated: 2026-11-13
+  - POP3 (optional), offline mode, rules/filters, contact suggestions from sent mail, `mailto:` links opening Zephium's compose.
+- [ ] T-0037 · Calendar: crate and iCalendar parsing · area: new crates/zephium-calendar · owner: - · updated: 2026-11-13
+  - `.ics` events with time zones, all-day events and recurrence (RRULE, EXDATE, overrides), e.g. the `icalendar`/`rrule` crates; bounded input.
+- [ ] T-0038 · Calendar: CalDAV accounts · area: crates/zephium-calendar, desktop IPC `calendar_*` · owner: - · updated: 2026-11-13
+  - Discovery via `.well-known/caldav` and the email domain; username/password in Credential Manager (shared with T-0023).
+- [ ] T-0039 · Calendar: ICS subscription links · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
+  - Read-only calendars from secret addresses (Google, Outlook, others).
+- [ ] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
+  - Shares sign-in with T-0034; only if needed (see T-0019).
+- [ ] T-0041 · Calendar: local cache and sync · area: crates/zephium-store (calendar tables + migration), crates/zephium-calendar · owner: - · updated: 2026-11-13
+  - Sync tokens / ETags; periodic and manual refresh.
+- [ ] T-0042 · Calendar: day, week, month and agenda views · area: frame/src/features/calendar, frame/src/domain/calendar · owner: - · updated: 2026-11-13
+  - Several calendars overlaid with colours and show/hide toggles; Today button; mini month navigator.
+- [ ] T-0043 · Calendar: create, edit, move and delete events · area: frame/src/features/calendar, crates/zephium-calendar · owner: - · updated: 2026-11-13
+  - Writable CalDAV calendars; title, time, all-day, location, notes, recurrence, reminders; drag to move.
+- [ ] T-0044 · Calendar: reminders as Windows notifications · area: desktop/src/focus_alerts.rs, crates/zephium-calendar · owner: - · updated: 2026-11-13
+- [ ] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: - · updated: 2026-11-13
+  - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
+- [ ] T-0046 · Calendar: links with Time, Tasks and meeting links · area: frame/src/features/time, frame/src/features/tasks, frame/src/features/calendar · owner: - · updated: 2026-11-13
+  - Today's events in the Time panel / new tab; link events to Tasks; open Teams/Meet/Zoom links as tabs.
 - [ ] T-0002 · Launch `pnpm dev` and confirm "Zephium Dev" starts · area: desktop, frame · owner: - · updated: 2026-11-13
   - Must not touch the installed Zephium or its profile.
 - [ ] T-0004 · Decide on fork releases for colleague updates · area: .github, desktop · owner: - · updated: 2026-11-13
