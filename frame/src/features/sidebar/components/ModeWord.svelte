@@ -5,10 +5,24 @@
   import { untrack } from "svelte";
   import { chooseMode, modeOptions } from "../lib/modes";
 
-  let { standalone = false }: { standalone?: boolean } = $props();
+  let {
+    standalone = false,
+    count = 0,
+    badge = null,
+  }: {
+    standalone?: boolean;
+    /** Unread mail in every inbox, named on the Mail mark. */
+    count?: number;
+    /** The capped count the Mail mark shows, or null for none. */
+    badge?: string | null;
+  } = $props();
 
   const modes = $derived(modeOptions());
   const current = $derived(surface.modeOf(surface.currentPage()));
+  // Names the Mail mark with its count for assistive technology; the mark
+  // itself shows only the capped count.
+  const nameOf = (value: string, label: string) =>
+    value === "mail" && badge !== null ? m.mode_mail_unread({ count }) : label;
   const index = $derived(
     Math.max(
       0,
@@ -47,11 +61,18 @@
       type="button"
       class="mode"
       aria-pressed={current === mode.value}
-      aria-label={mode.label}
+      aria-label={nameOf(mode.value, mode.label)}
       title={mode.label}
       onclick={() => {
         if (current !== mode.value) chooseMode(mode.value);
-      }}><Icon icon={mode.icon} size={15} strokeWidth={1.7} /></button
+      }}
+      ><Icon
+        icon={mode.icon}
+        size={15}
+        strokeWidth={1.7}
+      />{#if mode.value === "mail" && badge !== null}<span class="count" aria-hidden="true"
+          >{badge}</span
+        >{/if}</button
     >{/each}
 </div>
 
@@ -131,6 +152,39 @@
   .mode:focus-visible {
     outline: 2px solid var(--color-ring);
     outline-offset: -2px;
+  }
+
+  /* Unread mail: a small count pinned to the Mail mark's corner. */
+  .count {
+    position: absolute;
+    inset-block-start: -3px;
+    inset-inline-end: -4px;
+    min-inline-size: 13px;
+    height: 13px;
+    box-sizing: border-box;
+    padding-inline: 3px;
+    border-radius: var(--radius-capsule);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-size: 8px;
+    font-weight: 600;
+    line-height: 13px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .count {
+      animation: count-in var(--motion-fast) var(--ease-spring);
+    }
+  }
+
+  @keyframes count-in {
+    from {
+      scale: 0.5;
+      opacity: 0;
+    }
   }
 
   /* Beside a tool panel the rail has no header to hold it off the window's
