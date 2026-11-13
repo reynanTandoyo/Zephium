@@ -241,6 +241,13 @@ impl ImapSession {
         };
         self.drain_unsolicited();
         match result {
+            // A server must report UIDVALIDITY on SELECT. Its absence means the
+            // stream ended mid-command, which must read as a dead connection and
+            // never as an empty folder.
+            Ok(mailbox) if mailbox.uid_validity.is_none() => {
+                self.selected = None;
+                Err(MailError::Offline)
+            }
             Ok(mailbox) => {
                 self.selected = Some((path.to_owned(), write));
                 Ok(mailbox)

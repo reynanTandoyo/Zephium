@@ -25,4 +25,4 @@ url.workspace = true
 ulid.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["net", "time", "io-util", "rt"] }
+tokio = { workspace = true, features = ["net", "time", "io-util", "rt", "test-util", "macros", "sync"] }
