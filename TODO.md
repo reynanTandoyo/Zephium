@@ -120,16 +120,11 @@ Last ID: T-0046
   - Needs app registrations with Microsoft and Google (client IDs), done by the user. Only if T-0019 shows it is needed, or for personal accounts.
 - [ ] T-0036 · Mail: extras · area: crates/zephium-mail, frame/src/features/mail · owner: - · updated: 2026-11-13
   - POP3 (optional), offline mode, rules/filters, contact suggestions from sent mail, `mailto:` links opening Zephium's compose.
-- [ ] T-0037 · Calendar: crate and iCalendar parsing · area: new crates/zephium-calendar · owner: - · updated: 2026-11-13
-  - `.ics` events with time zones, all-day events and recurrence (RRULE, EXDATE, overrides), e.g. the `icalendar`/`rrule` crates; bounded input.
-- [ ] T-0038 · Calendar: CalDAV accounts · area: crates/zephium-calendar, desktop IPC `calendar_*` · owner: - · updated: 2026-11-13
-  - Discovery via `.well-known/caldav` and the email domain; username/password in Credential Manager (shared with T-0023).
-- [ ] T-0039 · Calendar: ICS subscription links · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
-  - Read-only calendars from secret addresses (Google, Outlook, others).
 - [ ] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
   - Shares sign-in with T-0034; only if needed (see T-0019).
 - [ ] T-0041 · Calendar: local cache and sync · area: crates/zephium-store (calendar tables + migration), crates/zephium-calendar · owner: - · updated: 2026-11-13
   - Sync tokens / ETags; periodic and manual refresh.
+  - 2026-11-13: in-memory cache done in `zephium-calendar` (`ccf74bf31`); persistent zephium-store tables still open (wave 2).
 - [ ] T-0042 · Calendar: day, week, month and agenda views · area: frame/src/features/calendar, frame/src/domain/calendar · owner: - · updated: 2026-11-13
   - Several calendars overlaid with colours and show/hide toggles; Today button; mini month navigator.
 - [ ] T-0043 · Calendar: create, edit, move and delete events · area: frame/src/features/calendar, crates/zephium-calendar · owner: - · updated: 2026-11-13
@@ -153,6 +148,16 @@ Last ID: T-0046
 ## Blocked
 
 ## Done
+
+- [x] T-0037 · Calendar: crate and iCalendar parsing · area: new crates/zephium-calendar · owner: orca w3-calendar · updated: 2026-11-13
+  - `.ics` events with time zones, all-day events and recurrence (RRULE, EXDATE, overrides), e.g. the `icalendar`/`rrule` crates; bounded input.
+  - `ccf74bf31`: new `zephium-calendar` (iCalendar parse/serialize, RRULE/RDATE/EXDATE/overrides, time zones). `cargo test -p zephium-calendar` 48 passed, clippy -D warnings clean (Windows).
+- [x] T-0038 · Calendar: CalDAV accounts · area: crates/zephium-calendar, desktop IPC `calendar_*` · owner: orca w3-calendar · updated: 2026-11-13
+  - Discovery via `.well-known/caldav` and the email domain; username/password in Credential Manager (shared with T-0023).
+  - `ccf74bf31` + `033ea500e`: CalDAV discovery/PROPFIND/REPORT/sync-token/ETag, 12 `calendar_*` IPC commands, `zephium:calendar-changed`. No real-server test; editing one instance of a recurring series not supported yet.
+- [x] T-0039 · Calendar: ICS subscription links · area: crates/zephium-calendar · owner: orca w3-calendar · updated: 2026-11-13
+  - Read-only calendars from secret addresses (Google, Outlook, others).
+  - `ccf74bf31`: ICS/webcal subscriptions (read-only). Tested with fakes only.
 
 - [x] T-0005 · Remove stale feature exceptions `focus`/`activity`/`resources` · area: frame/architecture.config.js · owner: orca w4-stale · updated: 2026-11-13
   - `c7b3ecd28`: dropped the three names. `pnpm --dir frame run lint` exit 0, vitest `architecture.config` 9/9 (Windows).
