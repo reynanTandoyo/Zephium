@@ -119,7 +119,7 @@
         <span class="pill-label" data-level={subject.effort}>{effortName(subject.effort)}</span>
         <span class="pill-chevron"><Icon icon={ArrowDown01Icon} size={12} strokeWidth={2.2} /></span
         >
-      </button>{:else}<span class="fixed">{m.model_effort_fixed()}</span>{/if}
+      </button>{:else}<span class="pace">{m.model_effort_fixed()}</span>{/if}
   </div>
   <div
     class="face effort"
@@ -264,7 +264,7 @@
     opacity: 0.7;
   }
 
-  .fixed {
+  .pace {
     flex: none;
     padding-inline: 4px;
     color: var(--color-faint);
