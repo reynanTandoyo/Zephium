@@ -73,32 +73,24 @@ Last ID: T-0046
 - [ ] T-0015 · Modes: make Work-only Rust branches mode-aware · area: crates/zephium-app/src/shell/{spaces,operations,time,media,browser_pages}.rs · owner: - · updated: 2026-11-13
   - Switching space keeps the mode, typing an address returns to Browse, time tracking records the mode. Update the Rust tests in `shell/tests`.
   - 2026-11-13: `5a86ca30c` made spaces/operations/browser_pages mode-aware. Open: time tracking for Mail/Calendar (`Place` only has Site/Work; needs a store change), and media/space/address branches treat every mode like Work.
-- [ ] T-0020 · Mail: crate `zephium-mail` with IMAP over TLS · area: new crates/zephium-mail · owner: - · updated: 2026-11-13
-  - `async-imap` + rustls; IDLE for push; bounded reads; all server data is untrusted input. Unit tests against a fake IMAP server.
-- [ ] T-0021 · Mail: MIME parsing · area: crates/zephium-mail · owner: - · updated: 2026-11-13
-  - `mail-parser`: headers, text, HTML, inline images, attachments, encodings; size limits.
 - [ ] T-0022 · Mail: account setup with automatic server lookup · area: crates/zephium-mail, desktop IPC `mail_*`, frame/src/features/mail · owner: - · updated: 2026-11-13
   - Address + password; Mozilla ISPDB / `autoconfig.<domain>` / `.well-known/autoconfig` / SRV lookup; manual host, port and security fallback; "Test connection".
-- [ ] T-0023 · Mail: passwords in Windows Credential Manager · area: crates/zephium-credentials, crates/zephium-mail · owner: - · updated: 2026-11-13
-  - Never in the store, logs, diagnostics or IPC.
+  - 2026-11-13: backend autoconfig (ISPDB, autoconfig.<domain>, .well-known) + `mail_autoconfig`/`mail_test_account` done (`80dc4770c`, `ba6def012`); UI in wave 2.
 - [ ] T-0024 · Mail: several accounts per profile · area: zephium-store, frame/src/features/mail · owner: - · updated: 2026-11-13
   - Display name, colour, signature; reorder and remove accounts.
-- [ ] T-0025 · Mail: local cache in the store · area: crates/zephium-store (new mail tables + migration) · owner: - · updated: 2026-11-13
-  - Headers, flags, bodies on demand; bounded size; sync state per folder (UIDVALIDITY, MODSEQ/CONDSTORE).
 - [ ] T-0026 · Mail: folder list and combined inbox · area: frame/src/features/mail, crates/zephium-mail · owner: - · updated: 2026-11-13
   - Inbox, Sent, Drafts, Trash, Archive, Junk via SPECIAL-USE; unread counts; "All inboxes".
 - [ ] T-0027 · Mail: message list with threads · area: frame/src/features/mail · owner: - · updated: 2026-11-13
   - Sender, subject, date, snippet, unread/flag/attachment marks; threading by `References`/`In-Reply-To`; virtual scrolling (`shared/lib/virtual-window`).
 - [ ] T-0028 · Mail: safe reading pane · area: frame/src/features/mail, desktop (locked-down view) · owner: - · updated: 2026-11-13
   - Text and HTML with no scripts; remote images blocked until "Load images"; links open as browser tabs and show their real target; attachments save/open. Follow docs/security-model.md.
-- [ ] T-0029 · Mail: sending via SMTP · area: crates/zephium-mail · owner: - · updated: 2026-11-13
-  - `lettre`, STARTTLS/SSL, auth; store a copy in Sent where the server does not.
 - [ ] T-0030 · Mail: compose, reply, reply all, forward · area: frame/src/features/mail · owner: - · updated: 2026-11-13
   - Plain text first, simple rich text later; attachments; signatures; "From" picker across accounts; drafts saved to the Drafts folder.
 - [ ] T-0031 · Mail: message actions · area: frame/src/features/mail, crates/zephium-mail · owner: - · updated: 2026-11-13
   - Mark read/unread, flag, move/copy (drag to folder), delete to Trash, archive, mark junk; keyboard shortcuts.
 - [ ] T-0032 · Mail: search · area: crates/zephium-mail, zephium-store · owner: - · updated: 2026-11-13
   - Local search of cached mail plus server-side IMAP SEARCH.
+  - 2026-11-13: server-side IMAP SEARCH + `mail_search` done (`ba6def012`); UI in wave 2.
 - [ ] T-0033 · Mail: new-mail notifications and unread badge · area: desktop/src/focus_alerts.rs, frame/src/features/sidebar · owner: - · updated: 2026-11-13
   - Windows toast; unread count on the Mail mode button.
 - [ ] T-0034 · Mail: Microsoft 365 / Gmail sign-in (OAuth2, XOAUTH2) · area: crates/zephium-mail · owner: - · updated: 2026-11-13
@@ -134,6 +126,21 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0020 · Mail: crate `zephium-mail` with IMAP over TLS · area: new crates/zephium-mail · owner: orca w2-mail-core · updated: 2026-11-13
+  - `async-imap` + rustls; IDLE for push; bounded reads; all server data is untrusted input. Unit tests against a fake IMAP server.
+  - `80dc4770c`, `a0a1a8d84`, `21e8684c3`: `zephium-mail` IMAP over rustls, IDLE watch, bounded reads; 15 fake-IMAP-server flow tests pass. clippy -D warnings clean (Windows).
+- [x] T-0021 · Mail: MIME parsing · area: crates/zephium-mail · owner: orca w2-mail-core · updated: 2026-11-13
+  - `mail-parser`: headers, text, HTML, inline images, attachments, encodings; size limits.
+  - `80dc4770c`: MIME via `mail-parser` with size caps; unit tests with `.eml` fixtures pass. clippy -D warnings clean (Windows).
+- [x] T-0023 · Mail: passwords in Windows Credential Manager · area: crates/zephium-credentials, crates/zephium-mail · owner: orca w2-mail-core · updated: 2026-11-13
+  - Never in the store, logs, diagnostics or IPC.
+  - `80dc4770c`: passwords only in the OS vault as `app.zephium.mail|<account id>`, never in store/IPC. clippy -D warnings clean (Windows).
+- [x] T-0025 · Mail: local cache in the store · area: crates/zephium-store (new mail tables + migration) · owner: orca w2-mail-core · updated: 2026-11-13
+  - Headers, flags, bodies on demand; bounded size; sync state per folder (UIDVALIDITY, MODSEQ/CONDSTORE).
+  - `205615d43`, `6f92f9c73`: META migration v29 + pinned fingerprint, mail cache tables; 69 store mail/migration tests pass. clippy -D warnings clean (Windows).
+- [x] T-0029 · Mail: sending via SMTP · area: crates/zephium-mail · owner: orca w2-mail-core · updated: 2026-11-13
+  - `lettre`, STARTTLS/SSL, auth; store a copy in Sent where the server does not.
+  - `80dc4770c`: SMTP via `lettre` transport (rustls), copy to Sent per account setting. Real SMTP/STARTTLS untested (no network by rule). clippy -D warnings clean (Windows).
 - [x] T-0018 · Modes: texts and the onboarding mock switch · area: frame/messages (13 locales), frame/src/features/onboarding/components/Window.svelte · owner: orca w1-modes · updated: 2026-11-13
   - `mode_mail`, `mode_calendar`, update `ui_mode_work_hint`; the onboarding window draws a fake two-tab switch.
   - `d1d96ab24` texts in 13 locales; `8742f1cd2` onboarding mock shows Browse/Work/Mail/Calendar. Frame typecheck/lint, onboarding unit 19 + component 9 pass, frame build within unchanged budgets (Windows).
