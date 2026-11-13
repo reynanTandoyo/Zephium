@@ -6,6 +6,9 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
+/// The result of a cache operation, so callers need no SQLite dependency.
+pub type CacheResult<T> = rusqlite::Result<T>;
+
 /// Accounts kept.
 pub const MAX_MAIL_ACCOUNTS: usize = 16;
 /// Header rows kept per folder; the lowest UIDs go first.
@@ -460,6 +463,29 @@ impl<'a> MailCache<'a> {
         )? > 0)
     }
 
+    /// Sets or clears one flag bit on cached messages, leaving the others.
+    pub fn update_flag_bit(
+        &mut self,
+        account_id: &str,
+        folder: &str,
+        uids: &[u32],
+        bit: u8,
+        on: bool,
+    ) -> rusqlite::Result<usize> {
+        let sql = if on {
+            "UPDATE mail_messages SET flags = flags | ?4 WHERE account_id = ?1 AND folder = ?2 AND uid = ?3"
+        } else {
+            "UPDATE mail_messages SET flags = flags & ~?4 WHERE account_id = ?1 AND folder = ?2 AND uid = ?3"
+        };
+        let tx = self.conn.transaction()?;
+        let mut changed = 0;
+        for uid in uids {
+            changed += tx.execute(sql, params![account_id, folder, uid, bit])?;
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     /// Drops messages from the cache (after a move, delete or expunge).
     pub fn remove_messages(
         &mut self,
@@ -548,7 +574,7 @@ impl<'a> MailCache<'a> {
         folder: &str,
         uid: u32,
     ) -> rusqlite::Result<Option<MailBodyRecord>> {
-        let row: Option<(Option<String>, Option<String>, Option<String>, bool, i64)> = self
+        let row: Option<(MailBodyRecord, i64)> = self
             .conn
             .query_row(
                 "SELECT body_text, body_html, body_attachments_json, body_truncated, body_bytes
@@ -556,23 +582,18 @@ impl<'a> MailCache<'a> {
                 params![account_id, folder, uid],
                 |row| {
                     Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
+                        MailBodyRecord {
+                            text: row.get(0)?,
+                            html: row.get(1)?,
+                            attachments_json: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                            truncated: row.get(3)?,
+                        },
                         row.get(4)?,
                     ))
                 },
             )
             .optional()?;
-        Ok(row.and_then(|(text, html, attachments, truncated, bytes)| {
-            (bytes > 0).then(|| MailBodyRecord {
-                text,
-                html,
-                attachments_json: attachments.unwrap_or_default(),
-                truncated,
-            })
-        }))
+        Ok(row.and_then(|(record, bytes)| (bytes > 0).then_some(record)))
     }
 
     /// Total bytes of cached bodies.
@@ -772,6 +793,26 @@ mod tests {
             3
         );
         assert!(!cache.set_flags("a1", "INBOX", 99, 1).unwrap());
+        assert_eq!(
+            cache
+                .update_flag_bit("a1", "INBOX", &[3, 4, 99], 2, true)
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            cache.cached_headers("a1", "INBOX", Some(4), 1).unwrap()[0].flags,
+            3
+        );
+        assert_eq!(
+            cache
+                .update_flag_bit("a1", "INBOX", &[3], 1, false)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            cache.cached_headers("a1", "INBOX", Some(4), 1).unwrap()[0].flags,
+            2
+        );
         assert_eq!(
             cache.remove_messages("a1", "INBOX", &[1, 2, 77]).unwrap(),
             2
