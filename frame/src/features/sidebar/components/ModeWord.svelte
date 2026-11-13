@@ -1,52 +1,56 @@
 <script lang="ts">
   import * as m from "$shared/i18n/messages";
-  import { Briefcase02Icon, Globe02Icon } from "@hugeicons/core-free-icons";
   import Icon from "$shared/ui/Icon";
   import { surface } from "$domain/surface";
   import { untrack } from "svelte";
+  import { chooseMode, modeOptions } from "../lib/modes";
 
   let { standalone = false }: { standalone?: boolean } = $props();
 
-  const inWork = $derived(surface.currentPage() === "work");
+  const modes = $derived(modeOptions());
+  const current = $derived(surface.modeOf(surface.currentPage()));
+  const index = $derived(
+    Math.max(
+      0,
+      modes.findIndex((mode) => mode.value === current),
+    ),
+  );
   // The thumb stretches only on a change of side, never on arrival.
   let moved = $state(false);
-  let seen: boolean | null = null;
+  let seen: string | null = null;
   $effect(() => {
-    const next = inWork;
+    const next = current;
     untrack(() => {
       if (seen !== null && seen !== next) moved = true;
       seen = next;
     });
   });
-  const MODES = [
-    { work: false, label: m.mode_browse, icon: Globe02Icon },
-    { work: true, label: m.mode_work, icon: Briefcase02Icon },
-  ];
 </script>
 
 <!--
-  The rail's two environments as one small switch: a mark for each, a thumb
-  under the one you are in that slides across once native has moved there,
-  and a click on the other goes. Names come on hover and to assistive
-  technology.
+  The rail's modes as one small switch: a mark for each, a thumb under the one
+  you are in that slides across once native has moved there, and a click on
+  another goes. Names come on hover and to assistive technology.
 -->
 <div
   class="mode-switch"
-  data-work={inWork}
+  style:--count={modes.length}
+  style:--index={index}
+  data-mode={current}
   data-moved={moved}
   data-standalone={standalone}
   role="group"
   aria-label={m.ui_mode_work_hint()}
 >
   <span class="thumb" aria-hidden="true"></span>
-  {#each MODES as mode (mode.work)}<button
+  {#each modes as mode (mode.value)}<button
       type="button"
       class="mode"
-      aria-pressed={inWork === mode.work}
-      aria-label={mode.label()}
-      title={mode.label()}
+      aria-pressed={current === mode.value}
+      aria-label={mode.label}
+      title={mode.label}
       onclick={() => {
-        if (inWork !== mode.work) void surface.open(mode.work ? "work" : null);
+        if (current !== mode.value) chooseMode(mode.value);
       }}><Icon icon={mode.icon} size={15} strokeWidth={1.7} /></button
     >{/each}
 </div>
@@ -57,7 +61,7 @@
 
     position: relative;
     display: grid;
-    grid-template-columns: repeat(2, var(--cell));
+    grid-template-columns: repeat(var(--count), var(--cell));
     gap: 0;
     padding: 2px;
     border-radius: var(--radius-capsule);
@@ -76,32 +80,19 @@
     border-radius: var(--radius-capsule);
     background: var(--row-active);
     box-shadow: var(--shine-top);
+    translate: calc(var(--cell) * var(--index)) 0;
     transition: translate var(--motion-base) var(--ease-spring);
   }
 
-  .mode-switch[data-work="true"] .thumb {
-    translate: var(--cell) 0;
+  :global([dir="rtl"]) .thumb {
+    translate: calc(var(--cell) * var(--index) * -1) 0;
   }
 
-  :global([dir="rtl"]) .mode-switch[data-work="true"] .thumb {
-    translate: calc(var(--cell) * -1) 0;
+  .mode-switch[data-moved="true"] .thumb {
+    animation: thumb-travel var(--motion-base) var(--ease-out);
   }
 
-  .mode-switch[data-moved="true"][data-work="true"] .thumb {
-    animation: thumb-travel-in var(--motion-base) var(--ease-out);
-  }
-
-  .mode-switch[data-moved="true"][data-work="false"] .thumb {
-    animation: thumb-travel-out var(--motion-base) var(--ease-out);
-  }
-
-  @keyframes thumb-travel-in {
-    40% {
-      scale: 1.22 0.94;
-    }
-  }
-
-  @keyframes thumb-travel-out {
+  @keyframes thumb-travel {
     40% {
       scale: 1.22 0.94;
     }
@@ -154,7 +145,7 @@
       transition: none;
     }
 
-    .mode-switch[data-moved="true"][data-work] .thumb {
+    .mode-switch[data-moved="true"] .thumb {
       animation: none;
     }
   }

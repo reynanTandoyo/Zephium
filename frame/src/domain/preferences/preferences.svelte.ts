@@ -63,6 +63,8 @@ const defaults = {
   "tabs.archive": "never",
   "tabs.external-position": "new-tab",
   "tabs.close-button": "hover",
+  "mail.enabled": "true",
+  "calendar.enabled": "true",
   "notes.enabled": "true",
   "tasks.enabled": "true",
   "time.enabled": "true",
@@ -96,7 +98,7 @@ export const saving = () => pending !== null;
 export const saveFailed = () => failed;
 /** AI: models, agents and dictation. Off, no AI surface is shown. */
 export const aiEnabled = () => values["ai.enabled"] !== "false";
-export type Feature = "work" | "notes" | "tasks" | "time";
+export type Feature = "work" | "mail" | "calendar" | "notes" | "tasks" | "time";
 /** A feature switch: off, the feature leaves the app; its data stays. */
 export const enabled = (feature: Feature) => values[`${feature}.enabled`] !== "false";
 /** The feature a command belongs to. Mirrors `zephium_core::commands::feature_of`. */
@@ -104,6 +106,8 @@ function featureOf(command: string): Feature | "ai" | null {
   if (["work.dictate", "tool.ai", "mode.choose"].includes(command)) return "ai";
   if (command === "browser.work" || command === "mode.work" || command.startsWith("work."))
     return "work";
+  if (command === "browser.mail" || command === "mode.mail") return "mail";
+  if (command === "browser.calendar" || command === "mode.calendar") return "calendar";
   if (["tool.notes", "browser.notes", "note.new"].includes(command)) return "notes";
   if (command === "tool.tasks" || command === "browser.tasks") return "tasks";
   if (

@@ -37,29 +37,31 @@
     dock: Snippet<[boolean]>;
   } = $props();
   let settings = $derived(browserPage.currentPage() === "settings");
-  // Work gives the window to its canvas: the column is always the rail there,
-  // and only there.
+  // Work, Mail and Calendar give the window to their page: the column is always
+  // the rail there, and only there.
+  let inMode = $derived(browserPage.isModePage(browserPage.currentPage()));
   let inWork = $derived(browserPage.currentPage() === "work");
-  // Work keeps the column as its compact rail, always: a panel open in Browse
+  // A mode keeps the column as its compact rail, always: a panel open in Browse
   // closes on the way in, and a tool asked for while in Work opens over its
-  // canvas instead of beside it.
-  let settledInWork = false;
+  // canvas instead of beside it. Only Work has a canvas to open it over.
+  let settledInMode = false;
   $effect(() => {
     const tool = tools.activeTool();
-    const work = inWork;
+    const mode = inMode;
+    const work = untrack(() => inWork);
     untrack(() => {
-      if (work && tool !== null) {
+      if (mode && tool !== null) {
         tools.close();
-        if (settledInWork)
+        if (settledInMode && work)
           window.dispatchEvent(new CustomEvent("zephium:work-tool", { detail: tool }));
       }
-      settledInWork = work;
+      settledInMode = mode;
     });
   });
   // A tool stands in a panel beside the rail, which keeps the spaces, the
   // current tab, the way to all the others and the kept sites. Settings takes
   // the whole column for its sections.
-  let tool = $derived(inWork ? null : tools.activeTool());
+  let tool = $derived(inMode ? null : tools.activeTool());
   let navigating = $derived(settings);
   let paneled = $derived(settings || tool !== null);
   // Escape leaves a field typed in first, then the tool; whatever is open
@@ -91,12 +93,12 @@
   }
   // A tool in full keeps the column as Work does, as the rail beside it;
   // put away, the column stays put away.
-  let railed = $derived(inWork || (browserPage.toolPage() && !isHidden()));
+  let railed = $derived(inMode || (browserPage.toolPage() && !isHidden()));
   let compact = $derived(railed || tool !== null || isCompact());
   // Work's rail and Settings' sections want the column in view; a tool opened
   // while the column is put away comes out on the card instead.
   $effect(() => {
-    holdShown(navigating || inWork);
+    holdShown(navigating || inMode);
   });
 
   // Hidden, the column waits off to the side, beneath the page, and comes
@@ -127,9 +129,9 @@
       getComputedStyle(document.documentElement).getPropertyValue("--ease-emphasized").trim() ||
       "ease-out",
   });
-  let workBefore = untrack(() => inWork);
+  let workBefore = untrack(() => inMode);
   $effect(() => {
-    const work = untrack(() => inWork);
+    const work = untrack(() => inMode);
     const fromWork = hidden && workBefore && !work;
     workBefore = work;
     if (!hidden && untrack(() => away && peeking && overPage && !reducedMotion())) {
@@ -590,7 +592,7 @@
       launcher={tool !== null}
       ontoggle={toggleShape}
       pageControls={!railed}
-      search={!railed || inWork}
+      search={!railed || inMode}
     />{/if}
   <div
     bind:this={columns}

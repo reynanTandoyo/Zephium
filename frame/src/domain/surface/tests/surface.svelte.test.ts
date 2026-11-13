@@ -93,3 +93,58 @@ describe("closing a page", () => {
     page.dispose();
   });
 });
+describe("full-window modes", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    harness.listener = null;
+    harness.run.mockReset();
+    harness.wait.mockReset();
+  });
+  it("asks for Mail and Calendar by their commands and shows them once native confirms", async () => {
+    const page = await import("../surface.svelte");
+    await page.init();
+    harness.run.mockResolvedValue({ accepted: true, operation_id: null });
+    for (const mode of ["mail", "calendar"] as const) {
+      await page.open(mode);
+      expect(harness.run).toHaveBeenLastCalledWith(`browser.${mode}`);
+      // Admission is not arrival.
+      expect(page.currentPage()).not.toBe(mode);
+      harness.listener?.({ payload: `browser.${mode}` });
+      expect(page.currentPage()).toBe(mode);
+    }
+    page.dispose();
+  });
+  it("closing Mail returns to Browse, and Settings opened over it returns to it", async () => {
+    const page = await import("../surface.svelte");
+    await page.init();
+    harness.run.mockResolvedValue({ accepted: true, operation_id: null });
+    harness.listener?.({ payload: "browser.mail" });
+    harness.listener?.({ payload: "browser.settings" });
+    await page.close();
+    expect(harness.run).toHaveBeenLastCalledWith("browser.mail");
+    harness.listener?.({ payload: "browser.mail" });
+    await page.close();
+    expect(harness.run).toHaveBeenLastCalledWith("browser.return");
+    page.dispose();
+  });
+  it("lists Browse first and hides a mode whose feature is off", async () => {
+    const { MODES, enabledModes, modeOf, isModePage } = await import("../modes");
+    expect(MODES.map((mode) => mode.id)).toEqual(["browse", "work", "mail", "calendar"]);
+    expect(enabledModes(() => true).map((mode) => mode.id)).toEqual([
+      "browse",
+      "work",
+      "mail",
+      "calendar",
+    ]);
+    expect(enabledModes((feature) => feature !== "mail").map((mode) => mode.id)).toEqual([
+      "browse",
+      "work",
+      "calendar",
+    ]);
+    expect(enabledModes(() => false).map((mode) => mode.id)).toEqual(["browse"]);
+    expect(modeOf(null)).toBe("browse");
+    expect(modeOf("settings")).toBe("browse");
+    expect(modeOf("calendar")).toBe("calendar");
+    expect(isModePage("history")).toBe(false);
+  });
+});

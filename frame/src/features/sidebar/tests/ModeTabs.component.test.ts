@@ -69,8 +69,10 @@ test("the rail's switch marks where you are and goes to the other in one click",
   await expect.element(work).toHaveAttribute("aria-pressed", "true");
 });
 
-test("with Work off the column has no switch at either width, and it comes back on", async () => {
+test("with every other mode off the column has no switch at either width, and it comes back on", async () => {
   native.settings["work.enabled"] = "false";
+  native.settings["mail.enabled"] = "false";
+  native.settings["calendar.enabled"] = "false";
   await preferences.init();
   await surface.init();
   const wide = await render(ModeTabs);
@@ -82,4 +84,44 @@ test("with Work off the column has no switch at either width, and it comes back 
   emitNativeEvent("uiCommand", "preference.work.enabled=true");
   await expect.element(wide.getByRole("radio", { name: "Work", exact: true })).toBeVisible();
   await expect.element(rail.getByRole("button", { name: "Work", exact: true })).toBeVisible();
+});
+
+test("Mail and Calendar sit beside Browse and Work and each asks for its own page", async () => {
+  await surface.init();
+  const screen = await render(ModeTabs);
+  const names = ["Browse", "Work", "Mail", "Calendar"];
+  for (const name of names)
+    await expect.element(screen.getByRole("radio", { name, exact: true })).toBeVisible();
+  for (const [name, command] of [
+    ["Mail", "browser.mail"],
+    ["Calendar", "browser.calendar"],
+  ] as const) {
+    await screen.getByRole("radio", { name, exact: true }).click();
+    expect(native.run).toHaveBeenLastCalledWith(command);
+    emitNativeEvent("uiCommand", command);
+    await expect
+      .element(screen.getByRole("radio", { name, exact: true }))
+      .toHaveAttribute("aria-checked", "true");
+  }
+});
+
+test("the rail's switch has one cell per enabled mode and its thumb follows the mode", async () => {
+  await surface.init();
+  const screen = await render(ModeTabs, { compact: true });
+  const group = screen.getByRole("group").element() as HTMLElement;
+  expect(group.style.getPropertyValue("--count")).toBe("4");
+  emitNativeEvent("uiCommand", "browser.calendar");
+  await expect.poll(() => group.style.getPropertyValue("--index")).toBe("3");
+});
+
+test("a mode whose feature is off leaves the switch, and the switch ends below two modes", async () => {
+  native.settings["mail.enabled"] = "false";
+  await preferences.init();
+  await surface.init();
+  const screen = await render(ModeTabs);
+  await expect.element(screen.getByRole("radio", { name: "Mail" })).not.toBeInTheDocument();
+  await expect.element(screen.getByRole("radio", { name: "Calendar" })).toBeVisible();
+  emitNativeEvent("uiCommand", "preference.work.enabled=false");
+  emitNativeEvent("uiCommand", "preference.calendar.enabled=false");
+  await expect.element(screen.getByRole("radio", { name: "Browse" })).not.toBeInTheDocument();
 });

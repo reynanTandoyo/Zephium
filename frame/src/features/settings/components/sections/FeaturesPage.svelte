@@ -7,6 +7,8 @@
 <SettingsGroup title={m.features_ai_group()}>
   <FeatureSwitch feature="ai" />
   <FeatureSwitch feature="work" />
+  <FeatureSwitch feature="mail" />
+  <FeatureSwitch feature="calendar" />
 </SettingsGroup>
 
 <SettingsGroup title={m.features_tools_group()}>

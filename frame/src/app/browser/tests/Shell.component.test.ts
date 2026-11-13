@@ -141,8 +141,9 @@ test("Work keeps the column as the rail of tabs, and a tab chosen there opens ov
   emitNativeEvent("uiCommand", "browser.work");
   await expect.poll(() => column.style.width).toBe("56px");
   await expect.poll(() => screen.container.querySelector("[data-work-stage-stub]")).not.toBeNull();
-  // Work's rail keeps no tool shelf: Browse keeps its tools.
-  expect(screen.container.querySelector(".shelf")).toBeNull();
+  // Work's rail keeps no tool shelf: Browse keeps its tools. The wide column's
+  // shelf leaves with its outgoing body, so it is awaited rather than assumed.
+  await expect.poll(() => screen.container.querySelector(".shelf")).toBeNull();
   await page.viewport(900, 640);
   const rail = page.elementLocator(column);
   await rail.screenshot({ path: "../../../../../target/work-shell/rail-work.png" });
@@ -189,7 +190,7 @@ test("leaving Work or Settings gives back the column the window had", async () =
     width: column.style.width,
     resize: !!screen.container.querySelector('[aria-label="Resize sidebar"]'),
     toggle: !!screen.container.querySelector('[aria-label="Toggle sidebar"]'),
-    modes: !!screen.container.querySelector('[aria-label="Switch between Browse and Work"]'),
+    modes: !!screen.container.querySelector('[aria-label="Switch mode"]'),
   });
   const browse = { width: expanded, resize: true, toggle: true, modes: true };
   expect(shown()).toEqual(browse);
@@ -208,6 +209,44 @@ test("leaving Work or Settings gives back the column the window had", async () =
   emitNativeEvent("browserReturn", { ...items, projection_revision: revision(45) });
   await expect.poll(shown).toEqual(browse);
   expect(screen.container.querySelector(".settings-sidebar-navigation")).toBeNull();
+});
+
+test("Mail keeps the column as the rail, shows its page, and a tab chosen there returns to Browse", async () => {
+  await surface.init();
+  await tabs.init();
+  const tab = tabFixture();
+  emitNativeEvent("itemsChanged", {
+    projection_revision: revision(46),
+    profile: { id: "profile", name: "Personal", kind: "default" },
+    spaces: [spaceFixture("space", "Home")],
+    active_space_id: "space",
+    nodes: [],
+    tabs: [tab],
+    active: tab.id,
+    split_group: null,
+  });
+  const screen = await render(Shell);
+  const column = screen.container.querySelector("aside")!;
+  emitNativeEvent("uiCommand", "browser.mail");
+  await expect.poll(() => column.style.width).toBe("56px");
+  await expect.element(screen.getByRole("heading", { name: "Mail" })).toBeVisible();
+  await expect.element(screen.getByText("Coming soon")).toBeVisible();
+  await expect.poll(() => screen.container.querySelector(".shelf")).toBeNull();
+  // The rail carries one cell per mode, and marks the one the window is in.
+  await expect
+    .element(screen.getByRole("button", { name: "Mail", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  // No Work pane here: a tab chosen in the rail is activated, and native
+  // hands the window back to Browse.
+  const { tabRequest } = await import("$session/work-tab.svelte");
+  const rowSelector = `[data-zephium-tab-id="${tab.id}"] button`;
+  await expect.poll(() => screen.container.querySelector(rowSelector)).not.toBeNull();
+  const requested = tabRequest();
+  screen.container.querySelector<HTMLElement>(rowSelector)!.click();
+  // Only Work opens a tab over its canvas.
+  expect(tabRequest()).toBe(requested);
+  emitNativeEvent("uiCommand", "browser.return");
+  await expect.poll(() => surface.currentPage()).toBeNull();
 });
 
 test("the new tab settings button opens General after another section was selected", async () => {

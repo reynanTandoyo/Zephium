@@ -42,7 +42,12 @@ const switchShown = () => document.querySelector(".modes, .mode-switch") !== nul
 for (const theme of ["light", "dark"] as const) {
   test(`the column without Work, every shape, ${theme}`, async () => {
     await page.viewport(1100, 760);
-    native.settings = { appearance: theme, "work.enabled": "false" };
+    native.settings = {
+      appearance: theme,
+      "work.enabled": "false",
+      "mail.enabled": "false",
+      "calendar.enabled": "false",
+    };
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.material = "liquid_glass";
     document.body.style.background = "transparent";

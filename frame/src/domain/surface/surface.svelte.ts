@@ -3,6 +3,10 @@ import { flushSync } from "svelte";
 import { commands } from "$shared/ipc/bindings";
 import { settle } from "$domain/operations";
 import { events } from "$shared/ipc/native-events";
+import { isModePage } from "./modes";
+
+export { MODES, enabledModes, isModePage, modeOf } from "./modes";
+export type { ModeEntry, ModeId, ModePage } from "./modes";
 
 export type BrowserPage =
   | "settings"
@@ -10,6 +14,8 @@ export type BrowserPage =
   | "history"
   | "downloads"
   | "work"
+  | "mail"
+  | "calendar"
   | "tasks"
   | "notes"
   | "time"
@@ -55,6 +61,8 @@ async function initialize(epoch: number) {
         destination === "return"
           ? null
           : destination === "work" ||
+              destination === "mail" ||
+              destination === "calendar" ||
               destination === "settings" ||
               destination === "extensions" ||
               destination === "history" ||
@@ -67,8 +75,8 @@ async function initialize(epoch: number) {
             : undefined;
       if (confirmed !== undefined) {
         navigationEpoch++;
-        if (confirmed === null || confirmed === "work") underneath = null;
-        else if (page === "work") underneath = "work";
+        if (confirmed === null || isModePage(confirmed)) underneath = null;
+        else if (page !== null && isModePage(page)) underneath = page;
         flushSync(() => {
           error = false;
           page = confirmed;
@@ -133,5 +141,5 @@ export async function open(next: BrowserPage | null) {
 
 /** Closes the current page, returning to the one it was opened over. */
 export function close() {
-  return open(page === "work" ? null : underneath);
+  return open(page !== null && isModePage(page) ? null : underneath);
 }
