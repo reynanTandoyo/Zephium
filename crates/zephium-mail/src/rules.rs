@@ -8,8 +8,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::engine::MailEngine;
 use crate::error::{MailError, Result};
-use crate::model::{Address, MessageHeader};
+use crate::model::{Account, Address, FlagKind, Folder, MessageHeader};
 
 /// Rules kept per account.
 pub const MAX_RULES_PER_ACCOUNT: usize = 30;
@@ -17,6 +18,8 @@ pub const MAX_RULES_PER_ACCOUNT: usize = 30;
 pub const MAX_NEEDLE_BYTES: usize = 120;
 /// Bytes of a rule's destination folder path.
 pub const MAX_RULE_FOLDER_BYTES: usize = 256;
+/// Newest Inbox messages one run looks at.
+pub const MAX_RUN_MESSAGES: u32 = 50;
 /// Bytes of the stored rule set for every account together; the app-setting
 /// store refuses values above 64 KiB.
 pub const MAX_RULES_BYTES: usize = 56 * 1024;
@@ -93,9 +96,7 @@ impl Rule {
         }
         match (self.action, self.folder.as_deref()) {
             (RuleAction::Move, Some(folder)) => {
-                if folder.is_empty()
-                    || folder.len() > MAX_RULE_FOLDER_BYTES
-                    || !clean_text(folder)
+                if folder.is_empty() || folder.len() > MAX_RULE_FOLDER_BYTES || !clean_text(folder)
                 {
                     return Err(MailError::InvalidInput);
                 }
@@ -115,9 +116,8 @@ impl Rule {
         }
         let has = |text: &str| text.to_lowercase().contains(&needle);
         let any = |list: &[Address]| {
-            list.iter().any(|address| {
-                has(&address.email) || address.name.as_deref().is_some_and(has)
-            })
+            list.iter()
+                .any(|address| has(&address.email) || address.name.as_deref().is_some_and(has))
         };
         match self.field {
             RuleField::From => any(&header.from),
@@ -167,6 +167,16 @@ pub fn serialize_rule_set(set: &RuleSet) -> Result<String> {
 /// Runs the rules in order over one message. Marking and flagging add up; the
 /// first move wins and ends the run, since the message leaves the folder.
 pub fn plan(rules: &[Rule], header: &MessageHeader) -> Plan {
+    plan_with(rules, header, |_| true)
+}
+
+/// [`plan`], where a move to a folder `can_move_to` refuses is skipped and the
+/// rules after it still run.
+pub fn plan_with(
+    rules: &[Rule],
+    header: &MessageHeader,
+    can_move_to: impl Fn(&str) -> bool,
+) -> Plan {
     let mut plan = Plan::default();
     for rule in rules {
         if !rule.matches(header) {
@@ -176,12 +186,134 @@ pub fn plan(rules: &[Rule], header: &MessageHeader) -> Plan {
             RuleAction::MarkRead => plan.mark_read = true,
             RuleAction::Flag => plan.flag = true,
             RuleAction::Move => {
-                plan.move_to = rule.folder.clone();
+                let Some(folder) = rule.folder.as_deref().filter(|folder| can_move_to(folder))
+                else {
+                    continue;
+                };
+                plan.move_to = Some(folder.to_owned());
                 break;
             }
         }
     }
     plan
+}
+
+/// What the rules want done to a batch of messages, grouped by command.
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct Batch {
+    /// UIDs to mark read.
+    pub seen: Vec<u32>,
+    /// UIDs to flag.
+    pub flagged: Vec<u32>,
+    /// Destination folder and the UIDs to move there, in first-use order.
+    pub moves: Vec<(String, Vec<u32>)>,
+}
+
+impl Batch {
+    /// True when nothing is to be done.
+    pub fn is_empty(&self) -> bool {
+        self.seen.is_empty() && self.flagged.is_empty() && self.moves.is_empty()
+    }
+}
+
+/// Plans every header at or above `min_uid`. `can_move_to` says which
+/// destinations exist; a rule that names any other folder only skips its move.
+pub fn plan_batch(
+    rules: &[Rule],
+    headers: &[MessageHeader],
+    min_uid: u32,
+    can_move_to: impl Fn(&str) -> bool,
+) -> Batch {
+    let mut batch = Batch::default();
+    for header in headers.iter().filter(|header| header.uid >= min_uid) {
+        let planned = plan_with(rules, header, &can_move_to);
+        if planned.mark_read && !header.flags.seen {
+            batch.seen.push(header.uid);
+        }
+        if planned.flag && !header.flags.flagged {
+            batch.flagged.push(header.uid);
+        }
+        if let Some(dest) = planned.move_to {
+            match batch.moves.iter_mut().find(|(known, _)| *known == dest) {
+                Some((_, uids)) => uids.push(header.uid),
+                None => batch.moves.push((dest, vec![header.uid])),
+            }
+        }
+    }
+    batch
+}
+
+/// What a rule run did on the server. A list holds only what the server accepted.
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct RuleRun {
+    /// UIDs marked read.
+    pub seen: Vec<u32>,
+    /// UIDs flagged.
+    pub flagged: Vec<u32>,
+    /// UIDs moved out of the Inbox.
+    pub moved: Vec<u32>,
+    /// A command failed; the rest still ran.
+    pub failed: bool,
+}
+
+impl RuleRun {
+    /// True when the server changed anything.
+    pub fn changed(&self) -> bool {
+        !self.seen.is_empty() || !self.flagged.is_empty() || !self.moved.is_empty()
+    }
+}
+
+impl MailEngine {
+    /// Applies one account's `rules` to its newest Inbox messages with a UID
+    /// of `min_uid` or more (the ones a sync just found). Reads only that
+    /// account's Inbox headers; moves go only to folders in `folders`, never
+    /// to the Inbox itself. A failing command does not stop the others.
+    pub async fn apply_rules(
+        &self,
+        account: &Account,
+        inbox: &str,
+        rules: &[Rule],
+        min_uid: u32,
+        folders: &[Folder],
+    ) -> Result<RuleRun> {
+        validate_rules(rules)?;
+        if rules.is_empty() {
+            return Ok(RuleRun::default());
+        }
+        let page = self.headers(account, inbox, None, MAX_RUN_MESSAGES).await?;
+        let batch = plan_batch(rules, &page.messages, min_uid, |dest| {
+            dest != inbox
+                && folders
+                    .iter()
+                    .any(|folder| folder.path == dest && folder.selectable)
+        });
+        let mut run = RuleRun::default();
+        if !batch.seen.is_empty() {
+            match self
+                .set_flag(account, inbox, &batch.seen, FlagKind::Seen, true)
+                .await
+            {
+                Ok(()) => run.seen = batch.seen,
+                Err(_) => run.failed = true,
+            }
+        }
+        if !batch.flagged.is_empty() {
+            match self
+                .set_flag(account, inbox, &batch.flagged, FlagKind::Flagged, true)
+                .await
+            {
+                Ok(()) => run.flagged = batch.flagged,
+                Err(_) => run.failed = true,
+            }
+        }
+        for (dest, uids) in batch.moves {
+            match self.move_messages(account, inbox, &uids, &dest).await {
+                Ok(()) => run.moved.extend(uids),
+                Err(_) => run.failed = true,
+            }
+        }
+        Ok(run)
+    }
 }
 
 #[cfg(test)]
@@ -249,6 +381,46 @@ mod tests {
     }
 
     #[test]
+    fn a_batch_groups_by_command_skips_old_uids_and_unknown_folders() {
+        let at = |uid: u32, subject: &str, seen: bool| MessageHeader {
+            uid,
+            subject: subject.into(),
+            flags: crate::model::Flags {
+                seen,
+                ..Default::default()
+            },
+            ..header()
+        };
+        let rules = vec![
+            rule(RuleField::Subject, "news", RuleAction::MarkRead, None),
+            rule(RuleField::Subject, "news", RuleAction::Move, Some("News")),
+            rule(
+                RuleField::Subject,
+                "ghost",
+                RuleAction::Move,
+                Some("Missing"),
+            ),
+            rule(RuleField::Subject, "ghost", RuleAction::Flag, None),
+        ];
+        let headers = [
+            at(9, "news a", false),
+            at(8, "news b", true),
+            at(7, "ghost", false),
+            at(2, "news old", false),
+        ];
+        let batch = plan_batch(&rules, &headers, 5, |dest| dest == "News");
+        assert_eq!(
+            batch,
+            Batch {
+                seen: vec![9],
+                flagged: vec![7],
+                moves: vec![("News".into(), vec![9, 8])],
+            }
+        );
+        assert!(plan_batch(&[], &headers, 0, |_| true).is_empty());
+    }
+
+    #[test]
     fn rules_are_validated_and_bounded() {
         assert!(rule(RuleField::From, "a", RuleAction::Move, Some("Bills"))
             .validate()
@@ -257,7 +429,12 @@ mod tests {
             rule(RuleField::From, "", RuleAction::Flag, None),
             rule(RuleField::From, "  ", RuleAction::Flag, None),
             rule(RuleField::From, "a\r\nBcc: x", RuleAction::Flag, None),
-            rule(RuleField::From, &"x".repeat(MAX_NEEDLE_BYTES + 1), RuleAction::Flag, None),
+            rule(
+                RuleField::From,
+                &"x".repeat(MAX_NEEDLE_BYTES + 1),
+                RuleAction::Flag,
+                None,
+            ),
             rule(RuleField::From, "a", RuleAction::Move, None),
             rule(RuleField::From, "a", RuleAction::Move, Some("")),
             rule(RuleField::From, "a", RuleAction::Move, Some("A\nB")),
@@ -272,7 +449,8 @@ mod tests {
         for rule in bad {
             assert_eq!(rule.validate(), Err(MailError::InvalidInput), "{rule:?}");
         }
-        let many = vec![rule(RuleField::From, "a", RuleAction::Flag, None); MAX_RULES_PER_ACCOUNT + 1];
+        let many =
+            vec![rule(RuleField::From, "a", RuleAction::Flag, None); MAX_RULES_PER_ACCOUNT + 1];
         assert_eq!(validate_rules(&many), Err(MailError::TooLarge));
     }
 

@@ -129,7 +129,9 @@ pub fn parse(link: &str) -> Result<Mailto> {
             "body" if !body_seen => {
                 let body = decode(value)?.replace("\r\n", "\n").replace('\r', "\n");
                 if body.len() > MAX_MAILTO_BODY_BYTES
-                    || body.chars().any(|c| c.is_control() && c != '\n' && c != '\t')
+                    || body
+                        .chars()
+                        .any(|c| c.is_control() && c != '\n' && c != '\t')
                 {
                     return Err(MailError::InvalidInput);
                 }
@@ -165,7 +167,8 @@ mod tests {
 
     #[test]
     fn to_fields_merge_with_the_path_without_duplicates() {
-        let m = parse("mailto:a@example.com?to=A@example.com,b@example.com&TO=c@example.com").unwrap();
+        let m =
+            parse("mailto:a@example.com?to=A@example.com,b@example.com&TO=c@example.com").unwrap();
         assert_eq!(m.to, ["a@example.com", "b@example.com", "c@example.com"]);
     }
 
@@ -176,11 +179,14 @@ mod tests {
              &in-reply-to=%3Cx%3E&x-custom=1&subject=Hi#frag",
         )
         .unwrap();
-        assert_eq!(m, Mailto {
-            to: vec!["a@example.com".into()],
-            subject: "Hi".into(),
-            ..Mailto::default()
-        });
+        assert_eq!(
+            m,
+            Mailto {
+                to: vec!["a@example.com".into()],
+                subject: "Hi".into(),
+                ..Mailto::default()
+            }
+        );
     }
 
     #[test]
@@ -219,7 +225,10 @@ mod tests {
     fn oversized_links_are_refused() {
         let long = format!("mailto:a@example.com?body={}", "x".repeat(MAX_MAILTO_BYTES));
         assert_eq!(parse(&long), Err(MailError::TooLarge));
-        let body = format!("mailto:a@example.com?body={}", "x".repeat(MAX_MAILTO_BODY_BYTES + 1));
+        let body = format!(
+            "mailto:a@example.com?body={}",
+            "x".repeat(MAX_MAILTO_BODY_BYTES + 1)
+        );
         assert_eq!(parse(&body), Err(MailError::InvalidInput));
         let subject = format!(
             "mailto:a@example.com?subject={}",

@@ -495,7 +495,9 @@ impl<'a> MailCache<'a> {
     pub fn contacts(&self, prefix: &str, limit: u32) -> rusqlite::Result<Vec<MailContact>> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX));
+            .map_or(0, |elapsed| {
+                i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX)
+            });
         self.contacts_at(prefix, limit, now)
     }
 
@@ -898,9 +900,21 @@ mod tests {
                 "Sent",
                 Some(1),
                 &[
-                    sent_message(1, r#"[{"name":"Bob Brown","email":"bob@example.com"}]"#, NOW - DAY),
-                    sent_message(2, r#"[{"name":"Bob Brown","email":"bob@example.com"}]"#, NOW - 2 * DAY),
-                    sent_message(3, r#"[{"name":null,"email":"bea@example.com"}]"#, NOW - 3 * DAY),
+                    sent_message(
+                        1,
+                        r#"[{"name":"Bob Brown","email":"bob@example.com"}]"#,
+                        NOW - DAY,
+                    ),
+                    sent_message(
+                        2,
+                        r#"[{"name":"Bob Brown","email":"bob@example.com"}]"#,
+                        NOW - 2 * DAY,
+                    ),
+                    sent_message(
+                        3,
+                        r#"[{"name":null,"email":"bea@example.com"}]"#,
+                        NOW - 3 * DAY,
+                    ),
                 ],
             )
             .unwrap();
@@ -910,17 +924,36 @@ mod tests {
                 "INBOX",
                 Some(1),
                 &[
-                    received(1, r#"[{"name":"Bea Old","email":"bea@example.com"}]"#, NOW - 400 * DAY),
-                    received(2, r#"[{"name":"Bernd","email":"bernd@example.com"}]"#, NOW - 10 * DAY),
-                    received(3, r#"[{"name":"Carl","email":"carl@example.com"}]"#, NOW - DAY),
-                    received(4, r#"[{"name":"Bob Brown","email":"BOB@example.com"}]"#, NOW - 5 * DAY),
+                    received(
+                        1,
+                        r#"[{"name":"Bea Old","email":"bea@example.com"}]"#,
+                        NOW - 400 * DAY,
+                    ),
+                    received(
+                        2,
+                        r#"[{"name":"Bernd","email":"bernd@example.com"}]"#,
+                        NOW - 10 * DAY,
+                    ),
+                    received(
+                        3,
+                        r#"[{"name":"Carl","email":"carl@example.com"}]"#,
+                        NOW - DAY,
+                    ),
+                    received(
+                        4,
+                        r#"[{"name":"Bob Brown","email":"BOB@example.com"}]"#,
+                        NOW - 5 * DAY,
+                    ),
                 ],
             )
             .unwrap();
         let found = cache.contacts_at("b", 10, NOW).unwrap();
         let emails: Vec<&str> = found.iter().map(|c| c.email.as_str()).collect();
         // Bob: two sent + one received (case-folded together); Bea: sent + old; Bernd: one received.
-        assert_eq!(emails, ["bob@example.com", "bea@example.com", "bernd@example.com"]);
+        assert_eq!(
+            emails,
+            ["bob@example.com", "bea@example.com", "bernd@example.com"]
+        );
         assert_eq!(found[0].count, 3);
         assert_eq!(found[0].name.as_deref(), Some("Bob Brown"));
         assert_eq!(found[0].last, NOW - DAY);
@@ -957,7 +990,11 @@ mod tests {
                 "a1",
                 "Junk",
                 Some(1),
-                &[received(1, r#"[{"name":"P Spam","email":"pspam@example.com"}]"#, NOW)],
+                &[received(
+                    1,
+                    r#"[{"name":"P Spam","email":"pspam@example.com"}]"#,
+                    NOW,
+                )],
             )
             .unwrap();
         cache
@@ -965,7 +1002,11 @@ mod tests {
                 "a1",
                 "Sent",
                 Some(1),
-                &[sent_message(1, r#"[{"name":"Me","email":"ann@example.com"}]"#, NOW)],
+                &[sent_message(
+                    1,
+                    r#"[{"name":"Me","email":"ann@example.com"}]"#,
+                    NOW,
+                )],
             )
             .unwrap();
         let found = cache.contacts_at("p", 1_000, NOW).unwrap();
@@ -1001,7 +1042,11 @@ mod tests {
                     received(1, r#"{"not":"a list"}"#, NOW),
                     received(2, r#"[{"name":"X","email":"x y@example.com"}]"#, NOW),
                     received(3, r#"[{"name":"X","email":"x\u0007@example.com"}]"#, NOW),
-                    received(4, r#"[{"name":"Xavier","email":"xavier@example.com"}]"#, NOW),
+                    received(
+                        4,
+                        r#"[{"name":"Xavier","email":"xavier@example.com"}]"#,
+                        NOW,
+                    ),
                 ],
             )
             .unwrap();
