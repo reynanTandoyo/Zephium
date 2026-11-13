@@ -91,6 +91,89 @@ impl CalendarStorage for MemoryStorage {
     }
 }
 
+/// Refresh state of one calendar, kept so a restart can continue with a delta.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CacheMeta {
+    /// `getctag` at the last refresh.
+    pub ctag: Option<String>,
+    /// `sync-token` at the last refresh.
+    pub sync_token: Option<String>,
+    /// When the calendar was last refreshed.
+    pub synced_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// One cached `.ics` resource.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CachedRecord {
+    /// Resource address.
+    pub href: String,
+    /// ETag as sent by the server.
+    pub etag: Option<String>,
+    /// Raw iCalendar text (empty when the resource could not be read).
+    pub raw: String,
+    /// When a refresh last saw it.
+    pub last_seen: chrono::DateTime<chrono::Utc>,
+}
+
+/// Durable event cache behind the in-memory one. Holds iCalendar text and
+/// refresh state, never secrets. A failing cache costs a re-sync, nothing
+/// else, so the service ignores its write errors.
+pub trait EventCache: Send + Sync {
+    /// Refresh state and resources of a calendar; `None` when the calendar is
+    /// unknown to the cache.
+    fn load(&self, calendar_id: &str) -> Result<Option<(CacheMeta, Vec<CachedRecord>)>>;
+    /// Adds or replaces resources and removes the given addresses.
+    fn apply(&self, calendar_id: &str, upserts: &[CachedRecord], removed: &[String]) -> Result<()>;
+    /// Replaces every resource of a calendar.
+    fn replace(&self, calendar_id: &str, records: &[CachedRecord]) -> Result<()>;
+    /// Records the refresh state.
+    fn set_meta(&self, calendar_id: &str, meta: &CacheMeta) -> Result<()>;
+}
+
+type MemoryCalendar = (CacheMeta, HashMap<String, CachedRecord>);
+
+/// In-memory cache for tests and for hosts without a profile database.
+#[derive(Default)]
+pub struct MemoryEventCache(Mutex<HashMap<String, MemoryCalendar>>);
+
+impl EventCache for MemoryEventCache {
+    fn load(&self, calendar_id: &str) -> Result<Option<(CacheMeta, Vec<CachedRecord>)>> {
+        let map = self.0.lock().map_err(|_| CalendarError::Storage)?;
+        Ok(map.get(calendar_id).map(|(meta, records)| {
+            let mut records: Vec<_> = records.values().cloned().collect();
+            records.sort_by(|a, b| a.href.cmp(&b.href));
+            (meta.clone(), records)
+        }))
+    }
+
+    fn apply(&self, calendar_id: &str, upserts: &[CachedRecord], removed: &[String]) -> Result<()> {
+        let mut map = self.0.lock().map_err(|_| CalendarError::Storage)?;
+        let entry = map.entry(calendar_id.to_owned()).or_default();
+        for href in removed {
+            entry.1.remove(href);
+        }
+        for record in upserts {
+            entry.1.insert(record.href.clone(), record.clone());
+        }
+        Ok(())
+    }
+
+    fn replace(&self, calendar_id: &str, records: &[CachedRecord]) -> Result<()> {
+        let mut map = self.0.lock().map_err(|_| CalendarError::Storage)?;
+        map.entry(calendar_id.to_owned()).or_default().1 = records
+            .iter()
+            .map(|record| (record.href.clone(), record.clone()))
+            .collect();
+        Ok(())
+    }
+
+    fn set_meta(&self, calendar_id: &str, meta: &CacheMeta) -> Result<()> {
+        let mut map = self.0.lock().map_err(|_| CalendarError::Storage)?;
+        map.entry(calendar_id.to_owned()).or_default().0 = meta.clone();
+        Ok(())
+    }
+}
+
 /// Where account passwords live.
 pub trait SecretStore: Send + Sync {
     /// The password of an account, if stored.

@@ -226,6 +226,49 @@ pub fn expand(event: &Event, from: DateTime<Utc>, to: DateTime<Utc>, max: usize)
     out
 }
 
+/// `true` when `instance` is one of the generated instances of `master`
+/// (ignoring its EXDATEs and overrides): the RECURRENCE-ID of an occurrence
+/// that can be edited or deleted on its own.
+pub fn is_instance(master: &Event, instance: &EventTime) -> bool {
+    if !master.is_recurring() {
+        return false;
+    }
+    let mut probe = master.clone();
+    probe.overrides.clear();
+    probe.exdates.clear();
+    let from = instance.to_utc();
+    let found = expand(
+        &probe,
+        from,
+        from + Duration::seconds(1),
+        MAX_OCCURRENCES_PER_EVENT,
+    )
+    .occurrences
+    .iter()
+    .any(|occurrence| {
+        occurrence
+            .instance
+            .as_ref()
+            .is_some_and(|known| same_instance(known, instance))
+    });
+    found
+}
+
+/// `true` when two times denote the same instance of a series.
+pub fn same_time(a: &EventTime, b: &EventTime) -> bool {
+    same_instance(a, b)
+}
+
+/// End of the instance of `master` that starts at `instance`.
+pub fn instance_end(master: &Event, instance: &EventTime) -> EventTime {
+    let delta = if master.start.is_date() || matches!(master.start.kind, TimeKind::Floating) {
+        master.end.local - master.start.local
+    } else {
+        master.end.since(&master.start)
+    };
+    instance.plus(delta)
+}
+
 /// Midnight-UTC helper for tests and callers that hold a date.
 pub fn utc_midnight(date: NaiveDate) -> DateTime<Utc> {
     Utc.from_utc_datetime(&date.and_time(NaiveTime::MIN))

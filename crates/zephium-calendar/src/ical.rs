@@ -588,19 +588,98 @@ fn person_property(name: &str, person: &Person, with_status: bool) -> String {
     line
 }
 
-/// Serializes one event with its overrides as a complete VCALENDAR. Time
-/// zones are written as `TZID=<IANA name>` without a VTIMEZONE component.
+/// Zones used by `event` and its overrides, each with the earliest year it is
+/// used in, ordered by name.
+fn zones_used(event: &Event) -> Vec<(chrono_tz::Tz, i32)> {
+    use chrono::Datelike;
+    let mut zones: std::collections::BTreeMap<&'static str, (chrono_tz::Tz, i32)> =
+        std::collections::BTreeMap::new();
+    let mut visit = |time: &EventTime| {
+        if let TimeKind::Zoned(zone) = &time.kind {
+            let year = time.local.year();
+            zones
+                .entry(zone.name())
+                .and_modify(|(_, first)| *first = (*first).min(year))
+                .or_insert((*zone, year));
+        }
+    };
+    for item in std::iter::once(event).chain(event.overrides.iter()) {
+        visit(&item.start);
+        visit(&item.end);
+        item.rdates.iter().for_each(&mut visit);
+        item.exdates.iter().for_each(&mut visit);
+        if let Some(id) = &item.recurrence_id {
+            visit(id);
+        }
+    }
+    zones.into_values().collect()
+}
+
+/// Serializes one event with its overrides as a complete VCALENDAR. Every
+/// time zone the event uses is written as `TZID=<IANA name>` and described by
+/// a VTIMEZONE component (see [`crate::vtimezone`]).
 pub fn serialize_event(event: &Event, stamp: DateTime<Utc>) -> String {
     let mut out = String::new();
     fold("BEGIN:VCALENDAR", &mut out);
     fold("VERSION:2.0", &mut out);
     fold("PRODID:-//Zephium//Calendar//EN", &mut out);
+    for (zone, year) in zones_used(event) {
+        for line in crate::vtimezone::component(zone, year) {
+            fold(&line, &mut out);
+        }
+    }
     write_event(event, stamp, &mut out);
     for item in &event.overrides {
         write_event(item, stamp, &mut out);
     }
     fold("END:VCALENDAR", &mut out);
     out
+}
+
+/// Earliest start and latest end of everything in `events` (instants), for
+/// range queries on the cache. The end is `None` for a series that never
+/// ends (an RRULE without `UNTIL` or `COUNT`) or whose expansion is cut off
+/// by the expansion limit.
+pub fn bounds(events: &[Event]) -> Option<(DateTime<Utc>, Option<DateTime<Utc>>)> {
+    let mut start: Option<DateTime<Utc>> = None;
+    let mut end: Option<DateTime<Utc>> = None;
+    let mut open = false;
+    for master in events {
+        for item in std::iter::once(master).chain(master.overrides.iter()) {
+            let (s, e) = (
+                item.start.to_utc(),
+                item.end.to_utc().max(item.start.to_utc()),
+            );
+            start = Some(start.map_or(s, |known| known.min(s)));
+            end = Some(end.map_or(e, |known| known.max(e)));
+            for time in item.rdates.iter().chain(item.recurrence_id.iter()) {
+                let t = time.to_utc();
+                start = start.map(|known| known.min(t));
+                end = end.map(|known| known.max(t + (e - s)));
+            }
+        }
+        if let Some(rule) = &master.rrule {
+            let upper = rule.to_ascii_uppercase();
+            if !upper.contains("UNTIL=") && !upper.contains("COUNT=") {
+                open = true;
+            } else {
+                let from = master.start.to_utc() - chrono::Duration::days(1);
+                let expansion = crate::recur::expand(
+                    master,
+                    from,
+                    from + chrono::Duration::days(366 * 200),
+                    crate::recur::MAX_OCCURRENCES_PER_EVENT,
+                );
+                if expansion.truncated {
+                    open = true;
+                }
+                for occurrence in &expansion.occurrences {
+                    end = end.map(|known| known.max(occurrence.end.to_utc()));
+                }
+            }
+        }
+    }
+    start.map(|s| (s, if open { None } else { end }))
 }
 
 /// Calendar-level name (`X-WR-CALNAME`) and colour (`X-APPLE-CALENDAR-COLOR`

@@ -1828,6 +1828,11 @@ pub static META: &[Migration] = &[
         version: 29,
         up: |tx| tx.execute_batch(include_str!("mail_schema_v1.sql")),
     },
+    // Fork (T-0041): the local calendar cache.
+    Migration {
+        version: 30,
+        up: |tx| tx.execute_batch(include_str!("calendar_schema_v1.sql")),
+    },
 ];
 
 fn record_media(tx: &Transaction) -> rusqlite::Result<()> {
@@ -2847,6 +2852,7 @@ mod tests {
         (27, 0x6c555aa33142ef81),
         (28, 0xdce79131820ba8c9),
         (29, 0xa0b8957836963987),
+        (30, 0x0156_c991_8a12_eed3),
     ];
     const PROFILE_SCHEMA_FINGERPRINTS: &[(i64, u64)] = &[
         (1, 0x10b8_b7a3_094f_23d7),
@@ -3662,6 +3668,50 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn calendar_cache_migration_upgrades_a_v29_meta_database_without_losing_data() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        apply(&mut conn, &META[..29]).unwrap();
+        assert_eq!(validate_current(&conn, META).unwrap(), 29);
+        conn.execute(
+            "INSERT INTO mail_accounts(id, position, display_name, email, imap_host, imap_port,              imap_security, smtp_host, smtp_port, smtp_security, username, colour, signature,              save_sent_copy) VALUES ('keep', 0, 'Ann', 'ann@example.com', 'imap.example.com',              993, 'tls', 'smtp.example.com', 465, 'tls', 'ann', '#336699', '', 1)",
+            [],
+        )
+        .unwrap();
+        apply(&mut conn, META).unwrap();
+        apply(&mut conn, META).unwrap();
+        assert_eq!(validate_current(&conn, META).unwrap(), 30);
+        for table in ["calendar_accounts", "calendars", "calendar_events"] {
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1,
+                "{table}"
+            );
+        }
+        assert_eq!(
+            conn.query_row("SELECT email FROM mail_accounts WHERE id='keep'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "ann@example.com"
+        );
+        // No column can hold a secret by name.
+        let secrets: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('calendar_accounts') \
+                 WHERE name LIKE '%password%' OR name LIKE '%secret%' OR name LIKE '%token%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(secrets, 0);
     }
 
     fn insert_native_ownership_test_row(
