@@ -17,46 +17,12 @@ use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 use std::sync::Arc;
 use zephium_store::calendar_cache::{
-    CacheResult, CalendarAccountRecord, CalendarCache, CalendarEventRecord, CalendarRecord,
-    CalendarSyncState,
+    CacheResult, CalendarAccountRecord, CalendarCache, CalendarEventRecord, CalendarOAuthRecord,
+    CalendarRecord, CalendarSyncState,
 };
 use zephium_store::SqliteStore;
 
 const STATE_VERSION: u32 = 1;
-/// The store only knows the kinds `caldav` and `subscription`, so an OAuth
-/// account is saved as `caldav` with this marker in its user-name column:
-/// `oauth1<TAB>provider<TAB>client id<TAB>tenant<TAB>address`. Neither the
-/// client ID nor the tenant can hold a tab (both are validated), so the split
-/// is unambiguous.
-const OAUTH_MARK: &str = "oauth1\t";
-
-fn encode_oauth(account: &CalendarAccountV1) -> Option<String> {
-    let oauth = account.oauth.as_ref()?;
-    let provider = match account.kind {
-        CalendarAccountKindV1::Google => "google",
-        CalendarAccountKindV1::Microsoft => "microsoft",
-        _ => return None,
-    };
-    Some(format!(
-        "{OAUTH_MARK}{provider}\t{}\t{}\t{}",
-        oauth.client_id,
-        oauth.tenant.as_deref().unwrap_or(""),
-        account.username.as_deref().unwrap_or("")
-    ))
-}
-
-fn decode_oauth(text: &str) -> Option<(CalendarAccountKindV1, CalendarOAuthV1, Option<String>)> {
-    let mut parts = text.strip_prefix(OAUTH_MARK)?.splitn(4, '\t');
-    let kind = match parts.next()? {
-        "google" => CalendarAccountKindV1::Google,
-        "microsoft" => CalendarAccountKindV1::Microsoft,
-        _ => return None,
-    };
-    let client_id = parts.next()?.to_owned();
-    let tenant = Some(parts.next()?.to_owned()).filter(|tenant| !tenant.is_empty());
-    let address = Some(parts.next()?.to_owned()).filter(|address| !address.is_empty());
-    (!client_id.is_empty()).then_some((kind, CalendarOAuthV1 { client_id, tenant }, address))
-}
 /// Name a migrated `calendar.json` is renamed to.
 pub const MIGRATED_FILE: &str = "calendar.json.migrated";
 
@@ -90,22 +56,20 @@ impl StoreCalendar {
             accounts: accounts
                 .into_iter()
                 .filter_map(|record| {
-                    let oauth = record.username.as_deref().and_then(decode_oauth);
-                    if record.kind == "caldav"
-                        && record
-                            .username
-                            .as_deref()
-                            .is_some_and(|name| name.starts_with(OAUTH_MARK))
-                        && oauth.is_none()
-                    {
-                        return None;
-                    }
-                    let (kind, oauth, username) = match (record.kind.as_str(), oauth) {
-                        ("caldav", Some((kind, oauth, address))) => (kind, Some(oauth), address),
-                        ("caldav", None) => (CalendarAccountKindV1::Caldav, None, record.username),
-                        ("subscription", _) => {
-                            (CalendarAccountKindV1::Subscription, None, record.username)
-                        }
+                    let (kind, oauth) = match (record.kind.as_str(), record.oauth) {
+                        ("caldav", None) => (CalendarAccountKindV1::Caldav, None),
+                        ("subscription", None) => (CalendarAccountKindV1::Subscription, None),
+                        ("oauth", Some(oauth)) => (
+                            match oauth.provider.as_str() {
+                                "google" => CalendarAccountKindV1::Google,
+                                "microsoft" => CalendarAccountKindV1::Microsoft,
+                                _ => return None,
+                            },
+                            Some(CalendarOAuthV1 {
+                                client_id: oauth.client_id,
+                                tenant: oauth.tenant,
+                            }),
+                        ),
                         _ => return None,
                     };
                     Some(CalendarAccountV1 {
@@ -113,7 +77,7 @@ impl StoreCalendar {
                         kind,
                         name: record.name,
                         server_url: record.server_url,
-                        username,
+                        username: record.username,
                         oauth,
                     })
                 })
@@ -140,13 +104,26 @@ impl StoreCalendar {
             .map(|account| CalendarAccountRecord {
                 id: account.id.clone(),
                 kind: match account.kind {
+                    CalendarAccountKindV1::Caldav => "caldav",
                     CalendarAccountKindV1::Subscription => "subscription",
-                    _ => "caldav",
+                    CalendarAccountKindV1::Google | CalendarAccountKindV1::Microsoft => "oauth",
                 }
                 .to_owned(),
                 name: account.name.clone(),
                 server_url: account.server_url.clone(),
-                username: encode_oauth(account).or_else(|| account.username.clone()),
+                username: account.username.clone(),
+                oauth: account.oauth.as_ref().and_then(|oauth| {
+                    Some(CalendarOAuthRecord {
+                        provider: match account.kind {
+                            CalendarAccountKindV1::Google => "google",
+                            CalendarAccountKindV1::Microsoft => "microsoft",
+                            _ => return None,
+                        }
+                        .to_owned(),
+                        client_id: oauth.client_id.clone(),
+                        tenant: oauth.tenant.clone(),
+                    })
+                }),
             })
             .collect();
         let calendars: Vec<CalendarRecord> = state
