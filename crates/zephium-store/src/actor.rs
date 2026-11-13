@@ -8,6 +8,7 @@ mod activity;
 mod agent_audit;
 #[cfg(feature = "work-execution")]
 mod agent_work;
+mod mail;
 mod work_document;
 
 use std::collections::{HashMap, HashSet};
@@ -416,6 +417,8 @@ enum Cmd {
     ),
     ClearHistory(ProfileId, Option<i64>, Sender<Option<u32>>),
     DiscardSessionBackup(ProfileId, Box<dyn FnOnce(bool) + Send>),
+    /// Fork: runs a closure against the mail cache on the actor thread.
+    Mail(Box<dyn FnOnce(&mut Hub) + Send>),
     SiteOrigins(ProfileId, String, Box<dyn FnOnce(Vec<String>, bool) + Send>),
     Chats(ProfileId, u32, Sender<Vec<ChatSummary>>),
     Chat(ProfileId, String, Sender<Option<String>>),
@@ -2225,6 +2228,7 @@ fn actor(
                 };
                 let _ = reply.send(result);
             }
+            Some(Cmd::Mail(job)) => job(&mut hub),
             Some(Cmd::DiscardSessionBackup(profile, done)) => {
                 let result = if hub.knows(profile) || flush(&mut hub, &mut pending) {
                     hub.discard_session_backup(profile)

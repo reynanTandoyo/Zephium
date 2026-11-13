@@ -1,0 +1,28 @@
+[package]
+name = "zephium-mail"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+zephium-credentials.workspace = true
+async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+mail-parser = { version = "0.11", default-features = false, features = ["full_encoding"] }
+lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls", "ring", "rustls-platform-verifier", "smtp-transport"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+quick-xml = "0.41"
+mail-builder = { version = "0.4", default-features = false }
+futures = "0.3"
+tokio = { workspace = true, features = ["net", "time", "io-util"] }
+serde.workspace = true
+thiserror.workspace = true
+base64.workspace = true
+zeroize = "=1.9.0"
+url.workspace = true
+ulid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "time", "io-util", "rt", "test-util", "macros", "sync"] }

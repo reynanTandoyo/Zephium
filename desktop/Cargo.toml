@@ -133,6 +133,7 @@ zephium-agent-provider-transport = { workspace = true, optional = true }
 zephium-engine.workspace = true
 zephium-calendar = { workspace = true, features = ["ipc-types"] }
 zephium-store.workspace = true
+zephium-mail.workspace = true
 zephium-notes.workspace = true
 zephium-import.workspace = true
 zephium-blocker-service = { workspace = true, features = ["official-https"] }
@@ -146,6 +147,7 @@ tauri-specta.workspace = true
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = { version = "=2.10.1", default-features = false, features = ["rustls-tls", "zip"] }
 base64.workspace = true
+zeroize = "=1.9.0"
 minisign-verify = "=0.3.0"
 tempfile.workspace = true
 zephium-webext = { path = "../crates/zephium-webext", version = "=0.1.0" }

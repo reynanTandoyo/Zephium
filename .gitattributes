@@ -7,3 +7,6 @@ assets/blocker-seed/v1/NOTICE text eol=lf
 
 # Unified diff context prefixes include whitespace-only lines.
 patches/*.patch whitespace=-blank-at-eol
+
+# Fork: mail fixtures keep their CRLF line endings.
+crates/zephium-mail/tests/fixtures/*.eml -text

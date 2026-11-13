@@ -18,6 +18,7 @@ mod downloads;
 mod favicons;
 mod filesystem;
 mod history;
+mod mail;
 pub mod media;
 mod page_permissions;
 mod popup_sites;

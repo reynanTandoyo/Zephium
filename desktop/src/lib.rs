@@ -100,6 +100,7 @@ mod linux_shortcut_portal;
 #[cfg(any(target_os = "linux", test))]
 mod linux_x11_shortcut;
 mod login_item;
+mod mail;
 mod material;
 mod media;
 mod memory_pressure;
@@ -1798,6 +1799,24 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             calendar::calendar_update_event,
             calendar::calendar_delete_event,
             calendar::calendar_sync,
+            mail::mail_autoconfig,
+            mail::mail_test_account,
+            mail::mail_add_account,
+            mail::mail_update_account,
+            mail::mail_remove_account,
+            mail::mail_accounts,
+            mail::mail_folders,
+            mail::mail_sync,
+            mail::mail_messages,
+            mail::mail_message,
+            mail::mail_attachment,
+            mail::mail_set_flags,
+            mail::mail_move,
+            mail::mail_delete,
+            mail::mail_send,
+            mail::mail_save_draft,
+            mail::mail_search,
+            mail::mail_watch,
             voice::voice_status,
             voice::voice_choose_engine,
             voice::voice_choose_language,
@@ -2017,6 +2036,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             WorkDecisionPreferenceChanged,
             work_models::WorkModelsChanged,
             calendar::CalendarChanged,
+            mail::MailChanged,
             voice::VoiceChanged,
             voice::VoiceLevels,
             page_assist::PageAssistChanged,
