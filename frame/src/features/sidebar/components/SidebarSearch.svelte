@@ -9,7 +9,7 @@
   let { small = false }: { small?: boolean } = $props();
 
   function editAddress() {
-    const tab = surface.currentPage() === "work" ? null : tabs.activeTab();
+    const tab = surface.isModePage(surface.currentPage()) ? null : tabs.activeTab();
     if (tab?.url && (tab.content ?? "web") === "web") void commands.launcherEdit(tab.id, tab.url);
     else void commands.runCommand("launcher.toggle");
   }

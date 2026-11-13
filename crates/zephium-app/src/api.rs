@@ -157,6 +157,8 @@ pub enum ContentPolicyStatusQueryOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowserPage {
     Work,
+    Mail,
+    Calendar,
     Settings,
     Extensions,
     History,
@@ -173,6 +175,8 @@ impl BrowserPage {
     pub fn command_id(self) -> &'static str {
         match self {
             Self::Work => "browser.work",
+            Self::Mail => "browser.mail",
+            Self::Calendar => "browser.calendar",
             Self::Settings => "browser.settings",
             Self::Extensions => "browser.extensions",
             Self::History => "browser.history",
@@ -188,11 +192,19 @@ impl BrowserPage {
     pub fn feature(self) -> Option<&'static str> {
         match self {
             Self::Work => Some("work"),
+            Self::Mail => Some("mail"),
+            Self::Calendar => Some("calendar"),
             Self::Tasks => Some("tasks"),
             Self::Notes => Some("notes"),
             Self::Time => Some("time"),
             _ => None,
         }
+    }
+
+    /// Whether the page is a full-window mode (Work, Mail, Calendar) rather
+    /// than a browser-owned destination such as Settings.
+    pub fn is_mode(self) -> bool {
+        matches!(self, Self::Work | Self::Mail | Self::Calendar)
     }
 }
 

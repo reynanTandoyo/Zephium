@@ -48,6 +48,8 @@
   import { loadSourcePage } from "$features/source";
   import { bookmarkReveal } from "$features/bookmarks";
   import { loadTasksPage } from "$features/tasks";
+  import { loadCalendarPage } from "$features/calendar";
+  import { loadMailPage } from "$features/mail";
   import { loadFocusCover, loadTimePage } from "$features/time";
   import { focus } from "$domain/time";
   import { loadNewTabSearch } from "$features/search";
@@ -64,7 +66,6 @@
   import { IS_WINDOWS } from "$shared/platform";
   import { installChromeMenu } from "$shared/lib/chrome-menu";
   import { tabs } from "$domain/tabs";
-  import { preferences } from "$domain/preferences";
   /** The new tab field's menu, kept out of the graph the launcher shares. */
   const loadMenu = () => import("$shared/ui/Menu");
   /** New Note, from the menu or its shortcut: a note starts where notes are open. */
@@ -132,6 +133,10 @@
   });
   let splitting = $state(false);
   let inWork = $derived(browserPage.currentPage() === "work");
+  // Work, Mail and Calendar each give the window to their own page: the column
+  // is the compact rail there, with no address field, and tabs open over it.
+  let inMode = $derived(browserPage.isModePage(browserPage.currentPage()));
+  let mode = $derived(browserPage.modeOf(browserPage.currentPage()));
   // Settings stands beside the rail the way a tool panel does.
   let paneled = $derived(
     toolHost.activeTool() !== null || browserPage.currentPage() === "settings",
@@ -143,9 +148,9 @@
   let incognito = $derived(tabs.profile()?.kind === "incognito");
   // The column's body settles in only when the environment changes, never on launch.
   let modeSwitched = $state(false);
-  let shownMode: boolean | null = null;
+  let shownMode: string | null = null;
   $effect(() => {
-    const next = inWork;
+    const next = mode;
     untrack(() => {
       if (shownMode !== null && shownMode !== next) modeSwitched = true;
       shownMode = next;
@@ -328,7 +333,8 @@
       splitting = false;
       return;
     }
-    // In Work a tab opens over the canvas; the work stays where it is.
+    // In Work a tab opens over the canvas; the work stays where it is. Mail
+    // and Calendar have no pane: a tab there returns to Browse and shows it.
     if (inWork) requestTab(id);
     else tabs.activate(id);
   }
@@ -347,7 +353,7 @@
 <div
   class="shell flex h-screen w-screen p-2"
   data-tauri-drag-region
-  class:pb-0={inWork}
+  class:pb-0={inMode}
   data-caption={IS_WINDOWS || undefined}
   data-zephium-active-tab={tabs.activeId() ?? ""}
   data-zephium-surface={browserPage.currentPage() ?? "browse"}
@@ -356,27 +362,27 @@
   {#if !newTabImage()}<SkyLight shown={skyShown} />{/if}
   <Sidebar
     >{#snippet browserBody(compact)}
-      {#if compact && (inWork || besideRail)}
-        {#if !inWork && !(toolPage && !paneled)}<AddressField {compact} /><StoreInstallRail />{/if}
+      {#if compact && (inMode || besideRail)}
+        {#if !inMode && !(toolPage && !paneled)}<AddressField {compact} /><StoreInstallRail />{/if}
         {#if paneled && IS_WINDOWS}
           {#if browserPage.currentPage() === "settings"}<ModeTabs compact standalone />{/if}
           <div class="rail-search"><SidebarSearch /></div>
         {:else if paneled}<ModeTabs compact standalone />{/if}
       {:else if compact}<AddressField {compact} /><StoreInstallRail />
-      {:else if !incognito && preferences.enabled("work")}<div class="sidebar-head">
+      {:else if !incognito && browserPage.enabledModes().length > 1}<div class="sidebar-head">
           <ModeTabs />
         </div>{/if}
       <!-- One column in both environments: only what it lists changes, and the
            new list settles in where the old one was. -->
-      {#key inWork}<div class="sidebar-mode-body" data-arriving={modeSwitched}>
+      {#key mode}<div class="sidebar-mode-body" data-arriving={modeSwitched}>
           {#if compact}
             <TabRail
-              entries={besideRail && !inWork ? railCurrent : railTabs}
+              entries={besideRail && !inMode ? railCurrent : railTabs}
               closable={railClosable}
               onSelect={selectTab}
-              switcher={besideRail && !inWork ? openSwitcher : undefined}
-              spaces={!inWork}
-              roomy={besideRail || inWork}
+              switcher={besideRail && !inMode ? openSwitcher : undefined}
+              spaces={!inMode}
+              roomy={besideRail || inMode}
             />
           {:else}
             <!--
@@ -405,8 +411,8 @@
                 </UtilityTray>
               {/snippet}
             </AddressField>
-            <!-- Work floats its page over the whole window, sidebar included. -->
-            {#if !inWork}<SidebarPagePermission />{/if}
+            <!-- A mode floats its page over the whole window, sidebar included. -->
+            {#if !inMode}<SidebarPagePermission />{/if}
 
             <HidingBar />
             {#if splitting}<p class="shrink-0 px-3 pb-1 text-[12px] text-accent" aria-live="polite">
@@ -434,12 +440,12 @@
         </div>{/key}
     {/snippet}{#snippet dock(compact)}{#if compact && incognito}{@render player(true)}<PrivateBar
           compact
-        />{:else if compact}{@render player(true)}{#if tabs.profile()?.id && !inWork}<DownloadPulse
+        />{:else if compact}{@render player(true)}{#if tabs.profile()?.id && !inMode}<DownloadPulse
             profile={tabs.profile()?.id ?? ""}
           />{/if}<PrivateReturn compact /><UpdateNotice view="glyph" onabout={openAbout} /><Dock
           compact
           roomy={besideRail}
-          tools={!inWork}
+          tools={!inMode}
         >
           {#snippet sites()}<EssentialsRail
               entries={railEssentials}
@@ -614,6 +620,22 @@
               {:else if browserPage.currentPage() === "work"}
                 {#key tabs.profile()?.id}<LazyView
                     loader={loadWorkWorkspace}
+                    loadingLabel={m.surface_loading()}
+                    failureLabel={m.surface_render_failed()}
+                    retryLabel={m.surface_retry()}
+                    >{#snippet children(View)}<View />{/snippet}</LazyView
+                  >{/key}
+              {:else if browserPage.currentPage() === "mail"}
+                {#key tabs.profile()?.id}<LazyView
+                    loader={loadMailPage}
+                    loadingLabel={m.surface_loading()}
+                    failureLabel={m.surface_render_failed()}
+                    retryLabel={m.surface_retry()}
+                    >{#snippet children(View)}<View />{/snippet}</LazyView
+                  >{/key}
+              {:else if browserPage.currentPage() === "calendar"}
+                {#key tabs.profile()?.id}<LazyView
+                    loader={loadCalendarPage}
                     loadingLabel={m.surface_loading()}
                     failureLabel={m.surface_render_failed()}
                     retryLabel={m.surface_retry()}

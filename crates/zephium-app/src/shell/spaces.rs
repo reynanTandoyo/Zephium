@@ -270,7 +270,7 @@ impl Shell {
     /// follows the space, and any other browser page steps back to browsing first.
     fn switch_space(&mut self, space: SpaceId) -> OperationDisposition {
         match self.active_browser_page() {
-            Some(crate::BrowserPage::Work) => {}
+            Some(page) if page.is_mode() => {}
             Some(_) if !self.browser_return_ready => {
                 self.browser_after_return = Some(Box::new(Command::Space(Box::new(
                     SpaceCommand::Switch(space),
@@ -386,7 +386,10 @@ impl Shell {
         }
         let mut native = NativeWork::default();
         if id == current {
-            if matches!(self.active_browser_page(), Some(crate::BrowserPage::Work)) {
+            if self
+                .active_browser_page()
+                .is_some_and(crate::BrowserPage::is_mode)
+            {
                 return rejected(OperationReason::InvalidScope);
             }
             let at = order.iter().position(|space| *space == id).unwrap_or(0);

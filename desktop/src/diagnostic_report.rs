@@ -38,6 +38,8 @@ const SETTINGS: &[(&str, &str)] = &[
 const FEATURES: &[(&str, &str)] = &[
     ("AI", "ai"),
     ("Work", "work"),
+    ("Mail", "mail"),
+    ("Calendar", "calendar"),
     ("Notes", "notes"),
     ("Tasks", "tasks"),
     ("Time", "time"),

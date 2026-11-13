@@ -591,6 +591,18 @@ export const fields = {
     description: m.feature_work_on,
     initial: true,
   },
+  "mail.enabled": {
+    section: "features",
+    label: m.feature_mail_title,
+    description: m.feature_mail_on,
+    initial: true,
+  },
+  "calendar.enabled": {
+    section: "features",
+    label: m.feature_calendar_title,
+    description: m.feature_calendar_on,
+    initial: true,
+  },
   "notes.enabled": {
     section: "features",
     label: m.feature_notes_title,

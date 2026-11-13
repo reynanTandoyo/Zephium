@@ -163,7 +163,9 @@
     void webext.refresh();
     const stopAccess = webext.listenForAccess();
     const stopStoreClicks = webext.listenForStoreClicks();
-    const stopDrops = webext.listenForDrops(() => browserPage.currentPage() !== "work");
+    const stopDrops = webext.listenForDrops(
+      () => !browserPage.isModePage(browserPage.currentPage()),
+    );
     const pagePermissionsReady = pagePermissions.init();
 
     // Rasters are emitted immediately before the projection that references

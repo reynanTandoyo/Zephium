@@ -359,7 +359,9 @@ impl Shell {
             return operation_result(OperationOutcome::Rejected, OperationReason::InvalidInput);
         };
         // Work hands an address back to Browse rather than opening it behind itself.
-        if (self.active_browser_page() == Some(crate::BrowserPage::Work)
+        if (self
+            .active_browser_page()
+            .is_some_and(crate::BrowserPage::is_mode)
             || (new_tab && self.active_browser_page().is_some()))
             && !self.browser_return_ready
         {

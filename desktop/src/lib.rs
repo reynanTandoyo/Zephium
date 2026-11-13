@@ -4038,6 +4038,12 @@ fn execute_command_or(
     if id == "mode.work" {
         return execute_command(app, "browser.work");
     }
+    if id == "mode.mail" {
+        return execute_command(app, "browser.mail");
+    }
+    if id == "mode.calendar" {
+        return execute_command(app, "browser.calendar");
+    }
     if id == "mode.browse" {
         return execute_command(app, "browser.return");
     }
@@ -4046,9 +4052,20 @@ fn execute_command_or(
         let menu = (|| -> tauri::Result<_> {
             let browse =
                 MenuItemBuilder::with_id("mode.browse", menu_text::label("Browse")).build(app)?;
-            let work =
-                MenuItemBuilder::with_id("mode.work", menu_text::label("Work")).build(app)?;
-            Menu::with_items(app, &[&browse, &work])
+            // One entry per mode whose feature is on; Browse is always there.
+            let mut items = vec![browse];
+            for (id, english, feature) in [
+                ("mode.work", "Work", "work"),
+                ("mode.mail", "Mail", "mail"),
+                ("mode.calendar", "Calendar", "calendar"),
+            ] {
+                if zephium_core::preferences::feature_enabled(app_setting, feature) {
+                    items.push(MenuItemBuilder::with_id(id, menu_text::label(english)).build(app)?);
+                }
+            }
+            let refs: Vec<&dyn tauri::menu::IsMenuItem<_>> =
+                items.iter().map(|item| item as _).collect();
+            Menu::with_items(app, &refs)
         })();
         return match (app.get_webview_window(MAIN_LABEL), menu) {
             (Some(window), Ok(menu)) if window.popup_menu(&menu).is_ok() => accepted_ui_operation(),
@@ -4101,6 +4118,8 @@ fn execute_command_or(
     if let Some(destination) = id.strip_prefix("browser.") {
         let page = match destination {
             "work" => Some(zephium_app::BrowserPage::Work),
+            "mail" => Some(zephium_app::BrowserPage::Mail),
+            "calendar" => Some(zephium_app::BrowserPage::Calendar),
             "settings" => Some(zephium_app::BrowserPage::Settings),
             "extensions" => Some(zephium_app::BrowserPage::Extensions),
             "history" => Some(zephium_app::BrowserPage::History),

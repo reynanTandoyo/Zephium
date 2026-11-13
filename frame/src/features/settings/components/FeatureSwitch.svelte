@@ -1,9 +1,11 @@
 <script lang="ts">
   import {
     Briefcase02Icon,
+    Calendar01Icon,
     CheckListIcon,
     ChipIcon,
     Clock01Icon,
+    Mail01Icon,
     Note01Icon,
   } from "@hugeicons/core-free-icons";
   import * as m from "$shared/i18n/messages";
@@ -13,7 +15,7 @@
   import Icon from "$shared/ui/Icon";
   import Switch from "$shared/ui/Switch";
 
-  type Feature = "ai" | "work" | "notes" | "tasks" | "time";
+  type Feature = "ai" | "work" | "mail" | "calendar" | "notes" | "tasks" | "time";
   let { feature, card = false }: { feature: Feature; card?: boolean } = $props();
 
   const copy = {
@@ -37,6 +39,18 @@
       off: m.feature_work_off,
       confirm: m.feature_work_confirm_title,
       leaves: [m.feature_work_leaves_mode, m.feature_work_leaves_settings],
+    },
+    mail: {
+      icon: Mail01Icon,
+      title: m.feature_mail_title,
+      on: m.feature_mail_on,
+      off: m.feature_mail_off,
+    },
+    calendar: {
+      icon: Calendar01Icon,
+      title: m.feature_calendar_title,
+      on: m.feature_calendar_on,
+      off: m.feature_calendar_off,
     },
     notes: {
       icon: Note01Icon,

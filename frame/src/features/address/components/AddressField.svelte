@@ -156,8 +156,8 @@
     const tab = tabs.activeTab();
     const url = failedUrl ?? tab?.url;
     if (!tab || !url || (tab.content ?? "web") !== "web") return false;
-    // Work has no page in front, so there the launcher opens empty.
-    if (surface.currentPage() === "work") void commands.runCommand("launcher.toggle");
+    // A mode has no page in front, so there the launcher opens empty.
+    if (surface.isModePage(surface.currentPage())) void commands.runCommand("launcher.toggle");
     else void commands.launcherEdit(tab.id, url);
     return true;
   }
