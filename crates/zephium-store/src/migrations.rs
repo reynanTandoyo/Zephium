@@ -1823,6 +1823,11 @@ pub static META: &[Migration] = &[
             )
         },
     },
+    // Fork (T-0025): the local mail cache.
+    Migration {
+        version: 29,
+        up: |tx| tx.execute_batch(include_str!("mail_schema_v1.sql")),
+    },
 ];
 
 fn record_media(tx: &Transaction) -> rusqlite::Result<()> {
@@ -2841,6 +2846,7 @@ mod tests {
         (26, 0x8cf0e4639f17eb73),
         (27, 0x6c555aa33142ef81),
         (28, 0xdce79131820ba8c9),
+        (29, 0xa0b8957836963987),
     ];
     const PROFILE_SCHEMA_FINGERPRINTS: &[(i64, u64)] = &[
         (1, 0x10b8_b7a3_094f_23d7),

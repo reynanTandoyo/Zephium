@@ -7,6 +7,7 @@ mod hub;
 pub use hub::media::{admit as admit_media, MediaAdmissionError, MediaStore};
 pub use hub::profile_avatars::prepare_avatar_photo;
 mod legacy;
+pub mod mail_cache;
 mod migrations;
 mod pane;
 #[cfg(target_os = "windows")]
