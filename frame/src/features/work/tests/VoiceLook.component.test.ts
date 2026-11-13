@@ -65,7 +65,7 @@ test("a screenshot target keeps the bar after the live recording clock changes",
   await page.viewport(1000, 420);
   const screen = await render(VoiceStage);
   try {
-    native.start.mockResolvedValue({ take: 13, engine: "zephium", fault: null });
+    native.start.mockResolvedValue({ take: 13, engine: "open_ai", fault: null });
     await page.getByRole("button", { name: "Dictate" }).click();
     await expect.element(page.getByRole("button", { name: "Stop and insert" })).toBeVisible();
     const bar = screen.container.querySelector<HTMLElement>(".work-bar")!;
@@ -102,7 +102,7 @@ test("the bar at rest, listening, transcribing and when it cannot listen, in bot
     emitNativeEvent("voiceChanged", change(1, { phase: "done", text: "Find me a quiet hotel." }));
     await settle();
 
-    native.start.mockResolvedValue({ take: 2, engine: "zephium", fault: null });
+    native.start.mockResolvedValue({ take: 2, engine: "open_ai", fault: null });
     // With words in the field the mic has given way to Send: a take starts from the shortcut.
     await uiCommands.init();
     emitNativeEvent("uiCommand", "work.dictate");
@@ -110,7 +110,7 @@ test("the bar at rest, listening, transcribing and when it cannot listen, in bot
     await new Promise((done) => setTimeout(done, 1600));
     await shoot(bar(), "listening-cloud");
     quiet();
-    emitNativeEvent("voiceChanged", change(2, { phase: "transcribing", engine: "zephium" }));
+    emitNativeEvent("voiceChanged", change(2, { phase: "transcribing", engine: "open_ai" }));
     await shoot(bar(), "transcribing");
     emitNativeEvent("voiceChanged", change(2, { phase: "failed", fault: "no_engine" }));
     await shoot(bar(), "no-engine");

@@ -3,7 +3,6 @@ import { afterEach, test, vi } from "vitest";
 import { render } from "vitest-browser-svelte";
 import { page } from "vitest/browser";
 import { emitNativeEvent } from "$shared/testing/native-events";
-import { accountFixture } from "$shared/testing/account";
 import { preferences } from "$domain/preferences";
 import * as settings from "../lib/settings-state.svelte";
 import type { SettingsSection } from "../lib/settings-model";
@@ -18,11 +17,6 @@ vi.mock("$shared/ipc/bindings", async () => {
   const { entry, models } = await import("$shared/testing/work-models");
   const known: Record<string, (...args: never[]) => Promise<unknown>> = {
     settingGet: async (key: string) => native.settings[key] ?? null,
-    accountGet: async () => ({
-      account: accountFixture({ signed_in: true, email: "ada@example.com", plan: "pro" }),
-      fault: null,
-      retry_after: null,
-    }),
     keymapEntries: async () => [],
     workLocalServers: async () => [],
     workMoreModels: async () => ({

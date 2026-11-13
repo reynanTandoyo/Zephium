@@ -3,7 +3,6 @@ import { afterEach, test, vi } from "vitest";
 import { render } from "vitest-browser-svelte";
 import { page, userEvent } from "vitest/browser";
 import type {
-  AccountV1,
   WorkModelProvider,
   WorkModelReasoning,
   WorkModelRole,
@@ -16,13 +15,11 @@ import ModelPickerStage from "./ModelPickerStage.svelte";
 const native = vi.hoisted(() => ({
   view: null as unknown as WorkModelsV1,
   ready: true,
-  hosted: false,
   settings: {} as Record<string, string>,
 }));
 
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
-  const { accountFixture } = await import("$shared/testing/account");
   return mockBindings({
     workModels: vi.fn(async () => native.view),
     workModelsReady: vi.fn(async (profile: string) => ({
@@ -46,13 +43,6 @@ vi.mock("$shared/ipc/bindings", async () => {
       native.settings[key] = value;
       return { accepted: true, operation_id: null };
     },
-    accountGet: vi.fn(async () => ({
-      account: native.hosted
-        ? accountFixture({ available: true, hosted_models: true, signed_in: false })
-        : (null as unknown as AccountV1),
-      fault: null,
-      retry_after: null,
-    })),
   });
 });
 
@@ -89,7 +79,6 @@ async function shoot(name: string, materials: readonly ("glass" | "solid")[] = [
 
 afterEach(() => {
   native.ready = true;
-  native.hosted = false;
   native.settings = {};
   preferences.dispose();
 });
@@ -101,7 +90,6 @@ test(
   { timeout: 60_000 },
   async () => {
     await page.viewport(1100, 700);
-    native.hosted = true;
     native.view = keyed("anthropic/claude-opus-5-5");
     native.settings["work.favourite-models"] = "anthropic/claude-sonnet-5-5\nopenai/gpt-6-sol";
     await preferences.init();
@@ -125,8 +113,6 @@ test(
     await shoot("google-refused");
     await rail(/^Custom/u).click();
     await shoot("server");
-    await rail(/^Zephium AI/u).click();
-    await shoot("hosted");
     await rail(/^OpenRouter/u).click();
     await userEvent.keyboard("son");
     await shoot("search");

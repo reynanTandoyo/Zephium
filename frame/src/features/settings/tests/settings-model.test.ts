@@ -31,13 +31,14 @@ it("finds the agent destinations without exposing unimplemented controls", async
   );
 });
 
-it("offers Account through the identity card and search, outside the groups", async () => {
+it("has no Account page: every section belongs to a group", async () => {
   const { groups, sections, searchSettings } = await import("../lib/settings-model");
-  const account = sections.find((section) => String(section.id) === "account");
-  expect(account).toBeDefined();
-  expect(groups.some((group) => String(group.id) === account!.group)).toBe(false);
-  expect(searchSettings("account").some((result) => String(result.section) === "account")).toBe(
+  expect(sections.some((section) => String(section.id) === "account")).toBe(false);
+  expect(sections.every((section) => groups.some((group) => group.id === section.group))).toBe(
     true,
+  );
+  expect(searchSettings("account").some((result) => String(result.section) === "account")).toBe(
+    false,
   );
 });
 

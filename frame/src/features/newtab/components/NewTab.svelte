@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, untrack, type Snippet } from "svelte";
-  import { accountFoot, accountSession } from "$domain/account";
   import {
     CheckListIcon,
     Clock01Icon,
@@ -35,12 +34,10 @@
     type Scene,
   } from "$shared/sky";
   import { IS_WINDOWS } from "$shared/platform";
-  import NewTabAccount from "./NewTabAccount.svelte";
 
   let {
     search,
     oncustomize,
-    onaccount,
     ontasks,
     ontime,
   }: {
@@ -48,8 +45,6 @@
     search: Snippet;
     /** Opens this page's settings. */
     oncustomize?: () => void;
-    /** Opens the account in Settings, or straight onto buying credits. */
-    onaccount?: (intent: "account" | "credits") => void;
     /** Opens Tasks. */
     ontasks?: () => void;
     /** Opens Time. */
@@ -64,14 +59,6 @@
   let focusedBefore = $state(0);
 
   let incognito = $derived(tabs.profile()?.kind === "incognito");
-  const account = accountFoot({ private: () => incognito });
-  // The account is in its own pane beside the page's settings, and the
-  // settings keep the corner, so nothing moves when the account is known.
-  let showAccount = $derived(!!onaccount && account.available);
-  let signInWidth = $state(0);
-  let nameWidth = $state(0);
-  // The name beside the picture only where the page is wide enough to spare it.
-  let named = $derived(width >= 1100);
   let profile = $derived(tabs.profile()?.id ?? null);
   let picture = $derived(newTabImage());
   let useSky = $derived(picture === null);
@@ -180,12 +167,7 @@
       live = false;
     };
   });
-  let controls = $derived([
-    ...(showAccount
-      ? [account.signedIn ? (nameWidth > 0 ? nameWidth + 48 : 32) : Math.max(32, signInWidth)]
-      : []),
-    ...(oncustomize ? [32] : []),
-  ]);
+  let controls = $derived([...(oncustomize ? [32] : [])]);
   let page = $derived(
     layout(width, height, {
       controls,
@@ -205,7 +187,7 @@
   const at = ({ x, y, w, h }: Box) => `left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
 
   // On Windows the window's controls come down into the page's top corner on
-  // hover; the account and settings step down out of their way meanwhile, with
+  // hover; the settings button steps down out of its way meanwhile, with
   // the same timing, and back up as they go.
   let caption = $state({ height: 0, duration: 0 });
   $effect(() => {
@@ -302,11 +284,6 @@
       clearTimeout(timer);
       void listening.then((stop) => stop());
     };
-  });
-
-  onMount(() => {
-    void accountSession.retain();
-    return () => accountSession.release();
   });
 
   onMount(() => {
@@ -464,16 +441,6 @@
   {/if}
 
   <!-- Each control a disc of light on the sky, level with the field. -->
-  {#if showAccount && onaccount && page.controls[0]}
-    <div
-      class="control"
-      style={at(page.controls[0])}
-      style:translate={`0 ${stepDown(page.controls[0])}px`}
-      style:transition-duration={`${caption.duration}ms`}
-    >
-      <NewTabAccount {account} {onaccount} {named} bind:signInWidth bind:nameWidth />
-    </div>
-  {/if}
   {#if oncustomize && page.controls.at(-1)}
     <div
       class="control"
@@ -765,9 +732,8 @@
     color: var(--sky-ink);
   }
 
-  /* White on the sky for the buttons alone: the account's panel opens from
-     inside the disc and keeps the theme's own ink. */
-  .control :global(:is(.ntp-account, .sign-in, .icon-button)) {
+  /* White on the sky for the button alone. */
+  .control :global(.icon-button) {
     --color-text: var(--sky-ink);
     --color-muted: var(--sky-ink);
     --color-label-secondary: var(--sky-ink);

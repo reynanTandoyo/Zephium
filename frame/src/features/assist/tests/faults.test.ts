@@ -5,10 +5,13 @@ import { availabilityView, faultView } from "../lib/faults";
 const model = (fault: WorkModelFaultV1, retry_after_ms: number | null = null) =>
   faultView({ reason: "model", fault, retry_after_ms });
 
-test("out of credits sends the person to buy more, not to retry", () => {
-  const view = model("hosted_usage");
-  expect(view.fix?.command).toBe("settings.account");
-  expect(view.retry).toBe("no");
+test("a refusal of the retired hosted provider reads as unavailable and leads to Settings → AI", () => {
+  for (const fault of ["hosted_usage", "signed_out", "plan_required", "daily_limit"] as const) {
+    const view = model(fault);
+    expect(view.message, fault).toBe("Zephium isn’t available right now.");
+    expect(view.fix?.command, fault).toBe("settings.ai");
+    expect(view.retry, fault).toBe("no");
+  }
 });
 
 test("a rate limit waits, then offers the same question again", () => {
@@ -23,11 +26,6 @@ test("a missing or refused key leads to Settings → AI", () => {
 
 test("a request over the provider plan's per-minute limit is not retried", () => {
   expect(model("plan_limit")).toMatchObject({ retry: "no", fix: { command: "settings.ai" } });
-});
-
-test("a plan a model needs and the daily limit point at the account", () => {
-  expect(model("plan_required").fix?.command).toBe("settings.account");
-  expect(model("daily_limit").message).toContain("resets");
 });
 
 test("a page that changed may be asked again; no selection may not", () => {

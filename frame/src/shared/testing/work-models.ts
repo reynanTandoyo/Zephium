@@ -119,7 +119,6 @@ function levels(item: WorkModelEntry): WorkModelReasoning[] {
   const model = item.model.model;
   switch (item.model.provider) {
     case "anthropic":
-    case "cloud":
       return model.startsWith("claude-haiku-4") ? ["low", "medium", "high"] : ALL;
     case "open_ai":
       return model.startsWith("gpt-6") ? ALL : ["low", "medium", "high"];
@@ -137,23 +136,20 @@ export const PROFILE = "00000000000000000000000001";
 
 export function models(options: {
   keys?: Partial<Record<WorkModelProvider, WorkKeyStateV1>>;
-  cloud?: boolean;
   base?: string;
   lead?: string | null;
   chosen?: string | null;
   effort?: WorkModelReasoning;
 }): WorkModelsV1 {
-  const cloud = options.cloud
-    ? [entry("cloud", "claude-sonnet-5-5", "Claude Sonnet 5.5", true, ["lead", "page"])]
-    : [];
-  const efforts = [...cloud, ...builtin]
+  const efforts = builtin
     .map((item) => ({ id: item.id, levels: levels(item) }))
     .filter((row) => row.levels.length);
   const lead = efforts.find((row) => row.id === options.lead)?.levels;
+  // The view carries only what the picker reads; the hosted block it once had is gone.
   return {
     version: 1,
     profile: PROFILE,
-    entries: [...cloud, ...builtin],
+    entries: builtin,
     chosen: { lead: options.chosen ?? null, page: null, light: null },
     effective: { lead: options.lead ?? null, page: null, light: null },
     providers: (
@@ -174,17 +170,11 @@ export function models(options: {
       key: options.keys?.[provider] ?? "missing",
       base: provider === "compatible" ? (options.base ?? null) : null,
     })),
-    cloud: {
-      signed_in: !!options.cloud,
-      plan: options.cloud ? "Pro" : null,
-      locked: [],
-      required: [],
-    },
     fault: null,
     efforts,
     effort: lead?.length
       ? (options.effort ??
         (lead.includes("medium") ? "medium" : (lead.find((level) => level !== "low") ?? null)))
       : null,
-  };
+  } as WorkModelsV1;
 }

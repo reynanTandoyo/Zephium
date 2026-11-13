@@ -13,10 +13,8 @@ export function costLine(cost: PageAssistCostV1): string {
     return cost.usd === null
       ? m.assist_cost_confirming({ model: cost.model })
       : m.assist_cost_own({ model: cost.model, amount: `$${cost.usd}`, provider: cost.provider });
-  if (cost.credits === null) return m.assist_cost_confirming({ model: cost.model });
-  return cost.credits === "1"
-    ? m.assist_cost_credit({ model: cost.model })
-    : m.assist_cost_credits({ model: cost.model, credits: cost.credits });
+  // A stored hosted cost carries credits that no longer mean anything.
+  return m.assist_cost_confirming({ model: cost.model });
 }
 
 const QUOTED = /[“"]([^”"]*)[”"]/gu;

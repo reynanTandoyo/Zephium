@@ -16,14 +16,6 @@
       "js": 34903,
       "css": 0
     },
-    "lazy:features/account/components/AccountButton.svelte": {
-      "js": 8720,
-      "css": 7458
-    },
-    "lazy:features/account/index.ts": {
-      "js": 149,
-      "css": 0
-    },
     "lazy:features/address/components/PageRequestCard.svelte": {
       "js": 12100,
       "css": 2377
@@ -104,30 +96,6 @@
       "js": 116916,
       "css": 10108
     },
-    "lazy:features/settings/components/account/AccountAvatarCrop.svelte": {
-      "js": 9486,
-      "css": 5508
-    },
-    "lazy:features/settings/components/account/AccountCredits.svelte": {
-      "js": 4575,
-      "css": 3522
-    },
-    "lazy:features/settings/components/account/AccountEmailFlow.svelte": {
-      "js": 5001,
-      "css": 322
-    },
-    "lazy:features/settings/components/account/AccountHistory.svelte": {
-      "js": 12360,
-      "css": 2717
-    },
-    "lazy:features/settings/components/account/AccountPlanChange.svelte": {
-      "js": 11543,
-      "css": 1398
-    },
-    "lazy:features/settings/components/account/AccountPlans.svelte": {
-      "js": 5520,
-      "css": 2176
-    },
     "lazy:features/settings/components/ClearSiteData.svelte": {
       "js": 4426,
       "css": 944
@@ -135,10 +103,6 @@
     "lazy:features/settings/components/sections/AboutPage.svelte": {
       "js": 22508,
       "css": 2383
-    },
-    "lazy:features/settings/components/sections/AccountPage.svelte": {
-      "js": 73399,
-      "css": 20966
     },
     "lazy:features/settings/components/sections/AiPage.svelte": {
       "js": 75613,
@@ -207,10 +171,6 @@
     "lazy:features/settings/components/Settings.svelte": {
       "js": 144857,
       "css": 9599
-    },
-    "lazy:features/settings/components/SettingsIdentity.svelte": {
-      "js": 2318,
-      "css": 611
     },
     "lazy:features/source/components/SourcePage.svelte": {
       "js": 3670,

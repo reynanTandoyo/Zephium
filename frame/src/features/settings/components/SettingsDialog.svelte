@@ -45,7 +45,7 @@
 
 <dialog
   bind:this={dialog}
-  class="settings-modal account-dialog"
+  class="settings-modal settings-dialog"
   style:--width="{width}px"
   aria-labelledby={`${uid}-title`}
   aria-describedby={description ? `${uid}-body` : undefined}
@@ -62,7 +62,7 @@
 </dialog>
 
 <style>
-  .account-dialog {
+  .settings-dialog {
     box-sizing: border-box;
     inline-size: min(var(--width), calc(100vw - 48px));
     max-block-size: calc(100vh - 48px);
@@ -76,7 +76,7 @@
     box-shadow: var(--shadow-overlay);
   }
 
-  .account-dialog[open] {
+  .settings-dialog[open] {
     animation: interface-fade var(--motion-base) var(--ease-out);
   }
 
@@ -95,7 +95,7 @@
     line-height: 1.6;
   }
 
-  .account-dialog :global(footer) {
+  .settings-dialog :global(footer) {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
@@ -103,7 +103,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .account-dialog[open] {
+    .settings-dialog[open] {
       animation: none;
     }
   }

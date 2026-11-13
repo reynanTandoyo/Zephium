@@ -15,7 +15,6 @@ const native = vi.hoisted(() => ({
   set: vi.fn(),
   test: vi.fn(),
   choose: vi.fn(),
-  account: vi.fn(),
   local: vi.fn(async () => [] as WorkLocalServerV1[]),
   endpoint: vi.fn(),
   more: vi.fn(async (): Promise<WorkMoreModelsV1_Serialize> => ({
@@ -31,7 +30,6 @@ vi.mock("$shared/ipc/bindings", async () => {
     workSetProviderKey: native.set,
     workTestProviderKey: native.test,
     workChooseModel: native.choose,
-    accountGet: native.account,
     workLocalServers: native.local,
     workSetModelEndpoint: native.endpoint,
     workMoreModels: native.more,
@@ -122,9 +120,9 @@ test("a refused model change restores the stored choice and reports the failure"
   await expect.element(control).toHaveTextContent("Automatic · Claude Opus 5.5");
 });
 
-test("billing trouble preserves acceptance and the old Cloud group stays gone", async () => {
+test("billing trouble preserves acceptance", async () => {
   await page.viewport(1100, 1200);
-  const view = models({ keys: { open_ai: "valid" }, cloud: true });
+  const view = models({ keys: { open_ai: "valid" } });
   view.providers = view.providers.map((provider) =>
     provider.provider === "open_ai" ? { ...provider, fault: "billing" } : provider,
   );
@@ -149,51 +147,13 @@ test("Settings AI exposes Jev setup beside the regular model controls with hones
   await expect.element(screen.getByRole("heading", { name: "Work", exact: true })).toBeVisible();
 });
 
-test("Zephium AI is offered where the server hosts models, and shows the account once signed in", async () => {
+test("no hosted group or sign-in is offered", async () => {
   await page.viewport(1100, 1200);
   native.read.mockResolvedValue(models({}));
-  const account = {
-    version: 1,
-    available: true,
-    server: "https://api.zephium.app",
-    custom_server: false,
-    hosted_models: true,
-    billing: true,
-    signup_open: true,
-    signed_in: false,
-    pending_email: null,
-    resend_in: null,
-    email: null,
-    name: null,
-    plan: null,
-    usage: null,
-    subscription: null,
-    offers: [],
-    checkout_open: false,
-    notice: null,
-  };
-  native.account.mockResolvedValue({ account, fault: null, retry_after: null });
   const screen = await render(AiPage);
-  await expect.element(screen.getByRole("button", { name: "Sign in…" })).toBeVisible();
-  await screen.unmount();
-
-  native.read.mockResolvedValue(models({ cloud: true }));
-  native.account.mockResolvedValue({
-    account: {
-      ...account,
-      signed_in: true,
-      email: "ada@example.com",
-      plan: "free",
-      usage: { used_percent: 30, resets_at: null, extra: false },
-    },
-    fault: null,
-    retry_after: null,
-  });
-  const signed = await render(AiPage);
-  await expect.element(signed.getByText("Signed in · Free plan · 30% used")).toBeVisible();
-  await expect
-    .element(signed.getByText("Add a provider key or sign in", { exact: false }))
-    .not.toBeInTheDocument();
+  await expect.element(screen.getByText("Add a provider key", { exact: false })).toBeVisible();
+  await expect.element(screen.getByText("Zephium Cloud", { exact: true })).not.toBeInTheDocument();
+  await expect.element(screen.getByRole("button", { name: "Sign in…" })).not.toBeInTheDocument();
 });
 
 test("a model server already running here is one click away", async () => {

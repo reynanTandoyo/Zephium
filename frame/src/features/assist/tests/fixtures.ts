@@ -19,7 +19,7 @@ export const status = (
   tab: TAB,
   availability: "ready",
   page: { tab: TAB, host: "news.ycombinator.com", title: "Hacker News" },
-  model: { id: "openai/gpt-6-luna", name: "GPT-6 Luna", hosted: false, effort: "high" },
+  model: { id: "openai/gpt-6-luna", name: "GPT-6 Luna", effort: "high" },
   suggestions: ["summarize", "picks", "key_points", "redesign", "darker"],
   selection: null,
   can_pick: true,

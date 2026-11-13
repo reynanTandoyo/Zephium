@@ -622,101 +622,49 @@ test("a run that ended short says what is missing and offers the one thing that 
   session.dispose();
 });
 
-test("a run stopped by spent Zephium AI usage says so and offers the fix", async () => {
-  const session = new WorkSession("profile");
-  session.selected = "objective";
-  const failed = agentRun("failed");
-  failed.steps = [
-    ...failed.steps!,
-    {
-      id: "turn-2",
-      turn: 2,
-      kind: { kind: "turn" },
-      status: "failed",
-      note: "Zephium AI's included usage is spent",
-      model_fault: "hosted_usage",
-    },
-  ];
-  session.projection = { ...structuredClone(projection), executions: [failed] };
-  const screen = await render(AgentLine, { session });
-  await expect
-    .element(screen.getByText("You’ve used your included Zephium AI usage.", { exact: true }))
-    .toBeVisible();
-  await screen.getByRole("button", { name: "Upgrade or use a key" }).click();
-  expect(native.command).toHaveBeenCalledWith("settings.account");
-  await screen.unmount();
-  session.dispose();
-});
-
 test.each([
-  ["plan_required", "This model needs a different Zephium plan.", "See plans", "settings.account"],
-  [
-    "billing_review",
-    "Your Zephium account is under billing review.",
-    "Open account",
-    "settings.account",
-  ],
-  [
-    "daily_limit",
-    "You’ve reached your daily limit. It resets at",
-    "Change limit",
-    "settings.account",
-  ],
-  [
-    "free_usage_paused",
-    "Free Zephium AI usage is paused right now. Credits and your own key still work.",
-    "See plans",
-    "settings.account",
-  ],
-  [
-    "hosted_paused",
-    "Zephium AI is paused for now. Try again later, or use your own key.",
-    "Use your own key",
-    "settings.ai",
-  ],
+  "hosted_usage",
+  "plan_required",
+  "billing_review",
+  "daily_limit",
+  "free_usage_paused",
+  "hosted_busy",
+  "hosted_paused",
+  "signed_out",
 ] as const)(
-  "a hosted %s refusal says so and offers its one fix",
-  async (fault, line, label, command) => {
+  "a stored hosted %s refusal gets no account or plan fix, only the run's own note",
+  async (fault) => {
+    native.command.mockClear();
     const session = new WorkSession("profile");
     session.selected = "objective";
     const failed = agentRun("failed");
     failed.steps = [
       ...failed.steps!,
-      { id: "turn-2", turn: 2, kind: { kind: "turn" }, status: "failed", model_fault: fault },
+      {
+        id: "turn-2",
+        turn: 2,
+        kind: { kind: "turn" },
+        status: "failed",
+        note: "The model could not continue.",
+        model_fault: fault,
+      },
     ];
     session.projection = { ...structuredClone(projection), executions: [failed] };
     const screen = await render(AgentLine, { session });
-    await expect.element(screen.getByText(line)).toBeVisible();
-    await screen.getByRole("button", { name: label, exact: true }).click();
-    expect(native.command).toHaveBeenCalledWith(command);
+    await expect.element(screen.getByText("The model could not continue.")).toBeVisible();
+    for (const label of [
+      "Upgrade or use a key",
+      "See plans",
+      "Open account",
+      "Change limit",
+      "Sign in",
+    ])
+      expect(screen.getByRole("button", { name: label, exact: true }).query()).toBeNull();
+    expect(native.command).not.toHaveBeenCalledWith("settings.account");
     await screen.unmount();
     session.dispose();
   },
 );
-
-test("zephium still confirming earlier requests asks for a moment and offers a plain retry", async () => {
-  const session = new WorkSession("profile");
-  session.selected = "objective";
-  const failed = agentRun("failed");
-  failed.steps = [
-    ...failed.steps!,
-    { id: "turn-2", turn: 2, kind: { kind: "turn" }, status: "failed", model_fault: "hosted_busy" },
-  ];
-  session.projection = { ...structuredClone(projection), executions: [failed] };
-  const screen = await render(AgentLine, { session });
-  await expect
-    .element(
-      screen.getByText(
-        "Zephium AI is still confirming your earlier requests. Try again in a moment.",
-      ),
-    )
-    .toBeVisible();
-  await expect
-    .element(screen.getByRole("button", { name: "Try again", exact: true }))
-    .toBeVisible();
-  await screen.unmount();
-  session.dispose();
-});
 
 test("a refused request says so for a moment, then the finished run's own sentence returns", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

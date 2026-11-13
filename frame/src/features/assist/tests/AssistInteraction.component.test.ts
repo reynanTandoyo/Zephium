@@ -55,7 +55,6 @@ vi.mock("$domain/surface", () => ({ surface: { open: native.surface } }));
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
   const { models } = await import("$shared/testing/work-models");
-  const { accountFixture } = await import("$shared/testing/account");
   return mockBindings({
     pageAssistStatus: async () => {
       native.statusCalls++;
@@ -78,7 +77,6 @@ vi.mock("$shared/ipc/bindings", async () => {
       const view = models({ keys: { open_ai: "valid" }, lead: "openai/gpt-6-luna" });
       return { ...view, effective: { ...view.effective, page: "openai/gpt-6-luna" } };
     },
-    accountGet: async () => ({ account: accountFixture(), fault: null, retry_after: null }),
     settingGet: async () => null,
     runCommand: async () => ({ accepted: true, operation_id: null }),
   });

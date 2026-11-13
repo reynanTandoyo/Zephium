@@ -13,13 +13,6 @@ export type FaultView = {
   retry: "no" | "now" | "wait";
 };
 
-/** When Zephium AI's daily limit next resets: 00:00 UTC, on the person's own clock. */
-function dailyResetTime(now: Date = new Date()): string {
-  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(next);
-}
-
-const account = (label: string): FaultFix => ({ label, command: "settings.account" });
 const models = (label: string): FaultFix => ({ label, command: "settings.ai" });
 
 /** Every way a reply can end early, said as the person can act on it. */
@@ -33,48 +26,18 @@ export function faultView(reason: PageAssistFaultV1): FaultView {
 
 function modelFault(fault: Extract<PageAssistFaultV1, { reason: "model" }>["fault"]): FaultView {
   switch (fault) {
+    // The hosted provider is retired and never produces these; a stored one is simply unavailable.
     case "hosted_usage":
-      return {
-        message: m.assist_fault_hosted_usage(),
-        fix: account(m.assist_fix_buy_credits()),
-        retry: "no",
-      };
     case "plan_required":
-      return {
-        message: m.work_fault_plan_required(),
-        fix: account(m.work_fault_fix_plans()),
-        retry: "no",
-      };
     case "free_usage_paused":
-      return {
-        message: m.work_fault_free_usage_paused(),
-        fix: account(m.work_fault_fix_plans()),
-        retry: "no",
-      };
     case "billing_review":
-      return {
-        message: m.work_fault_billing_review(),
-        fix: account(m.work_fault_fix_account()),
-        retry: "no",
-      };
     case "daily_limit":
-      return {
-        message: m.work_fault_daily_limit({ time: dailyResetTime() }),
-        fix: account(m.assist_fix_buy_credits()),
-        retry: "no",
-      };
     case "hosted_busy":
-      return { message: m.work_fault_hosted_busy(), fix: null, retry: "now" };
     case "hosted_paused":
-      return {
-        message: m.work_fault_hosted_paused(),
-        fix: models(m.work_fault_fix_key()),
-        retry: "no",
-      };
     case "signed_out":
       return {
-        message: m.work_fault_signed_out(),
-        fix: account(m.work_fault_fix_sign_in()),
+        message: m.assist_unavailable(),
+        fix: models(m.assist_fix_open_models()),
         retry: "no",
       };
     case "missing_key":

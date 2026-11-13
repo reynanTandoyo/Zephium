@@ -32,7 +32,6 @@
     sites: () => import("./sections/SitesPage.svelte"),
     mcp: () => import("./sections/ConnectionsPage.svelte"),
     performance: () => import("./sections/PerformancePage.svelte"),
-    account: () => import("./sections/AccountPage.svelte"),
     about: () => import("./sections/AboutPage.svelte"),
   };
   // A section this build does not offer opens the first one instead; one

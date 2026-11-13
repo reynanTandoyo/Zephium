@@ -2,7 +2,7 @@
   import type { WorkModelProvider } from "$shared/ipc/bindings";
 
   /** What the person can do with a provider now: choose its models, or the one step that opens them. */
-  export type Standing = "ready" | "key" | "refused" | "sign_in" | "server";
+  export type Standing = "ready" | "key" | "refused" | "server";
   export type Seat = { provider: WorkModelProvider; standing: Standing };
   /** What the picker shows: one provider's models, or the ones the person starred from all of them. */
   export type View = "favourites" | WorkModelProvider;
@@ -12,7 +12,6 @@
   import { untrack } from "svelte";
   import { providerName } from "$domain/ai";
   import ProviderMark from "$shared/ui/ProviderMark";
-  import ZephiumTile from "$shared/ui/ZephiumTile";
   import * as m from "$shared/i18n/messages";
 
   let {
@@ -40,11 +39,7 @@
   };
 
   const names = (provider: WorkModelProvider) =>
-    provider === "cloud"
-      ? m.ai_cloud_title()
-      : provider === "compatible"
-        ? m.ai_custom_name()
-        : providerName(provider);
+    provider === "compatible" ? m.ai_custom_name() : providerName(provider);
 
   function caption(seat: Seat) {
     const name = names(seat.provider);
@@ -53,8 +48,6 @@
         return name;
       case "refused":
         return m.model_rail_refused({ provider: name });
-      case "sign_in":
-        return m.model_rail_sign_in({ provider: name });
       case "server":
         return m.model_rail_server({ provider: name });
       default:
@@ -64,8 +57,6 @@
 
   /** The favourites are shown while none of the seats is the place. */
   const at = $derived(seats.findIndex((seat) => seat.provider === current));
-  /** Zephium's own seat stands apart from the providers by a hairline. */
-  const lead = $derived(seats[0]?.provider === "cloud" ? 1 : 0);
 
   let list = $state<HTMLElement>();
   let plate = $state<{ y: number; h: number; glide: boolean } | null>(null);
@@ -115,7 +106,6 @@
       style:block-size="{plate.h}px"
     ></span>{/if}
   {#each seats as seat, index (seat.provider)}
-    {#if lead > 0 && index === lead}<span class="rule" role="presentation"></span>{/if}
     <button
       type="button"
       role="tab"
@@ -134,10 +124,7 @@
       onclick={() => onpick(seat.provider)}
     >
       <span class="mark" aria-hidden="true"
-        >{#if seat.provider === "cloud"}<ZephiumTile size={24} />{:else}<ProviderMark
-            provider={seat.provider}
-            size={18}
-          />{/if}</span
+        ><ProviderMark provider={seat.provider} size={18} /></span
       >
       {#if seat.standing === "refused"}<span class="badge" aria-hidden="true"></span>{/if}
     </button>
@@ -245,15 +232,6 @@
     block-size: 6px;
     border-radius: 50%;
     background: var(--color-danger);
-  }
-
-  .rule {
-    flex: none;
-    inline-size: 16px;
-    block-size: 1px;
-    margin-block: 3px;
-    background: var(--color-border-strong, var(--color-border));
-    opacity: 0.7;
   }
 
   @media (prefers-reduced-motion: reduce) {

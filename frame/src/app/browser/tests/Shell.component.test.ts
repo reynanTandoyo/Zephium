@@ -141,8 +141,8 @@ test("Work keeps the column as the rail of tabs, and a tab chosen there opens ov
   emitNativeEvent("uiCommand", "browser.work");
   await expect.poll(() => column.style.width).toBe("56px");
   await expect.poll(() => screen.container.querySelector("[data-work-stage-stub]")).not.toBeNull();
-  // The account closes the rail, where Browse keeps its tools.
-  await expect.element(screen.getByRole("button", { name: "Account" })).toBeVisible();
+  // Work's rail keeps no tool shelf: Browse keeps its tools.
+  expect(screen.container.querySelector(".shelf")).toBeNull();
   await page.viewport(900, 640);
   const rail = page.elementLocator(column);
   await rail.screenshot({ path: "../../../../../target/work-shell/rail-work.png" });
@@ -165,7 +165,6 @@ test("Work keeps the column as the rail of tabs, and a tab chosen there opens ov
   emitNativeEvent("uiCommand", "browser.return");
   await expect.poll(() => screen.container.querySelector(".shelf")).not.toBeNull();
   expect(screen.container.querySelector("aside")).toBe(column);
-  await expect.poll(() => screen.container.querySelector(".account-trigger")).toBeNull();
 });
 
 test("leaving Work or Settings gives back the column the window had", async () => {

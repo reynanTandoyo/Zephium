@@ -4,7 +4,6 @@ import {
   contextSize,
   dollars,
   effortLevels,
-  locked,
   pickerGroups,
   priceTier,
   searchEntries,
@@ -25,19 +24,16 @@ describe("the picker's list", () => {
     expect(pickerGroups(view, "page", listed).ready[0]!.entries).toEqual([known]);
     expect(pickerGroups(view, "light", listed).ready[0]!.entries).toEqual([known]);
   });
-  test("groups the curated models of usable providers, recommended first, hosted first", () => {
-    const view = models({
-      keys: { anthropic: "valid", open_ai: "set", google: "invalid" },
-      cloud: true,
-    });
+  test("groups the curated models of usable providers, recommended first", () => {
+    const view = models({ keys: { anthropic: "valid", open_ai: "set", google: "invalid" } });
     const { ready, needsKey } = pickerGroups(view, "lead");
-    expect(ready.map((group) => group.provider)).toEqual(["cloud", "anthropic", "open_ai"]);
-    expect(ready[1]!.entries.map((item) => item.id)).toEqual([
+    expect(ready.map((group) => group.provider)).toEqual(["anthropic", "open_ai"]);
+    expect(ready[0]!.entries.map((item) => item.id)).toEqual([
       "anthropic/claude-opus-5-5",
       "anthropic/claude-sonnet-5-5",
       "anthropic/claude-fable-5-1",
     ]);
-    expect(ready[2]!.entries.map((item) => item.id)).toEqual([
+    expect(ready[1]!.entries.map((item) => item.id)).toEqual([
       "openai/gpt-6-luna",
       "openai/gpt-6-sol",
       "openai/gpt-6-astra",
@@ -45,20 +41,16 @@ describe("the picker's list", () => {
     // A refused key reads as needing one, not as broken; only the best-known
     // providers ask, and the rest wait in Settings.
     expect(needsKey).toEqual(["google"]);
-    // Signed out, hosted models are neither offered nor listed as needing a key.
-    const signedOut = pickerGroups(
-      { ...view, cloud: { signed_in: false, plan: null, locked: [], required: [] } },
-      "lead",
-    );
-    expect(signedOut.ready.map((group) => group.provider)).toEqual(["anthropic", "open_ai"]);
-    expect(signedOut.needsKey).not.toContain("cloud");
-    // A plan-locked hosted model stays listed to explain the plan, but a
-    // catalog of only locked models cannot run anything.
-    const id = view.entries.find((item) => item.model.provider === "cloud")!.id;
-    const lockedView = { ...view, cloud: { ...view.cloud, locked: [id] } };
-    expect(locked(lockedView, id)).toBe(true);
-    expect(usable(lockedView, "cloud")).toBe(false);
-    expect(usable(view, "cloud")).toBe(true);
+  });
+
+  test("the retired hosted provider is never offered or usable", () => {
+    const hosted = entry("cloud", "claude-sonnet-5-5", "Claude Sonnet 5.5", true);
+    const view = models({ keys: { anthropic: "valid" } });
+    const stored = { ...view, entries: [hosted, ...view.entries] };
+    const { ready, needsKey } = pickerGroups(stored, "lead");
+    expect(ready.map((group) => group.provider)).toEqual(["anthropic"]);
+    expect(needsKey).not.toContain("cloud");
+    expect(usable(stored, "cloud")).toBe(false);
   });
 
   test("a custom server adds the models it serves", () => {

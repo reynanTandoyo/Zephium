@@ -28,7 +28,6 @@ vi.mock("$domain/surface", () => ({ surface: { open: async () => true } }));
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
   const { models } = await import("$shared/testing/work-models");
-  const { accountFixture } = await import("$shared/testing/account");
   return mockBindings({
     pageAssistStatus: async () => native.status!,
     pageAssistClose: async () => true,
@@ -47,7 +46,6 @@ vi.mock("$shared/ipc/bindings", async () => {
       });
       return { ...view, effective: { ...view.effective, page: "openai/gpt-6-luna" } };
     },
-    accountGet: async () => ({ account: accountFixture(), fault: null, retry_after: null }),
     settingGet: async () => null,
     runCommand: async () => ({ accepted: true, operation_id: null }),
   });
@@ -372,7 +370,7 @@ test("handoff: the hero card in each of its states", async () => {
   }
 });
 
-test("faults: a rate limit counts down, credits lead to the account", async () => {
+test("faults: a rate limit counts down, a missing key leads to Settings", async () => {
   const screen = await open(
     thread(
       person(1, "Summarize this"),
@@ -385,12 +383,12 @@ test("faults: a rate limit counts down, credits lead to the account", async () =
       reply(4, [], {
         state: "failed",
         cost: null,
-        fault: { reason: "model", fault: "hosted_usage", retry_after_ms: null },
+        fault: { reason: "model", fault: "missing_key", retry_after_ms: null },
       }),
     ),
   );
-  await expect.element(screen.getByRole("button", { name: "Buy credits" })).toBeVisible();
-  await expect.element(screen.getByText("Zephium AI needs a short breather.")).toBeVisible();
+  await expect.element(screen.getByRole("button", { name: "Open models" })).toBeVisible();
+  await expect.element(screen.getByText("The model needs a short breather.")).toBeVisible();
   await capture(screen.container, "faults");
 });
 

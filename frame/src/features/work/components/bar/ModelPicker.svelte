@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Popover } from "bits-ui";
-  import { onDestroy, onMount, tick, untrack } from "svelte";
-  import { accountSession, planName } from "$domain/account";
+  import { onDestroy, tick, untrack } from "svelte";
   import type { WorkModelEntry, WorkModelProvider, WorkModelReasoning } from "$shared/ipc/bindings";
   import { commands } from "$shared/ipc/bindings";
   import {
@@ -12,10 +11,8 @@
     favourites,
     keyState,
     keyedProviders,
-    locked,
     pickerGroups,
     providerName,
-    requiredPlan,
     searchEntries,
     shortName,
     toggleFavourite,
@@ -63,16 +60,6 @@
     return () => owner.dispose();
   });
 
-  onMount(() => {
-    void accountSession.retain();
-    return () => accountSession.release();
-  });
-  const account = $derived(accountSession.account());
-  /** Hosted models this server offers to someone not yet signed in. */
-  const hostedOffer = $derived(
-    !!account?.available && !account.signed_in && account.hosted_models === true,
-  );
-
   let open = $state(false);
   let trigger = $state<HTMLElement | null>(null);
   let material = $state<"opaque" | undefined>();
@@ -90,24 +77,14 @@
   type Section = { key: string; label: string; provider: WorkModelProvider; items: Item[] };
 
   const nameOf = (provider: WorkModelProvider) =>
-    provider === "cloud"
-      ? m.ai_cloud_title()
-      : provider === "compatible"
-        ? m.ai_custom_name()
-        : providerName(provider);
+    provider === "compatible" ? m.ai_custom_name() : providerName(provider);
 
-  /** Every provider Settings offers: Zephium's own first, then the ready ones, then each with the one step that readies it. */
+  /** Every provider Settings offers: the ready ones first, then each with the one step that readies it. */
   const seats = $derived.by<Seat[]>(() => {
-    const own: Seat[] = [];
     const ready: Seat[] = [];
     const rest: Seat[] = [];
-    for (const provider of ["cloud", ...keyedProviders] as const) {
-      if (provider === "cloud") {
-        if (usable(models, provider) || account?.signed_in)
-          own.push({ provider, standing: "ready" });
-        else if (account?.available && account.hosted_models === true)
-          own.push({ provider, standing: "sign_in" });
-      } else if (usable(models, provider)) ready.push({ provider, standing: "ready" });
+    for (const provider of keyedProviders) {
+      if (usable(models, provider)) ready.push({ provider, standing: "ready" });
       else
         rest.push({
           provider,
@@ -120,7 +97,7 @@
                 : "key",
         });
     }
-    return [...own, ...ready, ...rest];
+    return [...ready, ...rest];
   });
 
   const starred = $derived(new Set(favourites()));
@@ -131,8 +108,8 @@
   /** The sheet is as tall as its longest list needs, so it holds still as providers are chosen and searched. */
   const sheetHeight = $derived.by(() => {
     const rows = Math.max(0, ...groups.ready.map((group) => group.entries.length));
-    // The rail's own height: its padding, a seat and a gap for each, and the hairline after the leading seats.
-    const rail = 26 + seats.length * 34 + (seats[0]?.provider === "cloud" ? 8 : 0);
+    // The rail's own height: its padding, then a seat and a gap for each.
+    const rail = 26 + seats.length * 34;
     return Math.min(520, Math.max(rail, 148 + 34 * rows));
   });
 
@@ -341,7 +318,6 @@
 
   /** The menu stays while the choice lands, so the card and the trigger change before it closes. */
   async function choose(entry: WorkModelEntry) {
-    if (locked(models, entry.id)) return upgrade();
     if (session?.busy) return;
     if (entry.id !== chosen && !(await session?.choose(role, entry.id))) return;
     close();
@@ -374,26 +350,10 @@
     }
   }
 
-  /** A model the plan does not include opens Account, where the plans are. */
-  function upgrade() {
-    open = false;
-    reset();
-    void commands.runCommand("settings.account");
-  }
-
   function settings() {
     open = false;
     reset();
     onsettings();
-  }
-
-  /** The step a provider waits on: signing in for the hosted models, otherwise Settings. */
-  function step(row: Seat | null) {
-    if (row?.standing === "sign_in") {
-      open = false;
-      reset();
-      void commands.runCommand("settings.account");
-    } else settings();
   }
 
   async function pick(view: View | null) {
@@ -497,7 +457,7 @@
         const item = focus ?? items[0];
         event.preventDefault();
         if (item) void choose(item.entry);
-        else if (!searching && seat && seat.standing !== "ready") step(seat);
+        else if (!searching && seat && seat.standing !== "ready") settings();
         return;
       }
     }
@@ -577,9 +537,7 @@
 {#if keyless}
   <button type="button" class="model-trigger add-key ui-shine ui-shine-press" onclick={settings}>
     <span class="trigger-mark" aria-hidden="true"><Icon icon={Key01Icon} size={14} /></span>
-    <span class="trigger-name"
-      >{hostedOffer ? m.work_model_start() : m.work_model_add_model_key()}</span
-    >
+    <span class="trigger-name">{m.work_model_add_model_key()}</span>
   </button>
 {:else}<Popover.Root {open} onOpenChange={(next) => void opened(next)}>
     <Popover.Trigger
@@ -719,7 +677,7 @@
               provider={seat.provider}
               name={nameOf(seat.provider)}
               standing={seat.standing}
-              onact={() => step(seat)}
+              onact={settings}
             />
           {:else}
             <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -759,8 +717,6 @@
                       ><span>{section.label}</span>
                     </div>{/if}
                   {#each section.items as item (item.id)}
-                    {@const closed = locked(models, item.entry.id)}
-                    {@const needed = closed ? requiredPlan(models, item.entry.id) : null}
                     {@const starry = starred.has(item.id)}
                     <div
                       class="option"
@@ -770,21 +726,9 @@
                       data-active={item.id === active ? "" : undefined}
                       data-walk={item.id === active && walked ? "" : undefined}
                       aria-selected={item.id === chosen}
-                      aria-label={closed
-                        ? needed
-                          ? m.work_model_upgrade_plan_label({
-                              model: item.entry.display_name,
-                              plan: planName(needed) ?? needed,
-                            })
-                          : m.work_model_upgrade_label({ model: item.entry.display_name })
-                        : undefined}
-                      aria-disabled={(!closed && !!session?.busy && session.busy !== "effort") ||
-                        undefined}
+                      aria-disabled={(!!session?.busy && session.busy !== "effort") || undefined}
                     >
                       <span class="option-name">{item.entry.display_name}</span>
-                      {#if closed}<span class="upgrade" data-plan={needed ?? undefined}
-                          >{needed ? (planName(needed) ?? needed) : m.work_model_upgrade()}</span
-                        >{/if}
                       <span class="slot">
                         <span class="check" aria-hidden="true"
                           >{#if item.id === chosen}<Icon
@@ -1196,18 +1140,6 @@
 
   .option[aria-selected="true"] .option-name {
     font-weight: 550;
-  }
-
-  /* A locked model names the plan that opens it; the row is the way there. */
-  .upgrade {
-    flex: none;
-    padding: 1px 7px;
-    border-radius: var(--radius-capsule);
-    background: var(--color-fill);
-    color: var(--color-muted);
-    font-size: var(--text-caption);
-    font-weight: 500;
-    line-height: 14px;
   }
 
   .slot {

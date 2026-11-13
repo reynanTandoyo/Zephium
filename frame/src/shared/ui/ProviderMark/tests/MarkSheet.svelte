@@ -13,7 +13,6 @@
     "cerebras",
     "open_router",
     "compatible",
-    "cloud",
   ] as const;
 </script>
 

@@ -6,7 +6,6 @@ test("every settings page a menu or command names is the one that opens", () => 
     "general",
     "about",
     "shortcuts",
-    "account",
     "profiles",
     "newtab",
     "ai",
@@ -27,6 +26,9 @@ test("every settings page a menu or command names is the one that opens", () => 
     expect(section()).toBe(id);
   }
   handleNativeSection("settings.section.unknown");
+  expect(section()).toBe("privacy");
+  // The Zephium account page is gone, so its old id opens nothing.
+  handleNativeSection("settings.section.account");
   expect(section()).toBe("privacy");
 });
 

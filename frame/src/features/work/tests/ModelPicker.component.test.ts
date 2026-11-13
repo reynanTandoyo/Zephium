@@ -7,14 +7,12 @@ import { preferences } from "$domain/preferences";
 import ModelPicker from "../components/bar/ModelPicker.svelte";
 import ModelBarStage from "./ModelBarStage.svelte";
 import { PROFILE, entry, models } from "$shared/testing/work-models";
-import { accountFixture } from "$shared/testing/account";
 
 const native = vi.hoisted(() => ({
   read: vi.fn(),
   choose: vi.fn(),
   effort: vi.fn(),
   more: vi.fn(),
-  account: vi.fn(),
   command: vi.fn(async () => ({ operation_id: "op", accepted: true })),
   settings: {} as Record<string, string>,
   ready: vi.fn(async (profile: string): Promise<WorkModelsReadyV1> => ({
@@ -33,7 +31,6 @@ vi.mock("$shared/ipc/bindings", async () => {
     workSetModelEffort: native.effort,
     workMoreModels: native.more,
     workModelsReady: native.ready,
-    accountGet: native.account,
     runCommand: native.command,
     settingGet: async (key: string) => native.settings[key] ?? null,
     settingSet: async (key: string, value: string) => {
@@ -500,49 +497,22 @@ test("without any key the control is one calm way to add a key, straight to Sett
   expect(page.getByRole("listbox").query()).toBeNull();
 });
 
-test("signed out where hosted models exist, Zephium AI is one sign-in away", async () => {
+test("no hosted provider is pinned, and a keyless bar asks only for a model key", async () => {
   await page.viewport(1200, 800);
   native.read.mockResolvedValue(view("anthropic/claude-opus-5-5"));
-  native.account.mockResolvedValue({
-    account: {
-      version: 1,
-      available: true,
-      server: "https://api.zephium.app",
-      custom_server: false,
-      hosted_models: true,
-      billing: true,
-      signup_open: true,
-      signed_in: false,
-      pending_email: null,
-      resend_in: null,
-      email: null,
-      name: null,
-      plan: null,
-      usage: null,
-      subscription: null,
-      offers: [],
-      checkout_open: false,
-      notice: null,
-    },
-    fault: null,
-    retry_after: null,
-  });
   native.ready.mockImplementation(ready(false));
   const keyless = await render(ModelPicker, { profile: PROFILE });
-  await expect.element(keyless.getByRole("button", { name: "Sign in or add a key" })).toBeVisible();
+  await expect.element(keyless.getByRole("button", { name: "Add a model key" })).toBeVisible();
   await keyless.unmount();
 
   native.ready.mockImplementation(ready(true));
   const screen = await render(ModelPicker, { profile: PROFILE });
   await screen.getByRole("button", { name: /Model: Claude Opus 5\.5/u }).click();
-  // Zephium's own is pinned above every provider, ready or not.
+  // The rail leads with the person's own providers.
   const rail = page.getByRole("tab").all();
-  expect(rail[0]!.element().getAttribute("aria-label")).toBe("Zephium AI, sign in to use");
-  expect(rail[1]!.element().getAttribute("aria-label")).toBe("Anthropic");
-  await page.getByRole("tab", { name: "Zephium AI, sign in to use" }).click();
-  await expect.element(page.getByText("hosted models", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Sign in" }).click();
-  expect(native.command).toHaveBeenCalledWith("settings.account");
+  expect(rail[0]!.element().getAttribute("aria-label")).toBe("Anthropic");
+  expect(page.getByText("Zephium AI", { exact: false }).query()).toBeNull();
+  expect(page.getByRole("button", { name: "Sign in" }).query()).toBeNull();
 });
 
 test("the menu says so when no chosen model can search the web", async () => {
@@ -615,43 +585,16 @@ test("a press on the words while the menu is open closes it and puts the cursor 
   await expect.element(words).toHaveFocus();
 });
 
-test("a hosted model the plan leaves out names the plan that opens it and leads to Account", async () => {
+test("a stored model of the retired hosted provider is never offered", async () => {
   await page.viewport(1200, 800);
   native.ready.mockImplementation(ready(true));
-  native.command.mockClear();
   native.choose.mockClear();
-  const hosted = models({
-    cloud: true,
-    lead: "zephium/claude-sonnet-5-5",
-    chosen: "zephium/claude-sonnet-5-5",
-  });
-  const max = entry("cloud", "claude-opus-5-5", "Claude Opus 5.5", true, ["lead"]);
-  const other = entry("cloud", "claude-fable-5-1", "Claude Fable 5.1", true, ["lead"]);
-  native.read.mockResolvedValue({
-    ...hosted,
-    entries: [...hosted.entries, max, other],
-    cloud: {
-      ...hosted.cloud,
-      locked: [max.id, other.id],
-      required: [{ id: max.id, plan: "max" }],
-    },
-  });
-  native.account.mockResolvedValue({
-    account: accountFixture({ signed_in: true, plan: "pro" }),
-    fault: null,
-    retry_after: null,
-  });
+  const base = view("anthropic/claude-opus-5-5");
+  const hosted = entry("cloud", "claude-sonnet-5-5", "Claude Sonnet 5.5", true, ["lead"]);
+  native.read.mockResolvedValue({ ...base, entries: [hosted, ...base.entries] });
   const screen = await render(ModelPicker, { profile: PROFILE, onsettings: vi.fn() });
-  await screen.getByRole("button", { name: /Model: Claude Sonnet 5\.5/u }).click();
-
-  // The plan the server names is the badge; one it does not name says Upgrade.
-  const row = page.getByRole("option", { name: /Claude Opus 5\.5 needs the Max plan/u });
-  await expect.element(row).toHaveTextContent(/Claude Opus 5\.5\s*Max/u);
-  const plain = page.getByRole("option", { name: /Claude Fable 5\.1 needs a higher plan/u });
-  await expect.element(plain).toHaveTextContent(/Claude Fable 5\.1\s*Upgrade/u);
-  expect(page.getByText("Not in your plan").query()).toBeNull();
-
-  await row.click();
+  await screen.getByRole("button", { name: /Model: Claude Opus 5\.5/u }).click();
+  expect(page.getByRole("tab", { name: "Unavailable" }).query()).toBeNull();
+  expect(page.getByRole("tab").all()[0]!.element().getAttribute("aria-label")).toBe("Anthropic");
   expect(native.choose).not.toHaveBeenCalled();
-  expect(native.command).toHaveBeenCalledWith("settings.account");
 });

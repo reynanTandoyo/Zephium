@@ -7,7 +7,6 @@ import {
   PaintBoardIcon,
   Add01Icon,
   Layers01Icon,
-  UserCircleIcon,
   Search01Icon,
   Shield01Icon,
   KeyboardIcon,
@@ -151,14 +150,6 @@ const allSections = [
     title: m.section_about,
     description: m.section_about_description,
     icon: InformationCircleIcon,
-  },
-  // Reached through the identity card above the groups, and through search.
-  {
-    id: "account",
-    group: "identity",
-    title: m.section_account,
-    description: m.section_account_description,
-    icon: UserCircleIcon,
   },
 ] as const;
 export type SettingsSection = (typeof allSections)[number]["id"];

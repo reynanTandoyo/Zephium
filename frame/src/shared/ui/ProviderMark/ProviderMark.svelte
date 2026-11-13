@@ -3,7 +3,8 @@
   import Icon from "$shared/ui/Icon";
   import { MARKS } from "./marks";
 
-  /** Every provider a model can come from; mirrors `WorkModelProvider`. */
+  /** Every provider a model can come from; mirrors `WorkModelProvider`. The retired
+   *  hosted one has no mark and takes the generic server icon. */
   type Provider =
     | "anthropic"
     | "open_ai"

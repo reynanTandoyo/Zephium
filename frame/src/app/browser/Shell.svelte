@@ -1,11 +1,5 @@
 <script lang="ts">
   const loadWorkWorkspace = () => import("./WorkWorkspace.svelte");
-  // Loaded on the first visit to Work, the only place it shows.
-  let accountButton: ReturnType<typeof importAccountButton> | null = null;
-  function importAccountButton() {
-    return import("$features/account").then((account) => account.loadAccountButton());
-  }
-  const loadAccountButton = () => (accountButton ??= importAccountButton());
   // Dynamic like the panel's own path to Notes, so the feature's entry is
   // never a startup request.
   const loadNotesPage = () => import("$features/notes").then((notes) => notes.loadNotesPage());
@@ -42,7 +36,7 @@
 
   import { onMount } from "svelte";
   import { events } from "$shared/ipc/native-events";
-  import { askSettings, handleNativeSection } from "$features/settings";
+  import { handleNativeSection } from "$features/settings";
   import * as m from "$shared/i18n/messages";
   import { surface as browserPage } from "$domain/surface";
   import { loadToolSlot } from "$features/tools";
@@ -85,11 +79,6 @@
   // Settings opened from a page lands on the section that page asked for.
   function openSettings() {
     handleNativeSection("settings.section.general");
-    void browserPage.open("settings");
-  }
-  function openAccount(intent: "account" | "credits") {
-    askSettings(intent === "credits" ? "credits" : null);
-    handleNativeSection("settings.section.account");
     void browserPage.open("settings");
   }
   function openSearchSettings() {
@@ -443,11 +432,7 @@
             {@render player(false)}
           {/if}
         </div>{/key}
-    {/snippet}{#snippet dock(
-      compact,
-    )}{#snippet accountFoot()}{#await loadAccountButton() then { default: AccountButton }}<AccountButton
-            name={tabs.profile()?.name ?? ""}
-          />{/await}{/snippet}{#if compact && incognito}{@render player(true)}<PrivateBar
+    {/snippet}{#snippet dock(compact)}{#if compact && incognito}{@render player(true)}<PrivateBar
           compact
         />{:else if compact}{@render player(true)}{#if tabs.profile()?.id && !inWork}<DownloadPulse
             profile={tabs.profile()?.id ?? ""}
@@ -455,7 +440,6 @@
           compact
           roomy={besideRail}
           tools={!inWork}
-          foot={inWork ? accountFoot : undefined}
         >
           {#snippet sites()}<EssentialsRail
               entries={railEssentials}
@@ -584,7 +568,6 @@
             retryLabel={m.surface_retry()}
             >{#snippet children(NewTab)}<NewTab
                 oncustomize={openSettings}
-                onaccount={openAccount}
                 ontasks={() => void browserPage.open("tasks")}
                 ontime={() => void browserPage.open("time")}
                 >{#snippet search()}{#key tabs.activeId()}<LazyView

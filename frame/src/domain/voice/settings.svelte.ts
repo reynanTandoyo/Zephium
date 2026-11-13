@@ -10,12 +10,13 @@ export function engineName(engine: VoiceEngineV1): string {
   switch (engine) {
     case "on_device":
       return IS_MAC ? m.voice_engine_mac() : m.voice_engine_device();
-    case "zephium":
-      return m.voice_engine_zephium();
     case "open_ai":
       return m.voice_engine_openai();
     case "groq":
       return m.voice_engine_groq();
+    // An engine the build no longer offers; it is never listed.
+    default:
+      return engine;
   }
 }
 
@@ -32,7 +33,7 @@ export function languageName(tag: string, locale: string): string {
 /**
  * Settings → AI's view of dictation: the engines that can run, the person's
  * choice and language. Rust owns all of it; this mirrors its last answer and
- * reads again when keys or the account change.
+ * reads again when keys change.
  */
 export class VoiceSettings {
   status = $state.raw<VoiceStatusV1 | null>(null);
@@ -47,10 +48,7 @@ export class VoiceSettings {
     if (this.active) return;
     this.active = true;
     this.lifetime = new AbortController();
-    const stops = await Promise.all([
-      events.workModelsChanged.listen(() => void this.read()),
-      events.accountChanged.listen(() => void this.read()),
-    ]);
+    const stops = await Promise.all([events.workModelsChanged.listen(() => void this.read())]);
     if (!this.active) {
       for (const stop of stops) stop();
       return;

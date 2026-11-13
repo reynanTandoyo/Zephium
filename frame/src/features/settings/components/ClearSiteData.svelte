@@ -4,7 +4,7 @@
   import * as notices from "$session/notice.svelte";
   import * as m from "$shared/i18n/messages";
   import Button from "$shared/ui/Button";
-  import AccountDialog from "./account/AccountDialog.svelte";
+  import SettingsDialog from "./SettingsDialog.svelte";
 
   let request = $derived(clearRequest.pending());
   let host = $derived(request?.host ?? "");
@@ -31,7 +31,7 @@
   }
 </script>
 
-<AccountDialog
+<SettingsDialog
   bind:open={
     () => request !== null,
     (open) => {
@@ -59,7 +59,7 @@
       <Button type="submit" variant="danger" {pending}>{m.privacy_clear_apply()}</Button>
     </footer>
   </form>
-</AccountDialog>
+</SettingsDialog>
 
 <style>
   .error {

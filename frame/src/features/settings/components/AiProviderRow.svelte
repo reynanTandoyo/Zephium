@@ -2,7 +2,7 @@
   import { onMount, tick } from "svelte";
   import { commands } from "$shared/ipc/bindings";
   import type { WorkLocalServerV1, WorkModelProvider } from "$shared/ipc/bindings";
-  import { type ModelsSession, keyState, providerName } from "$domain/ai";
+  import { type KeyedProvider, type ModelsSession, keyState, providerName } from "$domain/ai";
   import ProviderMark from "$shared/ui/ProviderMark";
   import Button from "$shared/ui/Button";
   import Field from "$shared/ui/Field";
@@ -11,7 +11,7 @@
   import MoreHorizontalIcon from "@hugeicons/core-free-icons/MoreHorizontalIcon";
   import * as m from "$shared/i18n/messages";
 
-  let { session, provider }: { session: ModelsSession; provider: WorkModelProvider } = $props();
+  let { session, provider }: { session: ModelsSession; provider: KeyedProvider } = $props();
 
   const custom = $derived(provider === "compatible");
   const name = $derived(custom ? m.ai_custom_name() : providerName(provider));
@@ -44,7 +44,6 @@
       groq: m.ai_provider_groq,
       cerebras: m.ai_provider_cerebras,
       compatible: m.ai_provider_compatible,
-      cloud: m.ai_provider_compatible,
     }[provider](),
   );
 

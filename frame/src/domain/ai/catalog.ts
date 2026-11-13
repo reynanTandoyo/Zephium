@@ -7,8 +7,11 @@ import type {
   WorkModelsV1,
 } from "$shared/ipc/bindings";
 
+/** A provider the person can use: the retired hosted one is not among them. */
+export type KeyedProvider = Exclude<WorkModelProvider, "cloud">;
+
 /** Providers that take the person's own key, in the order they are shown. */
-export const keyedProviders: readonly WorkModelProvider[] = [
+export const keyedProviders: readonly KeyedProvider[] = [
   "anthropic",
   "open_ai",
   "google",
@@ -32,7 +35,8 @@ const names: Record<WorkModelProvider, string> = {
   groq: "Groq",
   cerebras: "Cerebras",
   compatible: "Custom",
-  cloud: "Zephium",
+  // Deprecated: the hosted provider is gone and never produced; kept so stored data still parses.
+  cloud: "Unavailable",
 };
 
 export function providerName(provider: WorkModelProvider): string {
@@ -55,13 +59,8 @@ export function keyState(models: WorkModelsV1 | null, provider: WorkModelProvide
 /** A provider can run calls now: its key is set and not refused. */
 export function usable(models: WorkModelsV1 | null, provider: WorkModelProvider): boolean {
   if (!models) return false;
-  if (provider === "cloud")
-    return (
-      models.cloud.signed_in &&
-      models.entries.some(
-        (entry) => entry.model.provider === "cloud" && !models.cloud.locked.includes(entry.id),
-      )
-    );
+  // The hosted provider is deprecated and never usable.
+  if (provider === "cloud") return false;
   if (provider === "compatible")
     return (
       !!models.providers.find((row) => row.provider === "compatible")?.base &&
@@ -78,8 +77,8 @@ const suggested: readonly WorkModelProvider[] = ["anthropic", "open_ai", "google
 
 /**
  * The picker's list for a role: every curated model of usable providers,
- * recommended first, grouped by provider, the signed-in account's hosted
- * models first. The person's own server adds the models it serves.
+ * recommended first, grouped by provider. The person's own server adds the
+ * models it serves.
  * The best-known providers without a key are listed apart, as needing one.
  */
 export function pickerGroups(
@@ -88,10 +87,9 @@ export function pickerGroups(
   endpoint: readonly WorkModelEntry[] = [],
 ) {
   const entries = [...(models?.entries ?? []), ...endpoint];
-  const order: readonly WorkModelProvider[] = ["cloud", ...keyedProviders];
   const ready: ModelGroup[] = [];
   const needsKey: WorkModelProvider[] = [];
-  for (const provider of order) {
+  for (const provider of keyedProviders) {
     const seen = new Set<string>();
     const offered = entries
       .filter((entry) => {
@@ -108,16 +106,6 @@ export function pickerGroups(
     }
   }
   return { ready, needsKey };
-}
-
-/** A hosted model the account's plan does not include: listed to explain the plan, never chosen. */
-export function locked(models: WorkModelsV1 | null, id: string): boolean {
-  return !!models?.cloud.locked.includes(id);
-}
-
-/** The plan a locked hosted model needs, as the server names it; null when it does not say. */
-export function requiredPlan(models: WorkModelsV1 | null, id: string): string | null {
-  return models?.cloud.required.find((row) => row.id === id)?.plan ?? null;
 }
 
 export function entryOf(models: WorkModelsV1 | null, id: string | null | undefined) {

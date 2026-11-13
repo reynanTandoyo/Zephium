@@ -5,12 +5,7 @@ import "$styles/global.css";
 import { emitNativeEvent } from "$shared/testing/native-events";
 import { acceleratorKeys } from "$shared/lib/accelerator";
 import { IS_MAC } from "$shared/platform";
-import type {
-  AccountReplyV1,
-  Material,
-  WorkLocalServerV1,
-  WorkModelsV1,
-} from "$shared/ipc/bindings";
+import type { Material, WorkLocalServerV1, WorkModelsV1 } from "$shared/ipc/bindings";
 import { browserImport, type ImportAdapter, type ImportJob } from "$domain/browser-import";
 import { fakeTabs } from "./onboarding-tabs.svelte";
 import OnboardingApp from "../OnboardingApp.svelte";
@@ -45,12 +40,6 @@ vi.mock("$shared/ipc/bindings", async () => {
       native.finished++;
       return native.opens;
     },
-    accountGet: async () =>
-      ({
-        account: { available: true, hosted_models: true, signed_in: false },
-        fault: null,
-        retry_after: null,
-      }) as unknown as AccountReplyV1,
     workLocalServers: async () =>
       native.discovery ?? [{ kind: "ollama", base: "http://localhost:11434/v1", models: 3 }],
     workSetModelEndpoint: async (_profile: string, base: string | null) => {
