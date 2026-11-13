@@ -213,10 +213,11 @@ four are kept.
   stay in `CalendarError` (`429` is `limit`, a failed token is `unauthorized`).
 - A request that answers 401 drops the cached access token and is sent once
   more with a refreshed one.
-- The store schema only allows the account kinds `caldav` and `subscription`,
-  so a Google or Microsoft account is saved as `caldav` with the marker
-  `oauth1<TAB>provider<TAB>client id<TAB>tenant<TAB>address` in the user-name
-  column (no secret in it). A store column of its own would need a migration.
+- Storage: META migration v31 gives `calendar_accounts` the kind `oauth` with
+  its own `oauth_provider` (`google`/`microsoft`), `oauth_client_id` and
+  `oauth_tenant` columns (not secrets; a CHECK ties them to that kind). The
+  calendar tables are rebuilt with their rows kept. Tokens and client secrets
+  are never in the database.
 
 IPC (main window only):
 
