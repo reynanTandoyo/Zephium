@@ -6,9 +6,10 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use fake_imap::{simple, standard_folders, FakeConnector, PASSWORD};
+use fake_imap::{simple, standard_folders, FakeConnector, PASSWORD, TOKEN};
 use futures::future::BoxFuture;
 use tokio::sync::Notify;
+use zephium_mail::auth::{AuthKind, Credential};
 use zephium_mail::engine::MailEngine;
 use zephium_mail::error::{MailError, Result};
 use zephium_mail::model::{
@@ -20,6 +21,7 @@ use zephium_mail::vault::{MemoryVault, PasswordVault};
 #[derive(Default)]
 struct FakeSmtp {
     sent: Mutex<Vec<Composed>>,
+    credentials: Mutex<Vec<String>>,
     fail: Mutex<Option<MailError>>,
 }
 
@@ -28,11 +30,14 @@ impl SmtpSender for FakeSmtp {
         &'a self,
         _e: &'a Endpoint,
         _u: &'a str,
-        password: &'a str,
+        credential: &'a Credential,
         composed: &'a Composed,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            assert_eq!(password, PASSWORD);
+            self.credentials
+                .lock()
+                .unwrap()
+                .push(format!("{credential:?}:{}", credential.secret()));
             if let Some(error) = *self.fail.lock().unwrap() {
                 return Err(error);
             }
@@ -44,10 +49,10 @@ impl SmtpSender for FakeSmtp {
         &'a self,
         _e: &'a Endpoint,
         _u: &'a str,
-        password: &'a str,
+        credential: &'a Credential,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            if password == PASSWORD {
+            if credential.secret() == PASSWORD || credential.secret() == TOKEN {
                 Ok(())
             } else {
                 Err(MailError::AuthFailed)
@@ -72,6 +77,55 @@ fn account(save_sent: bool) -> Account {
         colour: "#112233".into(),
         signature: String::new(),
         save_sent_copy: save_sent,
+        auth: AuthKind::Password,
+    }
+}
+
+fn oauth_account() -> Account {
+    Account {
+        auth: AuthKind::Oauth {
+            provider: zephium_oauth::provider::Provider::Microsoft,
+            client_id: "client-1".into(),
+            tenant: None,
+        },
+        ..account(false)
+    }
+}
+
+/// Hands out a fixed token and counts how often it was asked.
+struct FakeTokens {
+    token: &'static str,
+    asked: std::sync::atomic::AtomicUsize,
+    fail: Mutex<Option<zephium_oauth::OAuthError>>,
+}
+
+impl FakeTokens {
+    fn new(token: &'static str) -> Arc<Self> {
+        Arc::new(Self {
+            token,
+            asked: std::sync::atomic::AtomicUsize::new(0),
+            fail: Mutex::new(None),
+        })
+    }
+}
+
+impl zephium_oauth::manager::AccessTokenSource for FakeTokens {
+    fn access_token<'a>(
+        &'a self,
+        account_id: &'a str,
+        config: &'a zephium_oauth::provider::ClientConfig,
+        purpose: zephium_oauth::provider::Purpose,
+    ) -> BoxFuture<'a, zephium_oauth::Result<zeroize::Zeroizing<String>>> {
+        Box::pin(async move {
+            assert_eq!(account_id, "acc-1");
+            assert_eq!(config.client_id, "client-1");
+            assert_eq!(purpose, zephium_oauth::provider::Purpose::Mail);
+            self.asked.fetch_add(1, Ordering::SeqCst);
+            if let Some(error) = *self.fail.lock().unwrap() {
+                return Err(error);
+            }
+            Ok(zeroize::Zeroizing::new(self.token.to_owned()))
+        })
     }
 }
 
@@ -517,4 +571,93 @@ async fn forgetting_an_account_logs_out_its_connection() {
     assert!(rig.server.log().iter().any(|l| l == "LOGOUT"));
     rig.engine.folders(&a).await.unwrap();
     assert_eq!(rig.server.connects.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn oauth_accounts_authenticate_imap_with_xoauth2_and_never_use_the_password_vault() {
+    let server = FakeConnector::new(standard_folders());
+    let smtp = Arc::new(FakeSmtp::default());
+    // The vault is empty: a password lookup would fail.
+    let tokens = FakeTokens::new(TOKEN);
+    let engine = MailEngine::new(server.clone(), Arc::new(MemoryVault::default()), smtp)
+        .with_tokens(tokens.clone());
+    let folders = engine.folders(&oauth_account()).await.unwrap();
+    assert!(folders.iter().any(|f| f.role == FolderRole::Inbox));
+    assert_eq!(tokens.asked.load(Ordering::SeqCst), 1);
+    let log = server.state.lock().unwrap().log.clone();
+    assert!(log.iter().any(|line| line == "AUTHENTICATE <redacted>"));
+    assert!(!log.iter().any(|line| line.contains(TOKEN)));
+    // The session is reused: no second token request for the next command.
+    engine.folders(&oauth_account()).await.unwrap();
+    assert_eq!(tokens.asked.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_wrong_token_is_an_auth_failure_without_server_text() {
+    let server = FakeConnector::new(standard_folders());
+    let engine = MailEngine::new(
+        server,
+        Arc::new(MemoryVault::default()),
+        Arc::new(FakeSmtp::default()),
+    )
+    .with_tokens(FakeTokens::new("wrong-token"));
+    let error = engine.folders(&oauth_account()).await.unwrap_err();
+    assert_eq!(error, MailError::AuthFailed);
+    assert!(!format!("{error:?}{error}").contains("SERVER-SECRET"));
+}
+
+#[tokio::test]
+async fn oauth_sends_with_the_bearer_token_and_refresh_failures_surface() {
+    let server = FakeConnector::new(standard_folders());
+    let smtp = Arc::new(FakeSmtp::default());
+    let tokens = FakeTokens::new(TOKEN);
+    let engine = MailEngine::new(server, Arc::new(MemoryVault::default()), smtp.clone())
+        .with_tokens(tokens.clone());
+    let draft = Draft {
+        to: vec![addr("bob@example.com")],
+        subject: "Hi".into(),
+        text: "hello".into(),
+        ..Draft::default()
+    };
+    engine.send(&oauth_account(), &draft).await.unwrap();
+    assert_eq!(
+        smtp.credentials.lock().unwrap().as_slice(),
+        [format!("Credential::Bearer(..):{TOKEN}")]
+    );
+    // Revoked refresh token: the person must sign in again.
+    *tokens.fail.lock().unwrap() = Some(zephium_oauth::OAuthError::SignInRequired);
+    let error = engine.send(&oauth_account(), &draft).await.unwrap_err();
+    assert_eq!(error, MailError::AuthFailed);
+}
+
+#[tokio::test]
+async fn oauth_accounts_need_a_token_source() {
+    let server = FakeConnector::new(standard_folders());
+    let engine = MailEngine::new(
+        server,
+        Arc::new(MemoryVault::default()),
+        Arc::new(FakeSmtp::default()),
+    );
+    let error = engine.folders(&oauth_account()).await.unwrap_err();
+    assert_eq!(error, MailError::Credentials);
+}
+
+#[tokio::test]
+async fn test_credential_accepts_a_bearer_token_before_the_account_is_saved() {
+    let server = FakeConnector::new(standard_folders());
+    let engine = MailEngine::new(
+        server,
+        Arc::new(MemoryVault::default()),
+        Arc::new(FakeSmtp::default()),
+    );
+    let report = engine
+        .test_credential(&oauth_account(), &Credential::bearer(TOKEN))
+        .await
+        .unwrap();
+    assert_eq!((report.imap, report.smtp), (None, None));
+    let report = engine
+        .test_credential(&oauth_account(), &Credential::bearer("nope"))
+        .await
+        .unwrap();
+    assert_eq!(report.imap, Some(MailError::AuthFailed));
 }

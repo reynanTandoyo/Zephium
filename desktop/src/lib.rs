@@ -107,6 +107,7 @@ mod media;
 mod memory_pressure;
 mod menu_text;
 mod notes;
+mod oauth;
 #[cfg(target_os = "windows")]
 mod onboarding_host;
 mod overlay;
@@ -1817,6 +1818,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             mail::mail_save_draft,
             mail::mail_search,
             mail::mail_watch,
+            oauth::oauth_sign_in,
+            oauth::oauth_cancel_sign_in,
+            oauth::oauth_discard_grant,
+            oauth::oauth_sign_out,
             voice::voice_status,
             voice::voice_choose_engine,
             voice::voice_choose_language,

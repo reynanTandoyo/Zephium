@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::auth::AuthKind;
 use crate::error::{MailError, Result};
 use crate::limits;
 
@@ -49,6 +50,10 @@ pub struct Account {
     /// Append sent mail to the Sent folder after SMTP. On by default: most
     /// servers do not file submissions themselves.
     pub save_sent_copy: bool,
+    /// How the account signs in. Absent in accounts saved before OAuth
+    /// existed, which are password accounts.
+    #[serde(default)]
+    pub auth: AuthKind,
 }
 
 fn host_ok(host: &str) -> bool {
@@ -122,6 +127,7 @@ impl Account {
         if !ok {
             return Err(MailError::InvalidInput);
         }
+        self.auth.validate()?;
         self.imap.validate()?;
         self.smtp.validate()
     }
@@ -407,7 +413,36 @@ mod tests {
             colour: "#336699".into(),
             signature: String::new(),
             save_sent_copy: true,
+            auth: AuthKind::Password,
         }
+    }
+
+    #[test]
+    fn accounts_saved_before_oauth_still_load_as_password_accounts() {
+        let mut value = serde_json::to_value(account()).unwrap();
+        value.as_object_mut().unwrap().remove("auth");
+        let loaded: Account = serde_json::from_value(value).unwrap();
+        assert_eq!(loaded.auth, AuthKind::Password);
+        assert_eq!(loaded, account());
+    }
+
+    #[test]
+    fn oauth_accounts_round_trip_and_validate_their_client() {
+        let mut oauth = account();
+        oauth.auth = AuthKind::Oauth {
+            provider: zephium_oauth::provider::Provider::Google,
+            client_id: "123-abc.apps.googleusercontent.com".into(),
+            tenant: None,
+        };
+        let json = serde_json::to_string(&oauth).unwrap();
+        assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), oauth);
+        assert_eq!(oauth.validate(), Ok(()));
+        oauth.auth = AuthKind::Oauth {
+            provider: zephium_oauth::provider::Provider::Microsoft,
+            client_id: "bad id".into(),
+            tenant: Some("x/y".into()),
+        };
+        assert_eq!(oauth.validate(), Err(MailError::InvalidInput));
     }
 
     #[test]

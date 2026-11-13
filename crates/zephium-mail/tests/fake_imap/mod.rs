@@ -13,6 +13,8 @@ use zephium_mail::model::Endpoint;
 use zephium_mail::transport::{BoxStream, Connector};
 
 pub const PASSWORD: &str = "secret";
+/// The bearer token the fake accepts for `AUTHENTICATE XOAUTH2`.
+pub const TOKEN: &str = "ya29.fake-token";
 
 #[derive(Clone, Debug)]
 pub struct Msg {
@@ -181,8 +183,8 @@ async fn serve(
         let line = line.trim_end().to_owned();
         let (tag, rest) = line.split_once(' ').unwrap_or((&line, ""));
         let verb = rest.split(' ').next().unwrap_or("").to_ascii_uppercase();
-        let logged = if verb == "LOGIN" {
-            "LOGIN <redacted>".to_owned()
+        let logged = if verb == "LOGIN" || verb == "AUTHENTICATE" {
+            format!("{verb} <redacted>")
         } else {
             rest.to_owned()
         };
@@ -209,6 +211,28 @@ async fn serve(
                 let pass = rest.split(' ').nth(2).map(unquote).unwrap_or_default();
                 if pass == PASSWORD {
                     ok(&mut out, "logged in");
+                } else {
+                    out.extend_from_slice(
+                        format!("{tag} NO [AUTHENTICATIONFAILED] SERVER-SECRET-TEXT\r\n")
+                            .as_bytes(),
+                    );
+                }
+            }
+            "AUTHENTICATE" => {
+                // SASL: empty continuation, then one base64 line.
+                let _ = w.write_all(b"+ \r\n").await;
+                let mut answer = String::new();
+                if r.read_line(&mut answer).await.unwrap_or(0) == 0 {
+                    return;
+                }
+                use base64::Engine;
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(answer.trim())
+                    .unwrap_or_default();
+                let expected = format!("user=me\u{1}auth=Bearer {TOKEN}\u{1}\u{1}");
+                if rest.to_ascii_uppercase().ends_with("XOAUTH2") && decoded == expected.as_bytes()
+                {
+                    ok(&mut out, "authenticated");
                 } else {
                     out.extend_from_slice(
                         format!("{tag} NO [AUTHENTICATIONFAILED] SERVER-SECRET-TEXT\r\n")

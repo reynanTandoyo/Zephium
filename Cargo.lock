@@ -7882,6 +7882,7 @@ dependencies = [
  "zephium-ipc",
  "zephium-mail",
  "zephium-notes",
+ "zephium-oauth",
  "zephium-store",
  "zephium-voice",
  "zephium-webext",
@@ -7971,12 +7972,14 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "ulid",
  "url",
  "zephium-credentials",
+ "zephium-oauth",
  "zeroize",
 ]
 
@@ -8015,6 +8018,23 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "zephium-core",
+]
+
+[[package]]
+name = "zephium-oauth"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "futures",
+ "getrandom 0.4.3",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+ "zephium-credentials",
+ "zeroize",
 ]
 
 [[package]]

@@ -134,6 +134,7 @@ zephium-engine.workspace = true
 zephium-calendar = { workspace = true, features = ["ipc-types"] }
 zephium-store.workspace = true
 zephium-mail.workspace = true
+zephium-oauth.workspace = true
 zephium-notes.workspace = true
 zephium-import.workspace = true
 zephium-blocker-service = { workspace = true, features = ["official-https"] }

@@ -45,6 +45,7 @@ zephium-page-assist = { path = "crates/zephium-page-assist", version = "=0.1.0" 
 zephium-cli-models = { path = "crates/zephium-cli-models", version = "=0.1.0" }
 # Fork (T-0020): IMAP/SMTP mail engine.
 zephium-mail = { path = "crates/zephium-mail", version = "=0.1.0" }
+zephium-oauth = { path = "crates/zephium-oauth", version = "=0.1.0" }
 
 tauri = { version = "=2.11.3", features = ["macos-private-api"] }
 tauri-build = "2"

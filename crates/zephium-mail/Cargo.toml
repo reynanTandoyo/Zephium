@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 zephium-credentials.workspace = true
+zephium-oauth.workspace = true
 async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
 mail-parser = { version = "0.11", default-features = false, features = ["full_encoding"] }
 lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls", "ring", "rustls-platform-verifier", "smtp-transport"] }
@@ -25,4 +26,5 @@ url.workspace = true
 ulid.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 tokio = { workspace = true, features = ["net", "time", "io-util", "rt", "test-util", "macros", "sync"] }
