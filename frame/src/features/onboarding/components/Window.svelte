@@ -4,9 +4,11 @@
     ArrowLeft02Icon,
     ArrowRight02Icon,
     Briefcase02Icon,
+    Calendar01Icon,
     Folder01Icon,
     Globe02Icon,
     Layers01Icon,
+    Mail01Icon,
     PlusSignIcon,
     Refresh01Icon,
     Search01Icon,
@@ -22,6 +24,14 @@
   import Mark from "$shared/ui/BrandMark";
   import WorkCanvas from "./WorkCanvas.svelte";
 
+  // The switch's modes in its order; the mock lights the one the step shows.
+  const MODES = [
+    { id: "browse", icon: Globe02Icon, label: m.mode_browse },
+    { id: "work", icon: Briefcase02Icon, label: m.mode_work },
+    { id: "mail", icon: Mail01Icon, label: m.mode_mail },
+    { id: "calendar", icon: Calendar01Icon, label: m.mode_calendar },
+  ] as const;
+
   let {
     mode,
     sites,
@@ -36,7 +46,7 @@
     element = $bindable(),
   }: {
     mode: "browse" | "work";
-    /** The Browse and Work switch, absent while Work and AI are off. */
+    /** The mode switch (Browse, Work, Mail, Calendar), absent while fewer than two modes are on. */
     modes?: boolean;
     /** What the person has kept, in sidebar order. */
     sites: Site[];
@@ -90,8 +100,9 @@
         <Icon icon={Refresh01Icon} size={14} />
       </div>
       {#if modes}<div class="modes">
-          <span class="on"><Icon icon={Globe02Icon} size={13} />{m.mode_browse()}</span>
-          <span><Icon icon={Briefcase02Icon} size={13} />{m.mode_work()}</span>
+          {#each MODES as entry (entry.id)}<span class:on={entry.id === mode}
+              ><Icon icon={entry.icon} size={13} />{#if entry.id === mode}{entry.label()}{/if}</span
+            >{/each}
         </div>{/if}
       <div class="address">{m.search_web_short()}</div>
       <div class="space">
@@ -122,8 +133,9 @@
     <div class="rail">
       <span class="lights"><i></i><i></i><i></i></span>
       <div class="rail-modes">
-        <span><Icon icon={Globe02Icon} size={12} /></span>
-        <span class="on"><Icon icon={Briefcase02Icon} size={12} /></span>
+        {#each MODES as entry (entry.id)}<span class:on={entry.id === mode}
+            ><Icon icon={entry.icon} size={12} /></span
+          >{/each}
       </div>
       <span class="rail-icon"><Icon icon={Search01Icon} size={15} /></span>
       <hr />
@@ -267,7 +279,8 @@
 
   .modes {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(4, auto);
+    justify-content: stretch;
     block-size: 30px;
     padding: 2px;
     border-radius: var(--radius-control-compact);
