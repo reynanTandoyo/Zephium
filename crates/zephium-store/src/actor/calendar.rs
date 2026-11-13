@@ -34,6 +34,7 @@ mod tests {
             name: "Holidays".into(),
             server_url: "https://example.com/h.ics".into(),
             username: None,
+            oauth: None,
         }];
         let calendars = vec![CalendarRecord {
             id: "C1".into(),

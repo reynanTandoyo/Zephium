@@ -580,6 +580,7 @@ fn json_storage_round_trips_and_rejects_oversized_or_newer_files() {
             name: "n".to_owned(),
             server_url: "https://example.org/a.ics".to_owned(),
             username: None,
+            oauth: None,
         }],
         calendars: Vec::new(),
     };

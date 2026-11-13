@@ -8,7 +8,7 @@
 //! deleted, and if that fails too it stays where it is but is ignored from then
 //! on because the database is no longer empty.
 
-use crate::api::{CalendarAccountKindV1, CalendarAccountV1, CalendarV1};
+use crate::api::{CalendarAccountKindV1, CalendarAccountV1, CalendarOAuthV1, CalendarV1};
 use crate::error::{CalendarError, Result};
 use crate::store::{
     CacheMeta, CachedRecord, CalendarStorage, EventCache, JsonFileStorage, StoredState,
@@ -17,8 +17,8 @@ use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 use std::sync::Arc;
 use zephium_store::calendar_cache::{
-    CacheResult, CalendarAccountRecord, CalendarCache, CalendarEventRecord, CalendarRecord,
-    CalendarSyncState,
+    CacheResult, CalendarAccountRecord, CalendarCache, CalendarEventRecord, CalendarOAuthRecord,
+    CalendarRecord, CalendarSyncState,
 };
 use zephium_store::SqliteStore;
 
@@ -56,16 +56,29 @@ impl StoreCalendar {
             accounts: accounts
                 .into_iter()
                 .filter_map(|record| {
+                    let (kind, oauth) = match (record.kind.as_str(), record.oauth) {
+                        ("caldav", None) => (CalendarAccountKindV1::Caldav, None),
+                        ("subscription", None) => (CalendarAccountKindV1::Subscription, None),
+                        ("oauth", Some(oauth)) => (
+                            match oauth.provider.as_str() {
+                                "google" => CalendarAccountKindV1::Google,
+                                "microsoft" => CalendarAccountKindV1::Microsoft,
+                                _ => return None,
+                            },
+                            Some(CalendarOAuthV1 {
+                                client_id: oauth.client_id,
+                                tenant: oauth.tenant,
+                            }),
+                        ),
+                        _ => return None,
+                    };
                     Some(CalendarAccountV1 {
                         id: record.id,
-                        kind: match record.kind.as_str() {
-                            "caldav" => CalendarAccountKindV1::Caldav,
-                            "subscription" => CalendarAccountKindV1::Subscription,
-                            _ => return None,
-                        },
+                        kind,
                         name: record.name,
                         server_url: record.server_url,
                         username: record.username,
+                        oauth,
                     })
                 })
                 .collect(),
@@ -93,11 +106,24 @@ impl StoreCalendar {
                 kind: match account.kind {
                     CalendarAccountKindV1::Caldav => "caldav",
                     CalendarAccountKindV1::Subscription => "subscription",
+                    CalendarAccountKindV1::Google | CalendarAccountKindV1::Microsoft => "oauth",
                 }
                 .to_owned(),
                 name: account.name.clone(),
                 server_url: account.server_url.clone(),
                 username: account.username.clone(),
+                oauth: account.oauth.as_ref().and_then(|oauth| {
+                    Some(CalendarOAuthRecord {
+                        provider: match account.kind {
+                            CalendarAccountKindV1::Google => "google",
+                            CalendarAccountKindV1::Microsoft => "microsoft",
+                            _ => return None,
+                        }
+                        .to_owned(),
+                        client_id: oauth.client_id.clone(),
+                        tenant: oauth.tenant.clone(),
+                    })
+                }),
             })
             .collect();
         let calendars: Vec<CalendarRecord> = state

@@ -112,6 +112,15 @@ export const commands = {
 	 *  background and `zephium:calendar-changed` follows.
 	 */
 	calendarAddAccount: (serverUrl: string, username: string, password: string, name: string | null) => typedError<CalendarAccountV1, CalendarError>(__TAURI_INVOKE("calendar_add_account", { serverUrl, username, password, name })),
+	/**
+	 *  Adds a Google Calendar or Microsoft 365 account from a finished
+	 *  `oauth_sign_in` (the grant handle it returned; the sign-in must have asked
+	 *  for the calendar purpose). The handle is consumed: the refresh token goes
+	 *  to the OS vault, the calendars are listed from the provider, events load
+	 *  in the background and `zephium:calendar-changed` follows. A failure leaves
+	 *  nothing behind; sign in again to retry.
+	 */
+	calendarAddOauthAccount: (grant: string, name: string | null) => typedError<CalendarAccountV1, CalendarError>(__TAURI_INVOKE("calendar_add_oauth_account", { grant, name })),
 	/**  Adds a read-only calendar from an `https://` or `webcal://` address. */
 	calendarAddSubscription: (url: string, name: string) => typedError<CalendarAccountV1, CalendarError>(__TAURI_INVOKE("calendar_add_subscription", { url, name })),
 	/**  Accounts and subscriptions (no secrets). */
@@ -1080,9 +1089,19 @@ export type CalendarAccountKindV1 =
 /**  A CalDAV server with a user name and password. */
 "caldav" |
 /**  A read-only `.ics` address. */
-"subscription";
+"subscription" |
+/**  Google Calendar (API v3) with an OAuth sign-in. */
+"google" |
+/**
+ *  Microsoft 365 / Outlook.com calendars (Microsoft Graph) with an OAuth
+ *  sign-in.
+ */
+"microsoft";
 
-/**  A CalDAV account or an ICS subscription. Never holds a secret. */
+/**
+ *  A CalDAV, Google or Microsoft account, or an ICS subscription. Never holds
+ *  a secret.
+ */
 export type CalendarAccountV1 = {
 	/**  Stable id. */
 	id: string,
@@ -1092,8 +1111,10 @@ export type CalendarAccountV1 = {
 	name: string,
 	/**  Server or feed address. */
 	server_url: string,
-	/**  CalDAV user name. */
+	/**  CalDAV user name, or the signed-in address of an OAuth account. */
 	username: string | null,
+	/**  Present for Google and Microsoft accounts. */
+	oauth?: CalendarOAuthV1 | null,
 };
 
 /**  Calendars, accounts or events changed; read them again. */
@@ -1188,6 +1209,17 @@ export type CalendarEventsV1 = {
 	occurrences: CalendarOccurrenceV1[],
 	/**  A size limit cut the list short. */
 	truncated: boolean,
+};
+
+/**
+ *  The OAuth client an account signed in with. Holds no secret: the refresh
+ *  token and an optional client secret live in the OS vault.
+ */
+export type CalendarOAuthV1 = {
+	/**  The client (application) ID the person registered. */
+	client_id: string,
+	/**  Microsoft tenant, when one was given. */
+	tenant: string | null,
 };
 
 /**

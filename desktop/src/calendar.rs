@@ -61,6 +61,7 @@ pub(crate) fn install(app: &tauri::AppHandle, data_dir: &std::path::Path) {
             persistent,
             zephium_calendar::service::system_clock(),
         )
+        .map(|service| service.with_oauth(crate::oauth::token_manager()))
     });
     let service = match built {
         Ok(service) => Arc::new(service),
@@ -162,6 +163,31 @@ pub(crate) async fn calendar_add_account(
     Ok(account)
 }
 
+/// Adds a Google Calendar or Microsoft 365 account from a finished
+/// `oauth_sign_in` (the grant handle it returned; the sign-in must have asked
+/// for the calendar purpose). The handle is consumed: the refresh token goes
+/// to the OS vault, the calendars are listed from the provider, events load
+/// in the background and `zephium:calendar-changed` follows. A failure leaves
+/// nothing behind; sign in again to retry.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn calendar_add_oauth_account(
+    caller: WebviewWindow,
+    app: tauri::AppHandle,
+    grant: String,
+    name: Option<String>,
+) -> Result<CalendarAccountV1, CalendarError> {
+    let service = service(&app, &caller, "calendar_add_oauth_account")?;
+    let grant = crate::oauth::take_grant(&grant).ok_or(CalendarError::InvalidInput)?;
+    let account = service.add_oauth_account(&grant, name.as_deref()).await?;
+    changed(&app);
+    tauri::async_runtime::spawn(async move {
+        service.sync_all().await;
+        changed(&app);
+    });
+    Ok(account)
+}
+
 /// Adds a read-only calendar from an `https://` or `webcal://` address.
 #[tauri::command]
 #[specta::specta]
@@ -196,7 +222,9 @@ pub(crate) async fn calendar_remove_account(
     app: tauri::AppHandle,
     account: String,
 ) -> Result<(), CalendarError> {
-    service(&app, &caller, "calendar_remove_account")?.remove_account(&account)?;
+    service(&app, &caller, "calendar_remove_account")?
+        .remove_account_and_session(&account)
+        .await?;
     changed(&app);
     Ok(())
 }

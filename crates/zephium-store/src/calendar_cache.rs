@@ -19,19 +19,33 @@ pub const MAX_EVENTS_PER_CALENDAR: usize = 20_000;
 /// Largest raw iCalendar text kept for one resource.
 pub const MAX_ICAL_BYTES: usize = 8 * 1024 * 1024;
 
+/// The OAuth client of an `oauth` account. Not secret: tokens and client
+/// secrets are only in the OS vault.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CalendarOAuthRecord {
+    /// `google` or `microsoft`.
+    pub provider: String,
+    /// The client (application) ID the person registered.
+    pub client_id: String,
+    /// Microsoft tenant, when one was given.
+    pub tenant: Option<String>,
+}
+
 /// A stored account or subscription.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CalendarAccountRecord {
     /// Account id.
     pub id: String,
-    /// `caldav` or `subscription`.
+    /// `caldav`, `subscription` or `oauth`.
     pub kind: String,
     /// Display name.
     pub name: String,
     /// Server or feed address.
     pub server_url: String,
-    /// CalDAV user name.
+    /// CalDAV user name, or the signed-in address of an OAuth account.
     pub username: Option<String>,
+    /// Present exactly for kind `oauth`.
+    pub oauth: Option<CalendarOAuthRecord>,
 }
 
 /// A stored calendar.
@@ -149,16 +163,26 @@ impl<'a> CalendarCache<'a> {
     pub fn accounts(&self) -> CacheResult<Vec<CalendarAccountRecord>> {
         self.conn
             .prepare_cached(
-                "SELECT id, kind, name, server_url, username FROM calendar_accounts
-                 ORDER BY position, id",
+                "SELECT id, kind, name, server_url, username,
+                        oauth_provider, oauth_client_id, oauth_tenant
+                 FROM calendar_accounts ORDER BY position, id",
             )?
             .query_map([], |row| {
+                let provider: Option<String> = row.get(5)?;
+                let client_id: Option<String> = row.get(6)?;
                 Ok(CalendarAccountRecord {
                     id: row.get(0)?,
                     kind: row.get(1)?,
                     name: row.get(2)?,
                     server_url: row.get(3)?,
                     username: row.get(4)?,
+                    oauth: provider.zip(client_id).map(|(provider, client_id)| {
+                        CalendarOAuthRecord {
+                            provider,
+                            client_id,
+                            tenant: row.get(7).ok().flatten(),
+                        }
+                    }),
                 })
             })?
             .collect()
@@ -205,18 +229,27 @@ impl<'a> CalendarCache<'a> {
         let tx = self.conn.transaction()?;
         for (position, account) in accounts.iter().enumerate() {
             tx.execute(
-                "INSERT INTO calendar_accounts(id, position, kind, name, server_url, username)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO calendar_accounts(id, position, kind, name, server_url, username,
+                                               oauth_provider, oauth_client_id, oauth_tenant)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(id) DO UPDATE SET position = excluded.position, kind = excluded.kind,
                      name = excluded.name, server_url = excluded.server_url,
-                     username = excluded.username",
+                     username = excluded.username, oauth_provider = excluded.oauth_provider,
+                     oauth_client_id = excluded.oauth_client_id,
+                     oauth_tenant = excluded.oauth_tenant",
                 params![
                     account.id,
                     position as i64,
                     account.kind,
                     account.name,
                     account.server_url,
-                    account.username
+                    account.username,
+                    account.oauth.as_ref().map(|oauth| &oauth.provider),
+                    account.oauth.as_ref().map(|oauth| &oauth.client_id),
+                    account
+                        .oauth
+                        .as_ref()
+                        .and_then(|oauth| oauth.tenant.as_ref())
                 ],
             )?;
         }
@@ -415,6 +448,7 @@ mod tests {
             name: "Work".into(),
             server_url: "https://dav.example.com/".into(),
             username: Some("ann".into()),
+            oauth: None,
         }
     }
 

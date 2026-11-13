@@ -17,9 +17,33 @@ pub enum CalendarAccountKindV1 {
     Caldav,
     /// A read-only `.ics` address.
     Subscription,
+    /// Google Calendar (API v3) with an OAuth sign-in.
+    Google,
+    /// Microsoft 365 / Outlook.com calendars (Microsoft Graph) with an OAuth
+    /// sign-in.
+    Microsoft,
 }
 
-/// A CalDAV account or an ICS subscription. Never holds a secret.
+impl CalendarAccountKindV1 {
+    /// Google and Microsoft accounts sign in with OAuth.
+    pub fn is_oauth(self) -> bool {
+        matches!(self, Self::Google | Self::Microsoft)
+    }
+}
+
+/// The OAuth client an account signed in with. Holds no secret: the refresh
+/// token and an optional client secret live in the OS vault.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(specta::Type))]
+pub struct CalendarOAuthV1 {
+    /// The client (application) ID the person registered.
+    pub client_id: String,
+    /// Microsoft tenant, when one was given.
+    pub tenant: Option<String>,
+}
+
+/// A CalDAV, Google or Microsoft account, or an ICS subscription. Never holds
+/// a secret.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(specta::Type))]
 pub struct CalendarAccountV1 {
@@ -31,8 +55,12 @@ pub struct CalendarAccountV1 {
     pub name: String,
     /// Server or feed address.
     pub server_url: String,
-    /// CalDAV user name.
+    /// CalDAV user name, or the signed-in address of an OAuth account.
     pub username: Option<String>,
+    /// Present for Google and Microsoft accounts.
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", specta(optional))]
+    pub oauth: Option<CalendarOAuthV1>,
 }
 
 /// One calendar of an account.

@@ -1833,6 +1833,12 @@ pub static META: &[Migration] = &[
         version: 30,
         up: |tx| tx.execute_batch(include_str!("calendar_schema_v1.sql")),
     },
+    // Fork (T-0040): the account kind `oauth` with its own provider, client ID
+    // and tenant columns; the calendar tables are rebuilt with their rows.
+    Migration {
+        version: 31,
+        up: |tx| tx.execute_batch(include_str!("calendar_oauth_v31.sql")),
+    },
 ];
 
 fn record_media(tx: &Transaction) -> rusqlite::Result<()> {
@@ -2853,6 +2859,7 @@ mod tests {
         (28, 0xdce79131820ba8c9),
         (29, 0xa0b8957836963987),
         (30, 0x0156_c991_8a12_eed3),
+        (31, 0xe8fcfdcd10c7be72),
     ];
     const PROFILE_SCHEMA_FINGERPRINTS: &[(i64, u64)] = &[
         (1, 0x10b8_b7a3_094f_23d7),
@@ -3682,7 +3689,7 @@ mod tests {
         .unwrap();
         apply(&mut conn, META).unwrap();
         apply(&mut conn, META).unwrap();
-        assert_eq!(validate_current(&conn, META).unwrap(), 30);
+        assert!(validate_current(&conn, META).unwrap() >= 30);
         for table in ["calendar_accounts", "calendars", "calendar_events"] {
             assert_eq!(
                 conn.query_row(
@@ -3706,6 +3713,78 @@ mod tests {
         let secrets: i64 = conn
             .query_row(
                 "SELECT count(*) FROM pragma_table_info('calendar_accounts') \
+                 WHERE name LIKE '%password%' OR name LIKE '%secret%' OR name LIKE '%token%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(secrets, 0);
+    }
+
+    #[test]
+    fn calendar_oauth_migration_upgrades_a_v30_meta_database_without_losing_data() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        // Foreign keys on, as in production: the rebuild must not cascade.
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        apply(&mut conn, &META[..30]).unwrap();
+        assert_eq!(validate_current(&conn, META).unwrap(), 30);
+        conn.execute_batch(
+            "INSERT INTO calendar_accounts(id, position, kind, name, server_url, username)
+                 VALUES ('A1', 0, 'caldav', 'Work', 'https://dav.example.com/', 'ann');
+             INSERT INTO calendars(id, account_id, position, href, display_name, colour,
+                                   read_only, visible, ctag, sync_token, synced_at)
+                 VALUES ('C1', 'A1', 0, 'https://dav.example.com/work/', 'Work', '#336699',
+                         0, 1, 'ct', 'tok', 1700000000);
+             INSERT INTO calendar_events(calendar_id, href, etag, uid, ical, start_utc,
+                                         end_utc, last_seen)
+                 VALUES ('C1', 'a.ics', 'e1', 'u1', 'BEGIN:VCALENDAR', 10, 20, 30);",
+        )
+        .unwrap();
+        apply(&mut conn, META).unwrap();
+        apply(&mut conn, META).unwrap();
+        assert_eq!(validate_current(&conn, META).unwrap(), 31);
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(count("SELECT count(*) FROM calendar_accounts"), 1);
+        assert_eq!(count("SELECT count(*) FROM calendars"), 1);
+        assert_eq!(count("SELECT count(*) FROM calendar_events"), 1);
+        assert_eq!(
+            conn.query_row(
+                "SELECT sync_token || ctag || synced_at FROM calendars WHERE id='C1'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "tokct1700000000"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM calendar_accounts WHERE oauth_provider IS NULL"),
+            1
+        );
+        let violations: Vec<i64> = conn
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query_map([], |r| r.get(1))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(violations.is_empty());
+        // The new kind needs its provider and client ID, and only it may have them.
+        let insert = |kind: &str, provider: Option<&str>, client: Option<&str>| {
+            conn.execute(
+                "INSERT INTO calendar_accounts(id, position, kind, name, server_url,
+                     oauth_provider, oauth_client_id, oauth_tenant)
+                 VALUES (?1, 5, ?2, 'n', 'https://example.org/', ?3, ?4, NULL)",
+                rusqlite::params![format!("N{}", kind.len()), kind, provider, client],
+            )
+        };
+        assert!(insert("oauth", Some("google"), Some("client-1")).is_ok());
+        assert!(insert("oauth", None, None).is_err());
+        assert!(insert("oauth", Some("evil"), Some("client-1")).is_err());
+        assert!(insert("caldav", Some("google"), Some("client-1")).is_err());
+        assert!(insert("other", None, None).is_err());
+        let secrets: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('calendar_accounts')
                  WHERE name LIKE '%password%' OR name LIKE '%secret%' OR name LIKE '%token%'",
                 [],
                 |r| r.get(0),

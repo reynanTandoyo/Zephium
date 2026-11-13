@@ -100,6 +100,30 @@ the page then says you can close the tab. Zephium finishes the account setup
 If you wait more than three minutes, press **Cancel**, or close the tab
 without approving, the sign-in ends and nothing is saved.
 
+## D. Calendars (Google Calendar and Microsoft 365)
+
+The same registration can serve calendars; Calendar is optional and a CalDAV
+or `.ics` calendar needs none of this. Add the permissions below to the app you
+already registered (or register one the same way), then sign in again from the
+Calendar account setup, which asks for the calendar permission.
+
+- **Microsoft 365**: in Entra, **API permissions > Add a permission > Microsoft
+  Graph > Delegated permissions**, tick `Calendars.ReadWrite` (and
+  `offline_access` if it is not there yet). Some organisations need an
+  administrator to grant consent. Use `Calendars.ReadWrite` rather than
+  read-only so events can be created, moved and deleted.
+- **Google**: in the same Cloud project, **APIs & Services > Library**, enable
+  the **Google Calendar API** (separate from the Gmail API). Under **Data
+  access / Scopes** add `https://www.googleapis.com/auth/calendar`. Testing
+  status, test users and the optional client secret work as in section B.
+
+Each calendar account keeps its own copy of the refresh token in the vault
+(`app.zephium.oauth|<calendar account id>`); mail and calendar do not share a
+token entry, so removing one never signs the other out. One consent can cover
+both: the sign-in takes a list of purposes, and Microsoft grants mail and
+calendar together (its access tokens are still issued per resource, so the
+Graph token comes from a refresh with the calendar scopes).
+
 ## Removing access
 
 - In Zephium, removing the mail account deletes its entry from the Credential
@@ -122,9 +146,12 @@ without approving, the sign-in ends and nothing is saved.
   same.
 - Scopes: Microsoft `https://outlook.office.com/IMAP.AccessAsUser.All
   https://outlook.office.com/SMTP.Send offline_access`; Google
-  `https://mail.google.com/`. Calendar scopes (Google Calendar,
-  Microsoft Graph `Calendars.ReadWrite`) are defined as `Purpose::Calendar` and
-  unused until T-0040, which reuses the same sign-in and `AccessTokenSource`.
+  `https://mail.google.com/`. Calendar scopes (Google
+  `https://www.googleapis.com/auth/calendar`, Microsoft Graph
+  `Calendars.ReadWrite offline_access`) are `Purpose::Calendar`; the calendar
+  service uses the same sign-in through `TokenSessions` (an
+  `AccessTokenSource` that also adopts a grant, drops a token after a 401 and
+  signs out).
 - HTTP goes through the `HttpClient` trait (the desktop supplies `reqwest`,
   HTTPS only, no redirects, 64 KiB cap). Token errors become the closed
   `OAuthError` enum with no server text.
@@ -164,13 +191,51 @@ commands fail with `auth_failed`: the interface should offer *Sign in again*.
 Handles live in memory only, work once, expire after ten minutes and at most
 four are kept.
 
+### Calendars (T-0040)
+
+- Crate `zephium-calendar`, modules `provider/google.rs`, `provider/graph.rs`
+  and `service/oauth.rs`. **Google** uses the Calendar API v3 rather than
+  Google's CalDAV endpoint: first-class incremental sync (`syncToken`; `410`
+  / `fullSyncRequired` makes a full read), JSON, ETag-guarded writes and
+  stable instance ids (`<series>_<UTC start>`) for single-occurrence edits;
+  the RRULE/EXDATE strings map straight onto the iCalendar model. **Microsoft**
+  uses `/me/calendars`, `/me/calendars/{id}/calendarView/delta` (window: 180
+  days back, 365 ahead, re-read about every 90 days; an expired delta link is
+  a full read) and `/me/events`. Graph occurrences are cached as individual
+  events (Exchange has already applied exceptions and cancellations), so
+  editing or deleting one changes that occurrence; the series pattern
+  (`patternedRecurrence` to RRULE and back) is used when creating a series and
+  when a series master is read. Editing a whole Microsoft series is not
+  offered; do it in Outlook.
+- Bounds: 250 events per Google page and 100 per Graph page, 200 pages,
+  20 000 events per calendar, 200 calendars per account, 16 MiB per response;
+  Graph links are followed only on `graph.microsoft.com` over HTTPS. Errors
+  stay in `CalendarError` (`429` is `limit`, a failed token is `unauthorized`).
+- A request that answers 401 drops the cached access token and is sent once
+  more with a refreshed one.
+- Storage: META migration v31 gives `calendar_accounts` the kind `oauth` with
+  its own `oauth_provider` (`google`/`microsoft`), `oauth_client_id` and
+  `oauth_tenant` columns (not secrets; a CHECK ties them to that kind). The
+  calendar tables are rebuilt with their rows kept. Tokens and client secrets
+  are never in the database.
+
+IPC (main window only):
+
+| Command | Purpose |
+| --- | --- |
+| `calendar_add_oauth_account(grant, name)` | `grant` is the handle from `oauth_sign_in`, which must have been asked for the calendar purpose. Consumes the handle, lists the calendars, syncs in the background. `CalendarAccountV1.kind` is `google` or `microsoft` and `oauth` holds `{ client_id, tenant }`. |
+| `calendar_remove_account(account)` | Also removes the refresh token from the vault for these accounts. |
+
+The other `calendar_*` commands work unchanged on these accounts.
+
 ### Not covered
 
 - No real provider has been contacted in tests: flows run against fakes and a
   local fake IMAP server.
-- Microsoft tokens are per resource. The Graph (calendar) token for T-0040 is
-  obtained by refreshing the same refresh token with `Purpose::Calendar`,
-  which needs `Calendars.ReadWrite` consented at sign-in; the current sign-in
-  asks for mail scopes only.
+- Microsoft tokens are per resource. The Graph (calendar) token is obtained
+  by refreshing the refresh token with `Purpose::Calendar`, which needs
+  `Calendars.ReadWrite` consented at sign-in. `oauth_sign_in` currently asks
+  for mail scopes only; it needs a `purposes` argument before a calendar
+  account can be added.
 - Linux has no vault and no browser opener: OAuth commands report
   `unsupported` or fail to open the page there (Linux is not supported).

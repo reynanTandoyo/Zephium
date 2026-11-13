@@ -11,6 +11,7 @@ ipc-types = ["dep:specta"]
 
 [dependencies]
 zephium-credentials.workspace = true
+zephium-oauth.workspace = true
 zephium-store.workspace = true
 specta = { workspace = true, optional = true }
 async-trait = "0.1"

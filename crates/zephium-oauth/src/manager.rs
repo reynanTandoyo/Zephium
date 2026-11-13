@@ -33,6 +33,21 @@ pub trait AccessTokenSource: Send + Sync {
     ) -> BoxFuture<'a, Result<Zeroizing<String>>>;
 }
 
+/// An [`AccessTokenSource`] that also owns the sign-in lifecycle of an
+/// account: it adopts a fresh grant, drops a token the server refused and
+/// signs the account out. Implemented by [`TokenManager`]; the calendar
+/// service takes it as a port so tests can use a fake.
+pub trait TokenSessions: AccessTokenSource {
+    /// Stores a fresh sign-in (refresh token to the vault, access token to
+    /// memory).
+    fn adopt<'a>(&'a self, account_id: &'a str, grant: &'a Grant) -> BoxFuture<'a, Result<()>>;
+    /// Drops the cached access tokens of an account, so the next request
+    /// refreshes (used after a server answered 401).
+    fn invalidate<'a>(&'a self, account_id: &'a str) -> BoxFuture<'a, ()>;
+    /// Forgets the tokens and removes the refresh token from the vault.
+    fn sign_out<'a>(&'a self, account_id: &'a str) -> BoxFuture<'a, Result<()>>;
+}
+
 struct Cached {
     token: Zeroizing<String>,
     expires_at: Instant,
@@ -191,6 +206,20 @@ impl AccessTokenSource for TokenManager {
     }
 }
 
+impl TokenSessions for TokenManager {
+    fn adopt<'a>(&'a self, account_id: &'a str, grant: &'a Grant) -> BoxFuture<'a, Result<()>> {
+        Box::pin(TokenManager::adopt(self, account_id, grant))
+    }
+
+    fn invalidate<'a>(&'a self, account_id: &'a str) -> BoxFuture<'a, ()> {
+        Box::pin(self.forget(account_id))
+    }
+
+    fn sign_out<'a>(&'a self, account_id: &'a str) -> BoxFuture<'a, Result<()>> {
+        Box::pin(TokenManager::sign_out(self, account_id))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,6 +337,24 @@ mod tests {
         assert_eq!(result.unwrap_err(), OAuthError::Credentials);
         let result = manager.access_token("a|1", &config(), Purpose::Mail).await;
         assert_eq!(result.unwrap_err(), OAuthError::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn invalidate_forces_a_refresh_for_every_purpose() {
+        let (http, _vault, manager) = rig();
+        let sessions: &dyn TokenSessions = &manager;
+        sessions.adopt("a1", &grant(3600)).await.unwrap();
+        http.answer(
+            200,
+            r#"{"access_token":"AT1","token_type":"Bearer","expires_in":3600}"#,
+        );
+        sessions.invalidate("a1").await;
+        let token = sessions
+            .access_token("a1", &config(), Purpose::Mail)
+            .await
+            .unwrap();
+        assert_eq!(&*token, "AT1");
+        assert_eq!(http.posts.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

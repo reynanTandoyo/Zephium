@@ -1790,6 +1790,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             ai_apps::work_ai_app_sign_in,
             calendar::calendar_discover,
             calendar::calendar_add_account,
+            calendar::calendar_add_oauth_account,
             calendar::calendar_add_subscription,
             calendar::calendar_accounts,
             calendar::calendar_remove_account,
