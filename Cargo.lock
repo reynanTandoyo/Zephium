@@ -8018,6 +8018,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "zephium-oauth"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "futures",
+ "getrandom 0.4.3",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+ "zephium-credentials",
+ "zeroize",
+]
+
+[[package]]
 name = "zephium-page-assist"
 version = "0.1.0"
 dependencies = [
