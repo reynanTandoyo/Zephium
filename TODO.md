@@ -103,10 +103,9 @@ Last ID: T-0046
 - [ ] T-0041 · Calendar: local cache and sync · area: crates/zephium-store (calendar tables + migration), crates/zephium-calendar · owner: - · updated: 2026-11-13
   - Sync tokens / ETags; periodic and manual refresh.
   - 2026-11-13: in-memory cache done in `zephium-calendar` (`ccf74bf31`); persistent zephium-store tables still open (wave 2).
-- [ ] T-0042 · Calendar: day, week, month and agenda views · area: frame/src/features/calendar, frame/src/domain/calendar · owner: - · updated: 2026-11-13
-  - Several calendars overlaid with colours and show/hide toggles; Today button; mini month navigator.
 - [ ] T-0043 · Calendar: create, edit, move and delete events · area: frame/src/features/calendar, crates/zephium-calendar · owner: - · updated: 2026-11-13
   - Writable CalDAV calendars; title, time, all-day, location, notes, recurrence, reminders; drag to move.
+  - 2026-11-13: UI for create/edit/move/delete done (`6727a4639`); recurring events are view/delete-only until the backend exposes series info and `calendar_update_occurrence` (calendar-store worker). All-day banner drag not done.
 - [ ] T-0044 · Calendar: reminders as Windows notifications · area: desktop/src/focus_alerts.rs, crates/zephium-calendar · owner: - · updated: 2026-11-13
 - [ ] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: - · updated: 2026-11-13
   - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
@@ -127,6 +126,9 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0042 · Calendar: day, week, month and agenda views · area: frame/src/features/calendar, frame/src/domain/calendar · owner: orca w2-calendar-ui · updated: 2026-11-13
+  - Several calendars overlaid with colours and show/hide toggles; Today button; mini month navigator.
+  - `795aae1df`, `6727a4639`: day/week/month/agenda, colours, show/hide, Today, mini month, keyboard. Frame typecheck/lint/stylelint/knip/build/check:styles pass, 50 unit + 14 component tests (Chromium, Windows). New lazy budget entry for `CalendarPage` (no existing budget raised). Not run in the native app.
 - [x] T-0020 · Mail: crate `zephium-mail` with IMAP over TLS · area: new crates/zephium-mail · owner: orca w2-mail-core · updated: 2026-11-13
   - `async-imap` + rustls; IDLE for push; bounded reads; all server data is untrusted input. Unit tests against a fake IMAP server.
   - `80dc4770c`, `a0a1a8d84`, `21e8684c3`: `zephium-mail` IMAP over rustls, IDLE watch, bounded reads; 15 fake-IMAP-server flow tests pass. clippy -D warnings clean (Windows).
