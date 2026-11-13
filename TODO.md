@@ -70,24 +70,12 @@ Last ID: T-0046
 
 ## Open
 
-- [ ] T-0010 · Modes: define the mode list as data · area: frame/src/domain/surface, frame/src/features/sidebar · owner: - · updated: 2026-11-13
-  - `{ page, label, icon, feature }` in order Browse, Work, Mail, Calendar; a mode is hidden when its feature is off. Today "Browse" means no full-window page and "Work" is `BrowserPage::Work`.
-- [ ] T-0011 · Modes: `ModeTabs` shows N modes · area: frame/src/features/sidebar/components/ModeTabs.svelte · owner: - · updated: 2026-11-13
-  - Replace the two-option segmented control with one driven by T-0010; update `ModeTabs.component.test.ts`.
-- [ ] T-0012 · Modes: `ModeWord` rail switch shows N modes · area: frame/src/features/sidebar/components/ModeWord.svelte · owner: - · updated: 2026-11-13
-  - N-cell grid and moving thumb instead of `repeat(2, …)` and `data-work=true/false`.
-- [ ] T-0013 · Modes: generalise "in Work" into "in a full-window mode" · area: frame/src/app/browser/Shell.svelte, Sidebar.svelte, session/tools.svelte.ts, AddressField, SidebarSearch, BrowserApp · owner: - · updated: 2026-11-13
-  - About 60 frontend lines check `inWork` / `=== "work"`. Shared mode behaviour: compact rail, no address field, tabs open over the mode, follows space changes. Keep Work-only parts (canvas, Work pane, tool redirect) for Work. Update `Shell` and `surface` tests.
-- [ ] T-0014 · Modes: Rust `BrowserPage::Mail` and `BrowserPage::Calendar` · area: crates/zephium-app/src/api.rs, desktop/src/lib.rs (`browser.*` match), crates/zephium-core/src/commands.rs · owner: - · updated: 2026-11-13
-  - Variants, `command_id`, `feature()`, `feature_of`, the `browser.*` match, and regenerated bindings.
 - [ ] T-0015 · Modes: make Work-only Rust branches mode-aware · area: crates/zephium-app/src/shell/{spaces,operations,time,media,browser_pages}.rs · owner: - · updated: 2026-11-13
   - Switching space keeps the mode, typing an address returns to Browse, time tracking records the mode. Update the Rust tests in `shell/tests`.
-- [ ] T-0016 · Modes: generated native `mode.choose` menu · area: desktop/src/lib.rs (~4024-4044) · owner: - · updated: 2026-11-13
-  - Today it is hard-coded to Browse and Work.
-- [ ] T-0017 · Modes: Mail and Calendar switches in Settings → Features · area: frame/src/features/settings/lib/catalog.ts, frame/src/domain/preferences · owner: - · updated: 2026-11-13
-  - `mail.enabled`, `calendar.enabled`; turning one off while in its mode returns to Browse (like `operations.rs` does for Work).
+  - 2026-11-13: `5a86ca30c` made spaces/operations/browser_pages mode-aware. Open: time tracking for Mail/Calendar (`Place` only has Site/Work; needs a store change), and media/space/address branches treat every mode like Work.
 - [ ] T-0018 · Modes: texts and the onboarding mock switch · area: frame/messages (13 locales), frame/src/features/onboarding/components/Window.svelte · owner: - · updated: 2026-11-13
   - `mode_mail`, `mode_calendar`, update `ui_mode_work_hint`; the onboarding window draws a fake two-tab switch.
+  - 2026-11-13: texts in all 13 locales done (`d1d96ab24`). Open: onboarding `Window.svelte` mock still shows Browse/Work only.
 - [ ] T-0020 · Mail: crate `zephium-mail` with IMAP over TLS · area: new crates/zephium-mail · owner: - · updated: 2026-11-13
   - `async-imap` + rustls; IDLE for push; bounded reads; all server data is untrusted input. Unit tests against a fake IMAP server.
 - [ ] T-0021 · Mail: MIME parsing · area: crates/zephium-mail · owner: - · updated: 2026-11-13
@@ -149,6 +137,27 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0010 · Modes: define the mode list as data · area: frame/src/domain/surface, frame/src/features/sidebar · owner: orca w1-modes · updated: 2026-11-13
+  - `{ page, label, icon, feature }` in order Browse, Work, Mail, Calendar; a mode is hidden when its feature is off. Today "Browse" means no full-window page and "Work" is `BrowserPage::Work`.
+  - `5a86ca30c` (Rust) + `d1d96ab24` (frame): clippy -D warnings for zephium-app/core/desktop clean, new Rust mode tests pass, frame typecheck/lint/unit (305) pass, frame build within unchanged budgets (Windows).
+- [x] T-0011 · Modes: `ModeTabs` shows N modes · area: frame/src/features/sidebar/components/ModeTabs.svelte · owner: orca w1-modes · updated: 2026-11-13
+  - Replace the two-option segmented control with one driven by T-0010; update `ModeTabs.component.test.ts`.
+  - `5a86ca30c` (Rust) + `d1d96ab24` (frame): clippy -D warnings for zephium-app/core/desktop clean, new Rust mode tests pass, frame typecheck/lint/unit (305) pass, frame build within unchanged budgets (Windows).
+- [x] T-0012 · Modes: `ModeWord` rail switch shows N modes · area: frame/src/features/sidebar/components/ModeWord.svelte · owner: orca w1-modes · updated: 2026-11-13
+  - N-cell grid and moving thumb instead of `repeat(2, …)` and `data-work=true/false`.
+  - `5a86ca30c` (Rust) + `d1d96ab24` (frame): clippy -D warnings for zephium-app/core/desktop clean, new Rust mode tests pass, frame typecheck/lint/unit (305) pass, frame build within unchanged budgets (Windows).
+- [x] T-0013 · Modes: generalise "in Work" into "in a full-window mode" · area: frame/src/app/browser/Shell.svelte, Sidebar.svelte, session/tools.svelte.ts, AddressField, SidebarSearch, BrowserApp · owner: orca w1-modes · updated: 2026-11-13
+  - About 60 frontend lines check `inWork` / `=== "work"`. Shared mode behaviour: compact rail, no address field, tabs open over the mode, follows space changes. Keep Work-only parts (canvas, Work pane, tool redirect) for Work. Update `Shell` and `surface` tests.
+  - `5a86ca30c` (Rust) + `d1d96ab24` (frame): clippy -D warnings for zephium-app/core/desktop clean, new Rust mode tests pass, frame typecheck/lint/unit (305) pass, frame build within unchanged budgets (Windows).
+- [x] T-0014 · Modes: Rust `BrowserPage::Mail` and `BrowserPage::Calendar` · area: crates/zephium-app/src/api.rs, desktop/src/lib.rs (`browser.*` match), crates/zephium-core/src/commands.rs · owner: orca w1-modes · updated: 2026-11-13
+  - Variants, `command_id`, `feature()`, `feature_of`, the `browser.*` match, and regenerated bindings.
+  - `5a86ca30c` (Rust) + `d1d96ab24` (frame): clippy -D warnings for zephium-app/core/desktop clean, new Rust mode tests pass, frame typecheck/lint/unit (305) pass, frame build within unchanged budgets (Windows).
+- [x] T-0016 · Modes: generated native `mode.choose` menu · area: desktop/src/lib.rs (~4024-4044) · owner: orca w1-modes · updated: 2026-11-13
+  - Today it is hard-coded to Browse and Work.
+  - `5a86ca30c` (Rust) + `d1d96ab24` (frame): clippy -D warnings for zephium-app/core/desktop clean, new Rust mode tests pass, frame typecheck/lint/unit (305) pass, frame build within unchanged budgets (Windows).
+- [x] T-0017 · Modes: Mail and Calendar switches in Settings → Features · area: frame/src/features/settings/lib/catalog.ts, frame/src/domain/preferences · owner: orca w1-modes · updated: 2026-11-13
+  - `mail.enabled`, `calendar.enabled`; turning one off while in its mode returns to Browse (like `operations.rs` does for Work).
+  - `5a86ca30c` (Rust) + `d1d96ab24` (frame): clippy -D warnings for zephium-app/core/desktop clean, new Rust mode tests pass, frame typecheck/lint/unit (305) pass, frame build within unchanged budgets (Windows).
 - [x] T-0037 · Calendar: crate and iCalendar parsing · area: new crates/zephium-calendar · owner: orca w3-calendar · updated: 2026-11-13
   - `.ics` events with time zones, all-day events and recurrence (RRULE, EXDATE, overrides), e.g. the `icalendar`/`rrule` crates; bounded input.
   - `ccf74bf31`: new `zephium-calendar` (iCalendar parse/serialize, RRULE/RDATE/EXDATE/overrides, time zones). `cargo test -p zephium-calendar` 48 passed, clippy -D warnings clean (Windows).
