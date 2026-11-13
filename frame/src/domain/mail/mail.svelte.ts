@@ -14,18 +14,15 @@ import { composeFor, type ComposeMode } from "./compose";
 import { ComposeSession } from "./compose.svelte";
 import { buildThreads, rowKey, type MailRow } from "./thread";
 
-export const PAGE_SIZE = 50;
+const PAGE_SIZE = 50;
 /** The combined view over every account's inbox. */
 export const ALL_INBOXES = "*";
 
-export type Load = "idle" | "loading" | "ready" | "failed";
+type Load = "idle" | "loading" | "ready" | "failed";
 
-export type MailSelection = { account: string; folder: string };
+type MailSelection = { account: string; folder: string };
 
-/** What the list shows: a folder, every inbox, or search results in either. */
-export type MailView = MailSelection & { query: string };
-
-export type OpenMessage = {
+type OpenMessage = {
   row: MailRow;
   state: Load;
   body: MailBodyV1 | null;
@@ -33,7 +30,7 @@ export type OpenMessage = {
 };
 
 /** An action that could not be completed, shown until dismissed. */
-export type MailNotice = {
+type MailNotice = {
   action: "flag" | "move" | "delete" | "archive" | "junk" | "sync" | "open" | "account";
   error: MailFailure | "no_folder";
 };
@@ -49,7 +46,7 @@ const ROLE_ORDER: Record<MailFolderRoleV1, number> = {
 };
 
 /** Special-use folders first, in a fixed order, then the rest by name. */
-export function orderFolders(folders: readonly MailFolderV1[]): MailFolderV1[] {
+function orderFolders(folders: readonly MailFolderV1[]): MailFolderV1[] {
   return folders
     .filter((folder) => folder.selectable)
     .toSorted(
@@ -60,7 +57,8 @@ export function orderFolders(folders: readonly MailFolderV1[]): MailFolderV1[] {
 }
 
 const rowDate = (row: MailRow) => row.message.date ?? 0;
-const byNewest = (a: MailRow, b: MailRow) => rowDate(b) - rowDate(a) || b.message.uid - a.message.uid;
+const byNewest = (a: MailRow, b: MailRow) =>
+  rowDate(b) - rowDate(a) || b.message.uid - a.message.uid;
 
 /**
  * Mail as the frame sees it. Rust owns accounts, the cache and every server
@@ -86,7 +84,7 @@ export class MailStore {
   compose = $state<ComposeSession | null>(null);
   notice = $state<MailNotice | null>(null);
   /** Rows with an action in flight; they render as pending, unchanged. */
-  pending = $state.raw<ReadonlySet<string>>(new Set());
+  pending = $state.raw<readonly string[]>([]);
 
   /** `next_before` per `account/folder` source; null means the end was reached. */
   private cursors = $state.raw<Readonly<Record<string, number | null>>>({});
@@ -140,7 +138,7 @@ export class MailStore {
     this.folders = {};
     this.accountsState = "idle";
     this.listState = "idle";
-    this.pending = new Set();
+    this.pending = [];
   }
 
   account(id: string) {
@@ -164,7 +162,11 @@ export class MailStore {
   async loadAccounts() {
     const generation = this.generation;
     if (this.accountsState !== "ready") this.accountsState = "loading";
-    const outcome = await callMail(() => commands.mailAccounts(), READ_TIMEOUT, this.lifetime.signal);
+    const outcome = await callMail(
+      () => commands.mailAccounts(),
+      READ_TIMEOUT,
+      this.lifetime.signal,
+    );
     if (generation !== this.generation || outcome.ok === "aborted") return;
     if (!outcome.ok) {
       this.accountsState = this.accountsState === "ready" ? "ready" : "failed";
@@ -172,10 +174,10 @@ export class MailStore {
     }
     this.accounts = outcome.value;
     this.accountsState = "ready";
-    const known = new Set(outcome.value.map((account) => account.id));
-    const kept = Object.entries(this.folders).filter(([id]) => known.has(id));
+    const known = outcome.value.map((account) => account.id);
+    const kept = Object.entries(this.folders).filter(([id]) => known.includes(id));
     this.folders = Object.fromEntries(kept);
-    if (this.selection.account !== ALL_INBOXES && !known.has(this.selection.account)) {
+    if (this.selection.account !== ALL_INBOXES && !known.includes(this.selection.account)) {
       this.selection = { account: ALL_INBOXES, folder: "INBOX" };
     }
     await Promise.all(outcome.value.map((account) => this.loadFolders(account.id)));
@@ -192,7 +194,8 @@ export class MailStore {
     );
     if (generation !== this.generation || outcome.ok === "aborted") return false;
     if (!outcome.ok) {
-      if (!this.folderFailures.includes(account)) this.folderFailures = [...this.folderFailures, account];
+      if (!this.folderFailures.includes(account))
+        this.folderFailures = [...this.folderFailures, account];
       return false;
     }
     this.folderFailures = this.folderFailures.filter((id) => id !== account);
@@ -205,7 +208,9 @@ export class MailStore {
     if (this.syncing) return;
     this.syncing = true;
     const generation = this.generation;
-    const results = await Promise.all(this.accounts.map((account) => this.loadFolders(account.id, true)));
+    const results = await Promise.all(
+      this.accounts.map((account) => this.loadFolders(account.id, true)),
+    );
     if (generation !== this.generation) return;
     this.syncing = false;
     if (results.some((ok) => !ok)) this.notice = { action: "sync", error: "unavailable" };
@@ -328,7 +333,9 @@ export class MailStore {
     this.loadingMore = true;
     const generation = this.generation;
     const sequence = this.listSequence;
-    const next = this.sources().filter((source) => this.cursors[`${source.account}/${source.folder}`] != null);
+    const next = this.sources().filter(
+      (source) => this.cursors[`${source.account}/${source.folder}`] != null,
+    );
     const results = await Promise.all(
       next.map(async (source) => ({
         source,
@@ -346,7 +353,7 @@ export class MailStore {
     this.loadingMore = false;
     if (generation !== this.generation || sequence !== this.listSequence) return;
     const rows = [...this.rows];
-    const seen = new Set(rows.map((row) => row.key));
+    const seen = rows.map((row) => row.key);
     const cursors = { ...this.cursors };
     for (const { source, outcome } of results) {
       if (outcome.ok === "aborted") return;
@@ -357,7 +364,10 @@ export class MailStore {
       cursors[`${source.account}/${source.folder}`] = outcome.value.next_before;
       for (const message of outcome.value.messages) {
         const row = this.rowOf(source, message);
-        if (!seen.has(row.key)) rows.push(row);
+        if (!seen.includes(row.key)) {
+          seen.push(row.key);
+          rows.push(row);
+        }
       }
     }
     this.cursors = cursors;
@@ -411,7 +421,12 @@ export class MailStore {
       READ_TIMEOUT,
       this.lifetime.signal,
     );
-    if (generation !== this.generation || sequence !== this.openSequence || outcome.ok === "aborted") return;
+    if (
+      generation !== this.generation ||
+      sequence !== this.openSequence ||
+      outcome.ok === "aborted"
+    )
+      return;
     if (!outcome.ok) {
       this.open = { row, state: "failed", body: null, error: outcome.error };
       return;
@@ -443,34 +458,39 @@ export class MailStore {
   // Actions -------------------------------------------------------------------
 
   private markPending(rows: readonly MailRow[], on: boolean) {
-    const next = new Set(this.pending);
-    for (const row of rows) {
-      if (on) next.add(row.key);
-      else next.delete(row.key);
-    }
-    this.pending = next;
+    const keys = rows.map((row) => row.key);
+    this.pending = on
+      ? [...this.pending, ...keys.filter((key) => !this.pending.includes(key))]
+      : this.pending.filter((key) => !keys.includes(key));
+  }
+
+  /** An action on this row is in flight. */
+  isPending(key: string) {
+    return this.pending.includes(key);
   }
 
   /** Groups rows by `account/folder`, since each command addresses one folder. */
   private grouped(rows: readonly MailRow[]) {
-    const groups = new Map<string, { account: string; folder: string; rows: MailRow[] }>();
+    const groups: { account: string; folder: string; rows: MailRow[] }[] = [];
     for (const row of rows) {
-      const key = `${row.account}/${row.folder}`;
-      const group = groups.get(key) ?? { account: row.account, folder: row.folder, rows: [] };
+      let group = groups.find((g) => g.account === row.account && g.folder === row.folder);
+      if (!group) {
+        group = { account: row.account, folder: row.folder, rows: [] };
+        groups.push(group);
+      }
       group.rows.push(row);
-      groups.set(key, group);
     }
-    return [...groups.values()];
+    return groups;
   }
 
   private patchRows(rows: readonly MailRow[], patch: (row: MailRow) => MailRow | null) {
-    const keys = new Set(rows.map((row) => row.key));
+    const keys = rows.map((row) => row.key);
     this.rows = this.rows.flatMap((row) => {
-      if (!keys.has(row.key)) return [row];
+      if (!keys.includes(row.key)) return [row];
       const next = patch(row);
       return next ? [next] : [];
     });
-    if (this.open && keys.has(this.open.row.key)) {
+    if (this.open && keys.includes(this.open.row.key)) {
       const next = patch(this.open.row);
       this.open = next ? { ...this.open, row: next } : null;
     }
@@ -484,7 +504,14 @@ export class MailStore {
     let allOk = true;
     for (const group of this.grouped(rows)) {
       const outcome = await callMail(
-        () => commands.mailSetFlags(group.account, group.folder, group.rows.map((r) => r.message.uid), flag, on),
+        () =>
+          commands.mailSetFlags(
+            group.account,
+            group.folder,
+            group.rows.map((r) => r.message.uid),
+            flag,
+            on,
+          ),
         WRITE_TIMEOUT,
         this.lifetime.signal,
       );
@@ -521,7 +548,13 @@ export class MailStore {
     let allOk = true;
     for (const group of this.grouped(movable)) {
       const outcome = await callMail(
-        () => commands.mailMove(group.account, group.folder, group.rows.map((r) => r.message.uid), destination),
+        () =>
+          commands.mailMove(
+            group.account,
+            group.folder,
+            group.rows.map((r) => r.message.uid),
+            destination,
+          ),
         WRITE_TIMEOUT,
         this.lifetime.signal,
       );
@@ -539,7 +572,7 @@ export class MailStore {
 
   /** Moves to the account's folder with this role, or says there is none. */
   async moveToRole(rows: readonly MailRow[], role: "archive" | "junk") {
-    const accounts = new Set(rows.map((row) => row.account));
+    const accounts = rows.map((row) => row.account).filter((id, at, all) => all.indexOf(id) === at);
     for (const id of accounts) {
       if (!this.roleFolder(id, role)) {
         this.notice = { action: role, error: "no_folder" };
@@ -549,7 +582,12 @@ export class MailStore {
     let ok = true;
     for (const id of accounts) {
       const target = this.roleFolder(id, role)!;
-      ok = (await this.move(rows.filter((row) => row.account === id), target.path, role)) && ok;
+      ok =
+        (await this.move(
+          rows.filter((row) => row.account === id),
+          target.path,
+          role,
+        )) && ok;
     }
     return ok;
   }
@@ -561,7 +599,12 @@ export class MailStore {
     let allOk = true;
     for (const group of this.grouped(rows)) {
       const outcome = await callMail(
-        () => commands.mailDelete(group.account, group.folder, group.rows.map((r) => r.message.uid)),
+        () =>
+          commands.mailDelete(
+            group.account,
+            group.folder,
+            group.rows.map((r) => r.message.uid),
+          ),
         WRITE_TIMEOUT,
         this.lifetime.signal,
       );
@@ -590,19 +633,29 @@ export class MailStore {
   }
 
   async updateAccount(update: MailAccountUpdateV1) {
-    const outcome = await callMail(() => commands.mailUpdateAccount(update), WRITE_TIMEOUT, this.lifetime.signal);
+    const outcome = await callMail(
+      () => commands.mailUpdateAccount(update),
+      WRITE_TIMEOUT,
+      this.lifetime.signal,
+    );
     if (outcome.ok === "aborted") return false;
     if (!outcome.ok) {
       this.notice = { action: "account", error: outcome.error };
       return false;
     }
-    this.accounts = this.accounts.map((account) => (account.id === outcome.value.id ? outcome.value : account));
+    this.accounts = this.accounts.map((account) =>
+      account.id === outcome.value.id ? outcome.value : account,
+    );
     return true;
   }
 
   /** Removes the account and its cache; the list follows the answer. */
   async removeAccount(id: string) {
-    const outcome = await callMail(() => commands.mailRemoveAccount(id), WRITE_TIMEOUT, this.lifetime.signal);
+    const outcome = await callMail(
+      () => commands.mailRemoveAccount(id),
+      WRITE_TIMEOUT,
+      this.lifetime.signal,
+    );
     if (outcome.ok === "aborted") return false;
     if (!outcome.ok) {
       this.notice = { action: "account", error: outcome.error };
@@ -616,7 +669,7 @@ export class MailStore {
 
   /** Starts a message; a reply or forward reads the open message. */
   startCompose(mode: ComposeMode): boolean {
-    const original = mode === "new" ? undefined : this.open?.body ?? undefined;
+    const original = mode === "new" ? undefined : (this.open?.body ?? undefined);
     if (mode !== "new" && !original) return false;
     const accountId =
       mode === "new"

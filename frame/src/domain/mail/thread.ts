@@ -107,6 +107,8 @@ export function buildThreads(rows: readonly MailRow[]): MailThread[] {
       attachments: group.some((row) => row.message.has_attachments),
     });
   }
-  threads.sort((a, b) => date(b.latest) - date(a.latest) || b.latest.message.uid - a.latest.message.uid);
+  threads.sort(
+    (a, b) => date(b.latest) - date(a.latest) || b.latest.message.uid - a.latest.message.uid,
+  );
   return threads;
 }

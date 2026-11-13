@@ -13,7 +13,7 @@ import { callMail, READ_TIMEOUT, SLOW_TIMEOUT, type MailFailure } from "./call";
 /** Where the form is: typing, looking servers up, checking them, or adding. */
 export type SetupPhase = "form" | "detecting" | "testing" | "adding";
 
-export type EndpointForm = { host: string; port: string; security: MailSecurityV1 };
+type EndpointForm = { host: string; port: string; security: MailSecurityV1 };
 
 const DEFAULT_COLOURS = ["#3b6fd4", "#2f9e6e", "#c2573a", "#8a5bd6", "#b8860b", "#c2417b"];
 

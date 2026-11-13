@@ -10,9 +10,9 @@
  */
 
 /** Input beyond this is cut; a larger message is shown as truncated text. */
-export const MAX_HTML_CHARS = 2_000_000;
+const MAX_HTML_CHARS = 2_000_000;
 /** One inline `cid:` or `data:` image may be at most this many decoded bytes. */
-export const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_DEPTH = 64;
 const MAX_LINKS = 500;
 
@@ -102,9 +102,6 @@ const NAMED_ENTITIES: Record<string, string> = {
   rpar: ")",
 };
 
-/** What a rewritten `<img>` may load. */
-export type MailImageSource = "inline" | "remote" | "blocked";
-
 export type SanitizeOptions = {
   /** Inline images by Content-ID (without angle brackets), as `data:` URLs. */
   inline?: ReadonlyMap<string, string>;
@@ -112,7 +109,7 @@ export type SanitizeOptions = {
   allowRemoteImages?: boolean;
 };
 
-export type SanitizedMail = {
+type SanitizedMail = {
   /** Safe markup for a `<body>`; links carry no `href`. */
   html: string;
   /** Link targets in order of appearance; `data-zephium-link` indexes this list. */
@@ -124,11 +121,13 @@ export type SanitizedMail = {
 };
 
 /** Decodes the entities a browser would decode inside an attribute value. */
-export function decodeEntities(value: string): string {
+function decodeEntities(value: string): string {
   return value.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z][a-z0-9]*);?/giu, (whole, body: string) => {
     if (body.startsWith("#")) {
       const code =
-        body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+        body[1] === "x" || body[1] === "X"
+          ? parseInt(body.slice(2), 16)
+          : parseInt(body.slice(1), 10);
       if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return "\ufffd";
       return String.fromCodePoint(code);
     }
@@ -137,7 +136,10 @@ export function decodeEntities(value: string): string {
 }
 
 const escapeText = (value: string) =>
-  value.replace(/&(?!(?:#x?[0-9a-f]+|[a-z][a-z0-9]*);)/giu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
+  value
+    .replace(/&(?!(?:#x?[0-9a-f]+|[a-z][a-z0-9]*);)/giu, "&amp;")
+    .replace(/</gu, "&lt;")
+    .replace(/>/gu, "&gt;");
 
 const escapeAttribute = (value: string) =>
   value
@@ -146,11 +148,31 @@ const escapeAttribute = (value: string) =>
     .replace(/</gu, "&lt;")
     .replace(/>/gu, "&gt;");
 
+/** C0 and C1 controls, space, and the invisible characters browsers skip in a scheme. */
+const invisible = (code: number) =>
+  code <= 0x20 ||
+  (code >= 0x7f && code <= 0x9f) ||
+  (code >= 0x200b && code <= 0x200f) ||
+  code === 0x2028 ||
+  code === 0x2029 ||
+  code === 0xfeff;
+
+const hasControl = (value: string) => {
+  for (let at = 0; at < value.length; at += 1) {
+    const code = value.charCodeAt(at);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+};
+
 /** The scheme of a URL the way a browser would read it, or `null` when relative. */
 function schemeOf(raw: string): string | null {
   // Browsers drop tabs, newlines and leading C0 controls or spaces before parsing.
-  // eslint-disable-next-line no-control-regex
-  const cleaned = decodeEntities(raw).replace(/[\u0000-\u0020\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/gu, "");
+  const decoded = decodeEntities(raw);
+  let cleaned = "";
+  for (let at = 0; at < decoded.length; at += 1) {
+    if (!invisible(decoded.charCodeAt(at))) cleaned += decoded[at];
+  }
   const match = /^([a-z][a-z0-9+.-]*):/iu.exec(cleaned);
   return match ? match[1]!.toLowerCase() : null;
 }
@@ -160,8 +182,7 @@ export function safeLinkTarget(raw: string): string | null {
   const decoded = decodeEntities(raw).trim();
   const scheme = schemeOf(decoded);
   if (scheme !== "http" && scheme !== "https" && scheme !== "mailto") return null;
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f]/u.test(decoded)) return null;
+  if (hasControl(decoded)) return null;
   if (scheme !== "mailto" && /\s/u.test(decoded)) return null;
   return decoded.length > 2048 ? null : decoded;
 }
@@ -176,7 +197,7 @@ function base64Bytes(payload: string): number {
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 /** A `data:` URL for a raster image within the size cap, or `null`. SVG is refused. */
-export function safeImageDataUrl(raw: string): string | null {
+function safeImageDataUrl(raw: string): string | null {
   const value = decodeEntities(raw).trim();
   const match = /^data:([a-z]+\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]*)$/iu.exec(value);
   if (!match) return null;
@@ -206,8 +227,12 @@ export function sanitizeStyle(raw: string): string {
     const value = declaration.slice(at + 1).trim();
     if (!STYLE_PROPERTIES.has(property) || !value || value.length > 200) continue;
     // Anything that can fetch, script or escape the declaration is refused whole.
-    // eslint-disable-next-line no-control-regex
-    if (/[\\@<>{}\u0000-\u001f]|url\s*\(|image|expression|javascript|behavior|binding|attr\s*\(|var\s*\(|\/\*/iu.test(value)) {
+    if (
+      hasControl(value) ||
+      /[\\@<>{}]|url\s*\(|image|expression|javascript|behavior|binding|attr\s*\(|var\s*\(|\/\*/iu.test(
+        value,
+      )
+    ) {
       continue;
     }
     if (property === "display" && !SAFE_DISPLAY.has(value.toLowerCase())) continue;
@@ -309,7 +334,8 @@ export function sanitizeMailHtml(input: string, options: SanitizeOptions = {}): 
     const src = get("src");
     const parts: string[] = [];
     for (const attribute of attributes) {
-      if (!TAG_ATTRIBUTES.img!.has(attribute.name) && !GLOBAL_ATTRIBUTES.has(attribute.name)) continue;
+      if (!TAG_ATTRIBUTES.img!.has(attribute.name) && !GLOBAL_ATTRIBUTES.has(attribute.name))
+        continue;
       parts.push(`${attribute.name}="${escapeAttribute(decodeEntities(attribute.value))}"`);
     }
     const style = get("style");
@@ -317,7 +343,7 @@ export function sanitizeMailHtml(input: string, options: SanitizeOptions = {}): 
     if (safeStyle) parts.push(`style="${escapeAttribute(safeStyle)}"`);
     const scheme = src === undefined ? null : schemeOf(src);
     let shown: string | null = null;
-    let kind: MailImageSource = "blocked";
+    let kind: "inline" | "remote" | "blocked" = "blocked";
     if (src !== undefined && scheme === "cid") {
       const id = decodeEntities(src).trim().slice(4).replace(/^<|>$/gu, "");
       shown = inline.get(id) ?? null;
@@ -460,7 +486,7 @@ export function mailFrameDocument(sanitizedBody: string, allowRemoteImages: bool
 
 const URL_PATTERN = /\b(?:https?:\/\/|mailto:)[^\s<>"')\]]+/giu;
 
-export type TextSegment = { text: string; url?: undefined } | { text: string; url: string };
+type TextSegment = { text: string; url?: undefined } | { text: string; url: string };
 
 /** Splits plain text into text and link segments; the text is never markup. */
 export function linkify(text: string): TextSegment[] {

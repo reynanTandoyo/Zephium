@@ -20,9 +20,10 @@ export async function callMail<T>(
   signal?: AbortSignal,
 ): Promise<MailOutcome<T> | { ok: "aborted" }> {
   const response = await observe(Promise.resolve().then(request), milliseconds, signal);
-  if (response.state === "aborted") return { ok: "aborted" };
-  if (response.state === "timeout") return { ok: false, error: "timeout" };
-  if (response.state === "failed") return { ok: false, error: "unavailable" };
+  if (response.state !== "received") {
+    if (response.state === "aborted") return { ok: "aborted" };
+    return { ok: false, error: response.state === "timeout" ? "timeout" : "unavailable" };
+  }
   const reply = response.value;
   if (reply.status === "ok") return { ok: true, value: reply.data };
   return { ok: false, error: reply.error };

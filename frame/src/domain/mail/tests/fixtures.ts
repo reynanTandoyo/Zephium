@@ -19,7 +19,6 @@ export function message(uid: number, over: Partial<MailMessageV1> = {}): MailMes
   };
 }
 
-
 export const account = (id = "a1", over: Partial<MailAccountV1> = {}): MailAccountV1 => ({
   id,
   display_name: `Account ${id}`,

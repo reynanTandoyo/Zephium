@@ -12,7 +12,7 @@ import {
 const clean = (html: string, options = {}) => sanitizeMailHtml(html, options);
 
 test("scripts are removed with their content, in any case or spacing", () => {
-  const out = clean('a<script>alert(1)</script>b<SCRIPT src=x></SCRIPT >c<script>never closed');
+  const out = clean("a<script>alert(1)</script>b<SCRIPT src=x></SCRIPT >c<script>never closed");
   expect(out.html).toBe("abc");
   expect(out.html).not.toMatch(/script|alert/iu);
 });
@@ -59,7 +59,9 @@ test("remote images are removed and counted until allowed", () => {
   expect(blocked.html).toContain("data-zephium-blocked");
   const allowed = clean(html, { allowRemoteImages: true });
   expect(allowed.html).toContain('src="https://tracker.example/p.gif"');
-  expect(clean('<img src="http://x.example/a.png">', { allowRemoteImages: true }).remoteImages).toBe(1);
+  expect(
+    clean('<img src="http://x.example/a.png">', { allowRemoteImages: true }).remoteImages,
+  ).toBe(1);
 });
 
 test("other image sources never load: srcset, background, file, ftp, protocol-relative", () => {
@@ -75,7 +77,9 @@ test("cid images resolve from attachments; unknown ones are dropped", () => {
   const url = inlineImageUrl("image/png", "iVBORw0KGgo=");
   expect(url).toBe("data:image/png;base64,iVBORw0KGgo=");
   const inline = new Map([["logo@x", url!]]);
-  const out = clean('<img src="cid:logo@x"><img src="cid:<logo@x>"><img src="cid:other">', { inline });
+  const out = clean('<img src="cid:logo@x"><img src="cid:<logo@x>"><img src="cid:other">', {
+    inline,
+  });
   expect(out.html.match(/src="data:image\/png/gu)).toHaveLength(2);
   expect(out.droppedImages).toBe(1);
 });
@@ -96,7 +100,7 @@ test("inline images respect type and size caps; svg is refused", () => {
 test("forms and their controls are removed, their text stays", () => {
   const out = clean(
     '<form action="https://evil.example" method=post>Name <input name=a value=b><button>Go</button>' +
-      '<select><option>1</option></select><textarea>t</textarea> done</form>',
+      "<select><option>1</option></select><textarea>t</textarea> done</form>",
   );
   expect(out.html).toBe("Name  done");
   expect(out.html).not.toMatch(/form|input|action|evil/iu);
@@ -121,7 +125,7 @@ test("svg, math, iframe, object, embed and media are removed with content", () =
 
 test("style elements are dropped; inline css loses url(), @import and escapes", () => {
   const out = clean(
-    '<style>@import url(https://evil.example/a.css); p{background:url(https://evil.example/b.png)}</style>' +
+    "<style>@import url(https://evil.example/a.css); p{background:url(https://evil.example/b.png)}</style>" +
       '<p style="color: blue; background: url(https://evil.example/x.png); width:expression(alert(1)); ' +
       'background-image:url(&quot;x&quot;); font-family: \\75rl(x); position:fixed; margin: 4px">t</p>',
   );
@@ -133,7 +137,7 @@ test("style elements are dropped; inline css loses url(), @import and escapes", 
 
 test("comments, conditional comments, doctype and CDATA are removed", () => {
   const out = clean(
-    '<!DOCTYPE html><!-- <script>x</script> --><!--[if mso]><script>1</script><![endif]--><![CDATA[x]]><?xml y?>text',
+    "<!DOCTYPE html><!-- <script>x</script> --><!--[if mso]><script>1</script><![endif]--><![CDATA[x]]><?xml y?>text",
   );
   expect(out.html).toBe("text");
 });

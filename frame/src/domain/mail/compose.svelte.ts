@@ -18,9 +18,9 @@ import {
  */
 export type ComposeState = "editing" | "saving" | "sending" | "sent" | "failed";
 
-export type ComposeAttachment = MailOutgoingAttachmentV1 & { size: number };
+type ComposeAttachment = MailOutgoingAttachmentV1 & { size: number };
 
-export type ComposeProblem = Extract<DraftCheck, { ok: false }>["problem"] | "attachment_too_large";
+type ComposeProblem = Extract<DraftCheck, { ok: false }>["problem"] | "attachment_too_large";
 
 /** One message being written. Rust stores drafts; this holds the text meanwhile. */
 export class ComposeSession {
@@ -66,7 +66,9 @@ export class ComposeSession {
     return this.state === "saving" || this.state === "sending";
   }
   get dirty() {
-    return !this.saved && this.state !== "sent" && Boolean(this.to || this.subject || this.text.trim());
+    return (
+      !this.saved && this.state !== "sent" && Boolean(this.to || this.subject || this.text.trim())
+    );
   }
 
   /** Any edit means the stored draft is out of date. */

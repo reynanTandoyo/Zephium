@@ -70,7 +70,11 @@ function twoAccounts() {
     ]),
   );
   host.messages.mockImplementation((id: string) =>
-    page(id === "a1" ? [message(2, { date: 50 }), message(1, { date: 10 })] : [message(7, { date: 30 })]),
+    page(
+      id === "a1"
+        ? [message(2, { date: 50 }), message(1, { date: 10 })]
+        : [message(7, { date: 30 })],
+    ),
   );
 }
 
@@ -126,7 +130,9 @@ test("paging asks for the page before the cursor and merges without duplicates",
   const store = new MailStore();
   await store.start();
   expect(store.hasMore).toBe(true);
-  host.messages.mockReturnValueOnce(page([message(8, { date: 80 }), message(7, { date: 70 })], null));
+  host.messages.mockReturnValueOnce(
+    page([message(8, { date: 80 }), message(7, { date: 70 })], null),
+  );
   await store.loadMore();
   expect(host.messages).toHaveBeenLastCalledWith("a1", "INBOX", { before_uid: 8, limit: 50 });
   expect(store.rows.map((r) => r.message.uid)).toEqual([9, 8, 7]);
@@ -142,11 +148,11 @@ test("flags change only after the server accepted, and a refusal leaves the row 
   let release!: (value: unknown) => void;
   host.setFlags.mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
   const done = store.setFlagged([row], true);
-  expect(store.pending.has(row.key)).toBe(true);
+  expect(store.isPending(row.key)).toBe(true);
   expect(store.rows.find((r) => r.key === row.key)!.message.flags.flagged).toBe(false);
   release({ status: "ok", data: null });
   await done;
-  expect(store.pending.size).toBe(0);
+  expect(store.pending).toEqual([]);
   expect(store.rows.find((r) => r.key === row.key)!.message.flags.flagged).toBe(true);
 
   host.setFlags.mockReturnValueOnce(err("server_rejected"));

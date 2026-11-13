@@ -13,7 +13,7 @@ export type ComposeMode = "new" | "reply" | "reply_all" | "forward";
 /** One attachment is at most this large, and a message at most the total. */
 export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-export const MAX_RECIPIENTS = 100;
+const MAX_RECIPIENTS = 100;
 
 export type ComposeFields = {
   account: string;
@@ -26,7 +26,7 @@ export type ComposeFields = {
   references: string[];
 };
 
-export const SIGNATURE_MARK = "\n-- \n";
+const SIGNATURE_MARK = "\n-- \n";
 
 /** Appends the account's signature, once, below the body (above quoted text). */
 export function withSignature(text: string, signature: string, quoteAt?: number): string {
@@ -34,7 +34,8 @@ export function withSignature(text: string, signature: string, quoteAt?: number)
   if (!sig) return text;
   const block = `${SIGNATURE_MARK}${sig}\n`;
   if (text.includes(block)) return text;
-  if (quoteAt !== undefined && quoteAt >= 0) return text.slice(0, quoteAt) + block + text.slice(quoteAt);
+  if (quoteAt !== undefined && quoteAt >= 0)
+    return text.slice(0, quoteAt) + block + text.slice(quoteAt);
   return text + block;
 }
 
@@ -50,7 +51,7 @@ const dateLine = (seconds: number | null) =>
   seconds === null ? "" : new Date(seconds * 1000).toLocaleString();
 
 /** Quotes the original with `> ` and an attribution line, as a reply does. */
-export function quoteText(body: MailBodyV1): string {
+function quoteText(body: MailBodyV1): string {
   const header = body.header;
   const who = header.from[0] ? formatAddress(header.from[0]) : "";
   const when = dateLine(header.date);
@@ -140,7 +141,11 @@ export function composeFor(
 
 export type DraftCheck =
   | { ok: true; draft: MailDraftV1 }
-  | { ok: false; problem: "no_recipient" | "invalid_address" | "too_many" | "too_large"; invalid: string[] };
+  | {
+      ok: false;
+      problem: "no_recipient" | "invalid_address" | "too_many" | "too_large";
+      invalid: string[];
+    };
 
 /** Builds the wire draft, or says why it cannot be sent. */
 export function buildDraft(

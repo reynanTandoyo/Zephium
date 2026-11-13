@@ -40,7 +40,11 @@ const original = {
 };
 
 test("reply addresses the sender, quotes the text and threads the headers", () => {
-  const f = composeFor("reply", account("a1", { email: "me@example.com", signature: "Me" }), original);
+  const f = composeFor(
+    "reply",
+    account("a1", { email: "me@example.com", signature: "Me" }),
+    original,
+  );
   expect(f.to).toBe("Ann <ann@x.org>");
   expect(f.cc).toBe("");
   expect(f.subject).toBe("Re: Plan");
@@ -118,7 +122,12 @@ test("a draft needs a recipient to send, valid addresses and attachments within 
 
 const session = () =>
   new ComposeSession(
-    { ...composeFor("new", account("a1", { signature: "A1" })), to: "x@y.org", subject: "S", text: "body" },
+    {
+      ...composeFor("new", account("a1", { signature: "A1" })),
+      to: "x@y.org",
+      subject: "S",
+      text: "body",
+    },
     () => [account("a1", { signature: "A1" }), account("a2", { signature: "A2" })],
   );
 

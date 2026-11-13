@@ -3,7 +3,12 @@ import type { MailMessageV1 } from "$shared/ipc/bindings";
 import { message } from "./fixtures";
 import { baseSubject, buildThreads, rowKey, type MailRow } from "../thread";
 
-const row = (uid: number, over: Partial<MailMessageV1> = {}, account = "a1", folder = "INBOX"): MailRow => ({
+const row = (
+  uid: number,
+  over: Partial<MailMessageV1> = {},
+  account = "a1",
+  folder = "INBOX",
+): MailRow => ({
   key: rowKey(account, folder, uid),
   account,
   folder,
@@ -14,7 +19,11 @@ test("replies join their parent through In-Reply-To and References", () => {
   const rows = [
     row(1),
     row(2, { in_reply_to: "<m1@x>", references: ["<m1@x>"], subject: "Re: Subject 1" }),
-    row(3, { references: ["<m1@x>", "<m2@x>"], in_reply_to: "<m2@x>", subject: "RE: Re: Subject 1" }),
+    row(3, {
+      references: ["<m1@x>", "<m2@x>"],
+      in_reply_to: "<m2@x>",
+      subject: "RE: Re: Subject 1",
+    }),
     row(4),
   ];
   const threads = buildThreads(rows);
@@ -53,7 +62,9 @@ test("a copy of one message in two folders is one entry, and cycles terminate", 
 
 test("a thread counts unread, flags and attachments across its messages", () => {
   const [thread] = buildThreads([
-    row(1, { flags: { seen: false, flagged: false, answered: false, draft: false, deleted: false } }),
+    row(1, {
+      flags: { seen: false, flagged: false, answered: false, draft: false, deleted: false },
+    }),
     row(2, {
       in_reply_to: "<m1@x>",
       has_attachments: true,
