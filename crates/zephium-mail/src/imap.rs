@@ -12,6 +12,7 @@ use futures::TryStreamExt;
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
+use crate::auth::{Credential, XOauth2};
 use crate::error::{MailError, Result};
 use crate::limits::{
     COMMAND_TIMEOUT, CONNECT_TIMEOUT, IDLE_RENEW, MAX_FOLDERS, MAX_FOLDER_NAME_BYTES,
@@ -172,12 +173,13 @@ fn flags_of<'a>(flags: impl Iterator<Item = Flag<'a>>) -> Flags {
 }
 
 impl ImapSession {
-    /// Connects, reads the greeting and logs in.
+    /// Connects, reads the greeting and authenticates: `LOGIN` for a
+    /// password, `AUTHENTICATE XOAUTH2` for a bearer token.
     pub async fn connect(
         connector: &dyn Connector,
         endpoint: &Endpoint,
         username: &str,
-        password: &str,
+        credential: &Credential,
     ) -> Result<Self> {
         let stream = timeout(CONNECT_TIMEOUT * 2, connector.connect(endpoint)).await??;
         let mut client = Client::new(stream);
@@ -188,7 +190,16 @@ impl ImapSession {
                 .map_err(|_| MailError::Offline)?
                 .ok_or(MailError::Offline)?;
         }
-        let session = match timeout(COMMAND_TIMEOUT, client.login(username, password)).await? {
+        let attempt = match credential {
+            Credential::Password(password) => {
+                timeout(COMMAND_TIMEOUT, client.login(username, password.as_str())).await?
+            }
+            Credential::Bearer(token) => {
+                let responder = XOauth2::new(username, token)?;
+                timeout(COMMAND_TIMEOUT, client.authenticate("XOAUTH2", responder)).await?
+            }
+        };
+        let session = match attempt {
             Ok(session) => session,
             Err((async_imap::error::Error::No(_) | async_imap::error::Error::Bad(_), _)) => {
                 return Err(MailError::AuthFailed)

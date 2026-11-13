@@ -8,6 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 
+use zephium_oauth::manager::AccessTokenSource;
+use zephium_oauth::provider::Purpose;
+
+use crate::auth::{AuthKind, Credential};
 use crate::error::{MailError, Result};
 use crate::imap::ImapSession;
 use crate::limits::MAX_ACCOUNTS;
@@ -52,6 +56,7 @@ pub struct MailEngine {
     connector: Arc<dyn Connector>,
     vault: Arc<dyn PasswordVault>,
     smtp: Arc<dyn SmtpSender>,
+    tokens: Option<Arc<dyn AccessTokenSource>>,
     slots: Mutex<HashMap<String, Slot>>,
 }
 
@@ -106,7 +111,32 @@ impl MailEngine {
             connector,
             vault,
             smtp,
+            tokens: None,
             slots: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Adds the source of OAuth access tokens. Without one, OAuth accounts
+    /// fail with [`MailError::Credentials`] and password accounts work as before.
+    #[must_use]
+    pub fn with_tokens(mut self, tokens: Arc<dyn AccessTokenSource>) -> Self {
+        self.tokens = Some(tokens);
+        self
+    }
+
+    /// What to present to the account's servers right now: its password, or
+    /// a bearer token that is refreshed first when it is about to expire.
+    async fn credential(&self, account: &Account) -> Result<Credential> {
+        match &account.auth {
+            AuthKind::Password => Ok(Credential::Password(self.vault.get(&account.id)?)),
+            kind @ AuthKind::Oauth { .. } => {
+                let config = kind.oauth_config().ok_or(MailError::Internal)?;
+                let tokens = self.tokens.as_ref().ok_or(MailError::Credentials)?;
+                let token = tokens
+                    .access_token(&account.id, &config, Purpose::Mail)
+                    .await?;
+                Ok(Credential::Bearer(token))
+            }
         }
     }
 
@@ -120,12 +150,12 @@ impl MailEngine {
 
     async fn connect(&self, account: &Account) -> Result<ImapSession> {
         account.validate()?;
-        let password = self.vault.get(&account.id)?;
+        let credential = self.credential(account).await?;
         ImapSession::connect(
             &*self.connector,
             &account.imap,
             &account.username,
-            &password,
+            &credential,
         )
         .await
     }
@@ -146,12 +176,24 @@ impl MailEngine {
 
     /// Tests both servers with a password that is not stored yet.
     pub async fn test_account(&self, account: &Account, password: &str) -> Result<AccountTest> {
+        self.test_credential(account, &Credential::password(password))
+            .await
+    }
+
+    /// Tests both servers with a credential that is not stored yet (a
+    /// password, or the access token of a sign-in not yet attached to an
+    /// account).
+    pub async fn test_credential(
+        &self,
+        account: &Account,
+        credential: &Credential,
+    ) -> Result<AccountTest> {
         account.validate()?;
         let imap = match ImapSession::connect(
             &*self.connector,
             &account.imap,
             &account.username,
-            password,
+            credential,
         )
         .await
         {
@@ -163,7 +205,7 @@ impl MailEngine {
         };
         let smtp = self
             .smtp
-            .check(&account.smtp, &account.username, password)
+            .check(&account.smtp, &account.username, credential)
             .await
             .err();
         Ok(AccountTest { imap, smtp })
@@ -266,9 +308,9 @@ impl MailEngine {
         if composed.recipients.is_empty() {
             return Err(MailError::InvalidInput);
         }
-        let password = self.vault.get(&account.id)?;
+        let credential = self.credential(account).await?;
         self.smtp
-            .send(&account.smtp, &account.username, &password, &composed)
+            .send(&account.smtp, &account.username, &credential, &composed)
             .await?;
         let mut saved_copy = false;
         if account.save_sent_copy {

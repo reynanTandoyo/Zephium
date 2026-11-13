@@ -6,6 +6,7 @@
 //! and every failure maps to the closed [`MailError`] without server text.
 #![deny(missing_docs)]
 
+pub mod auth;
 pub mod autoconfig;
 pub mod engine;
 pub mod error;

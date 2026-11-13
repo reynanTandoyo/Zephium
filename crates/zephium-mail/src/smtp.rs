@@ -4,11 +4,12 @@
 
 use futures::future::BoxFuture;
 use lettre::address::Envelope;
-use lettre::transport::smtp::authentication::Credentials;
+use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use mail_builder::MessageBuilder;
 
+use crate::auth::Credential;
 use crate::error::{MailError, Result};
 use crate::limits::{
     MAX_OUTGOING_BYTES, MAX_RECIPIENTS, MAX_REFERENCES, MAX_SUBJECT_BYTES, SEND_TIMEOUT,
@@ -151,7 +152,7 @@ pub trait SmtpSender: Send + Sync {
         &'a self,
         endpoint: &'a Endpoint,
         username: &'a str,
-        password: &'a str,
+        credential: &'a Credential,
         composed: &'a Composed,
     ) -> BoxFuture<'a, Result<()>>;
 
@@ -160,7 +161,7 @@ pub trait SmtpSender: Send + Sync {
         &'a self,
         endpoint: &'a Endpoint,
         username: &'a str,
-        password: &'a str,
+        credential: &'a Credential,
     ) -> BoxFuture<'a, Result<()>>;
 }
 
@@ -171,7 +172,7 @@ pub struct LettreSender;
 fn transport(
     endpoint: &Endpoint,
     username: &str,
-    password: &str,
+    credential: &Credential,
 ) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
     endpoint.validate()?;
     let tls = TlsParameters::builder(endpoint.host.clone())
@@ -183,9 +184,17 @@ fn transport(
             Security::Tls => Tls::Wrapper(tls),
             Security::StartTls => Tls::Required(tls),
         })
-        .credentials(Credentials::new(username.to_owned(), password.to_owned()))
+        .credentials(Credentials::new(
+            username.to_owned(),
+            credential.secret().to_owned(),
+        ))
         .timeout(Some(SEND_TIMEOUT));
-    Ok(builder.build())
+    Ok(match credential {
+        // lettre builds the XOAUTH2 initial response from user and token.
+        Credential::Bearer(_) => builder.authentication(vec![Mechanism::Xoauth2]),
+        Credential::Password(_) => builder,
+    }
+    .build())
 }
 
 fn map_smtp(error: &lettre::transport::smtp::Error) -> MailError {
@@ -212,11 +221,11 @@ impl SmtpSender for LettreSender {
         &'a self,
         endpoint: &'a Endpoint,
         username: &'a str,
-        password: &'a str,
+        credential: &'a Credential,
         composed: &'a Composed,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let transport = transport(endpoint, username, password)?;
+            let transport = transport(endpoint, username, credential)?;
             let sender = composed
                 .sender
                 .parse()
@@ -239,10 +248,10 @@ impl SmtpSender for LettreSender {
         &'a self,
         endpoint: &'a Endpoint,
         username: &'a str,
-        password: &'a str,
+        credential: &'a Credential,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let transport = transport(endpoint, username, password)?;
+            let transport = transport(endpoint, username, credential)?;
             match tokio::time::timeout(SEND_TIMEOUT, transport.test_connection()).await? {
                 Ok(true) => Ok(()),
                 Ok(false) => Err(MailError::Offline),
@@ -273,6 +282,7 @@ mod tests {
             colour: "#336699".into(),
             signature: String::new(),
             save_sent_copy: true,
+            auth: crate::auth::AuthKind::Password,
         }
     }
 

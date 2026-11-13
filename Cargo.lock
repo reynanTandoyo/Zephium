@@ -7971,12 +7971,14 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "ulid",
  "url",
  "zephium-credentials",
+ "zephium-oauth",
  "zeroize",
 ]
 
