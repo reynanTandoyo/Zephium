@@ -13,7 +13,7 @@
   import { reducedMotion } from "$shared/lib/motion";
   import { WORDMARK } from "$shared/lib/wordmark";
   import * as motion from "$session/motion.svelte";
-  import { SITES, SITE_URLS } from "../lib/catalog";
+  import { DEFAULT_ESSENTIALS, SITES, SITE_URLS } from "../lib/catalog";
   import { scene } from "$shared/sky";
   import { cover, frame, land, NEWTAB, PAGE, SHOTS, STAGE, type Shot } from "../lib/camera";
   import { neighbour, position, stepsFor, type Step } from "../lib/flow";
@@ -133,9 +133,26 @@
     step = "import";
   }
 
+  /** Fork: whether this run already offered the default Essentials. */
+  let defaultsOffered = false;
+
+  /** Keeps the default sites the first time the Essentials step opens, unless
+   *  something is already kept (an import, or an earlier run). One at a time,
+   *  in order, so the dock fills in the catalog's order; a refusal is skipped. */
+  async function keepDefaults() {
+    if (defaultsOffered) return;
+    defaultsOffered = true;
+    if (kept.size > 0) return;
+    for (const site of DEFAULT_ESSENTIALS) {
+      if (leaving) return;
+      await tabs.keepSite(site).catch(() => undefined);
+    }
+  }
+
   function go(next: Step | undefined) {
     if (!next || leaving) return;
     step = next;
+    if (next === "essentials") void keepDefaults();
   }
 
   async function finish() {

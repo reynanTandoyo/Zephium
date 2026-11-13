@@ -81,6 +81,7 @@ Rule precedence, highest first:
 | `desktop/src/legacy_vault.rs` | one-time removal of the old account token from the OS vault |
 | Deprecated serde variants (`WorkModelProvider::Cloud`, hosted `WorkModelFaultV1`, `PageAssistCostV1::Hosted`, `HostedRefusal`) | kept only so saved runs and conversations still load; never produced |
 | AI apps as model backends (T-0008, design `docs/fork-cli-models.md`) | new `crates/zephium-cli-models`, `crates/zephium-app/src/work_models_cli.rs`, `desktop/src/ai_apps.rs`, `frame/src/domain/ai/apps.svelte.ts`, `frame/src/shared/ui/AiAppRow/`; small edits in core `work/model.rs` (providers `claude_code`/`antigravity`/`open_code`, wire `cli`), agentic `lead/*`, app `work_models.rs`, desktop `work_models.rs`/`lib.rs`, frame AI settings/picker/onboarding; onboarding JS budget raised for the new option |
+| Gemini in the Essentials catalog and `DEFAULT_ESSENTIALS` (whatsapp, github, youtube, claude, gemini, spotify) | `crates/zephium-app/src/shell/kept_sites.rs`, `assets/kept-sites/gemini.rgba`, `frame/src/features/onboarding/{lib/catalog.ts,marks/gemini.svg,components/Onboarding.svelte}`; onboarding keeps the defaults when its Essentials step first opens with nothing kept |
 | `frame/vite.frame.ts` groups `browser-controls`, `browser-downloads` | keep the browser startup within the 24-request budget after the account chunks were removed |
 
 Update this table whenever you add a fork-only file or an edit to an
