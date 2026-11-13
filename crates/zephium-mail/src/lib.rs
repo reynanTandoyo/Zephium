@@ -14,6 +14,7 @@ pub mod imap;
 pub mod limits;
 pub mod mime;
 pub mod model;
+pub mod remote_images;
 pub mod smtp;
 pub mod transport;
 pub mod utf7;
