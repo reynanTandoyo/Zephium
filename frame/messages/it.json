@@ -3861,5 +3861,13 @@
   "calendar_repeat_on": "Ripeti il",
   "calendar_field_ends": "Termina",
   "calendar_field_count": "Numero di eventi",
-  "calendar_field_until": "Ultimo giorno"
+  "calendar_field_until": "Ultimo giorno",
+  "calendar_today_events": "Eventi di oggi",
+  "calendar_nothing_more": "Nient’altro oggi",
+  "calendar_next_event": "Prossimo evento",
+  "calendar_now": "Ora",
+  "calendar_open_event": "Apri {title} in Calendario",
+  "calendar_create_task": "Crea attività",
+  "calendar_task_created": "Attività creata",
+  "calendar_task_failed": "Impossibile creare l’attività."
 }

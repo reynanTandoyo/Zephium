@@ -3861,5 +3861,13 @@
   "calendar_repeat_on": "Повторювати в",
   "calendar_field_ends": "Завершення",
   "calendar_field_count": "Кількість подій",
-  "calendar_field_until": "Останній день"
+  "calendar_field_until": "Останній день",
+  "calendar_today_events": "Події на сьогодні",
+  "calendar_nothing_more": "Більше нічого на сьогодні",
+  "calendar_next_event": "Наступна подія",
+  "calendar_now": "Зараз",
+  "calendar_open_event": "Відкрити «{title}» у Календарі",
+  "calendar_create_task": "Створити завдання",
+  "calendar_task_created": "Завдання створено",
+  "calendar_task_failed": "Не вдалося створити завдання."
 }

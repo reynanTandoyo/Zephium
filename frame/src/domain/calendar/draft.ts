@@ -11,8 +11,8 @@ import {
   parseDayKey,
   startOfDay,
   timeKey,
-} from "./dates";
-import type { PlacedEvent } from "./dates";
+} from "$domain/calendar-agenda";
+import type { PlacedEvent } from "$domain/calendar-agenda";
 
 const FREQUENCIES = ["none", "daily", "weekly", "monthly", "yearly"] as const;
 type Frequency = (typeof FREQUENCIES)[number];

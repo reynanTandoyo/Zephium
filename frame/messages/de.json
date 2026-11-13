@@ -3861,5 +3861,13 @@
   "calendar_repeat_on": "Wiederholen am",
   "calendar_field_ends": "Endet",
   "calendar_field_count": "Anzahl der Termine",
-  "calendar_field_until": "Letzter Tag"
+  "calendar_field_until": "Letzter Tag",
+  "calendar_today_events": "Heutige Termine",
+  "calendar_nothing_more": "Heute nichts mehr",
+  "calendar_next_event": "Nächster Termin",
+  "calendar_now": "Jetzt",
+  "calendar_open_event": "{title} im Kalender öffnen",
+  "calendar_create_task": "Aufgabe erstellen",
+  "calendar_task_created": "Aufgabe erstellt",
+  "calendar_task_failed": "Die Aufgabe konnte nicht erstellt werden."
 }

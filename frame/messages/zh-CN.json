@@ -3861,5 +3861,13 @@
   "calendar_repeat_on": "重复日",
   "calendar_field_ends": "结束",
   "calendar_field_count": "次数",
-  "calendar_field_until": "最后一天"
+  "calendar_field_until": "最后一天",
+  "calendar_today_events": "今天的日程",
+  "calendar_nothing_more": "今天没有更多日程",
+  "calendar_next_event": "下一个日程",
+  "calendar_now": "现在",
+  "calendar_open_event": "在日历中打开 {title}",
+  "calendar_create_task": "创建任务",
+  "calendar_task_created": "任务已创建",
+  "calendar_task_failed": "无法创建任务。"
 }

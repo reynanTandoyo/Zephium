@@ -3861,5 +3861,13 @@
   "calendar_repeat_on": "Şu günlerde tekrarla",
   "calendar_field_ends": "Bitiş",
   "calendar_field_count": "Etkinlik sayısı",
-  "calendar_field_until": "Son gün"
+  "calendar_field_until": "Son gün",
+  "calendar_today_events": "Bugünün etkinlikleri",
+  "calendar_nothing_more": "Bugün başka bir şey yok",
+  "calendar_next_event": "Sonraki etkinlik",
+  "calendar_now": "Şimdi",
+  "calendar_open_event": "{title} etkinliğini Takvim’de aç",
+  "calendar_create_task": "Görev oluştur",
+  "calendar_task_created": "Görev oluşturuldu",
+  "calendar_task_failed": "Görev oluşturulamadı."
 }

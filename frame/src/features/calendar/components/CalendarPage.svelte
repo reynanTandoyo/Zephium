@@ -24,6 +24,10 @@
   import {
     calendar,
     editPolicy,
+    eventOpen,
+    linkId,
+    parseCalendarTime,
+    taskInputOf,
     formForSlot,
     formFromEvent,
     formToDraft,
@@ -40,6 +44,7 @@
     type Scope,
   } from "$domain/calendar";
   import type { CalendarEventDraftV1 } from "$shared/ipc/bindings";
+  import { tabs } from "$domain/tabs";
   import { firstDayOfWeek } from "$domain/time";
   import AccountsPanel from "./AccountsPanel.svelte";
   import AgendaList from "./AgendaList.svelte";
@@ -70,7 +75,10 @@
 
   onMount(() => {
     void calendar.init();
-    return () => calendar.dispose();
+    return () => {
+      eventOpen.clear();
+      calendar.dispose();
+    };
   });
 
   const days = $derived(visibleDays(view, anchor, firstDay));
@@ -226,6 +234,38 @@
       void performMove(current.event, current.start, scope);
     }
   }
+
+  // A task made from an event, kept by event for as long as the page shows.
+  let taskStates = $state<Record<string, "pending" | "done" | "failed">>({});
+
+  async function makeTask(event: PlacedEvent) {
+    const profile = tabs.profile();
+    if (!profile || taskStates[event.id] === "pending" || taskStates[event.id] === "done") return;
+    taskStates[event.id] = "pending";
+    // Tasks are only loaded when one is made.
+    const id = await import("$domain/resources")
+      .then(({ taskSession }) => taskSession(profile.id, "calendar").create(taskInputOf(event)))
+      .catch(() => null);
+    taskStates[event.id] = id ? "done" : "failed";
+  }
+
+  // Another surface asked for an event: go to its day, then show it once the
+  // day's events are in.
+  $effect(() => {
+    const link = eventOpen.pending();
+    if (!link) return;
+    const at = parseCalendarTime(link.at);
+    if (at) anchor = startOfDay(at);
+  });
+  $effect(() => {
+    const link = eventOpen.pending();
+    if (!link) return;
+    const id = linkId(link);
+    const found = placed.find((event) => event.id === id);
+    if (!found) return;
+    show(found);
+    eventOpen.clear();
+  });
 
   async function join(url: string) {
     panelFault = (await calendar.openLink(url)) ? null : "unavailable";
@@ -387,6 +427,8 @@
           onedit={() => edit(shown)}
           ondelete={() => (repeats(shown) ? ask("delete", shown) : void remove(shown, null))}
           onjoin={(url) => void join(url)}
+          task={taskStates[shown.id] ?? "idle"}
+          ontask={() => void makeTask(shown)}
           onclose={close}
         />
       {:else if panel.kind === "editor"}

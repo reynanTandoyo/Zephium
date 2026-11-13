@@ -3861,5 +3861,13 @@
   "calendar_repeat_on": "반복 요일",
   "calendar_field_ends": "종료",
   "calendar_field_count": "횟수",
-  "calendar_field_until": "마지막 날"
+  "calendar_field_until": "마지막 날",
+  "calendar_today_events": "오늘 일정",
+  "calendar_nothing_more": "오늘 남은 일정 없음",
+  "calendar_next_event": "다음 일정",
+  "calendar_now": "지금",
+  "calendar_open_event": "캘린더에서 {title} 열기",
+  "calendar_create_task": "할 일 만들기",
+  "calendar_task_created": "할 일을 만들었습니다",
+  "calendar_task_failed": "할 일을 만들지 못했습니다."
 }

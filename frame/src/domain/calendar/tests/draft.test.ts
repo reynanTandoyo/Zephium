@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import type { CalendarOccurrenceV1 } from "../../../shared/ipc/bindings";
-import { place } from "../dates";
+import { meetingLink, place } from "$domain/calendar-agenda";
 import {
   editPolicy,
   formForSlot,
@@ -11,7 +11,6 @@ import {
   wallClock,
 } from "../draft";
 import type { EventForm } from "../draft";
-import { meetingLink } from "../meeting";
 
 beforeAll(() => {
   process.env.TZ = "Europe/Berlin";

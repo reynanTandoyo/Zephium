@@ -3940,5 +3940,13 @@
   "calendar_repeat_on": "Repeat on",
   "calendar_field_ends": "Ends",
   "calendar_field_count": "Number of events",
-  "calendar_field_until": "Last day"
+  "calendar_field_until": "Last day",
+  "calendar_today_events": "Today’s events",
+  "calendar_nothing_more": "Nothing more today",
+  "calendar_next_event": "Next event",
+  "calendar_now": "Now",
+  "calendar_open_event": "Open {title} in Calendar",
+  "calendar_create_task": "Create task",
+  "calendar_task_created": "Task created",
+  "calendar_task_failed": "The task could not be created."
 }

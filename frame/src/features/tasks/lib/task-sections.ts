@@ -331,7 +331,8 @@ export function completion(rows: readonly TaskRow[]): {
  *  address, and an address that will not parse is shown as it was stored. */
 export function hostOf(url: string): string {
   try {
-    return new URL(url).host.replace(/^www\./u, "");
+    // A task made from a calendar event leads to `calendar.zephium.invalid`.
+    return new URL(url).host.replace(/^www\./u, "").replace(/\.zephium\.invalid$/u, "");
   } catch {
     return url;
   }

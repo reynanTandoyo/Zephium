@@ -3861,5 +3861,13 @@
   "calendar_repeat_on": "繰り返す曜日",
   "calendar_field_ends": "終了",
   "calendar_field_count": "回数",
-  "calendar_field_until": "最終日"
+  "calendar_field_until": "最終日",
+  "calendar_today_events": "今日の予定",
+  "calendar_nothing_more": "今日はもう予定なし",
+  "calendar_next_event": "次の予定",
+  "calendar_now": "今",
+  "calendar_open_event": "カレンダーで {title} を開く",
+  "calendar_create_task": "タスクを作成",
+  "calendar_task_created": "タスクを作成しました",
+  "calendar_task_failed": "タスクを作成できませんでした。"
 }

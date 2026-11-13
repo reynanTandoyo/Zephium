@@ -3861,5 +3861,13 @@
   "calendar_repeat_on": "重複日",
   "calendar_field_ends": "結束",
   "calendar_field_count": "次數",
-  "calendar_field_until": "最後一天"
+  "calendar_field_until": "最後一天",
+  "calendar_today_events": "今天的行程",
+  "calendar_nothing_more": "今天沒有更多行程",
+  "calendar_next_event": "下一個行程",
+  "calendar_now": "現在",
+  "calendar_open_event": "在日曆中開啟 {title}",
+  "calendar_create_task": "建立待辦事項",
+  "calendar_task_created": "待辦事項已建立",
+  "calendar_task_failed": "無法建立待辦事項。"
 }

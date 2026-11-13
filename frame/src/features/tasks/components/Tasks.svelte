@@ -8,6 +8,7 @@
   import { CheckListIcon, Delete02Icon } from "@hugeicons/core-free-icons";
   import * as m from "$shared/i18n/messages";
   import type { TaskScope } from "../lib/task-sections";
+  import { openContext } from "../lib/open-context";
   import { today, watchToday } from "../lib/today.svelte";
   import TaskComposer from "./TaskComposer.svelte";
   import TaskList from "./TaskList.svelte";
@@ -77,7 +78,8 @@
     });
   });
 
-  const open = (url: string) => void commands.browserOpenUrl(url, false);
+  const open = (url: string) =>
+    openContext(url, (page) => void commands.browserOpenUrl(page, false));
   function select(id: string | null, activate = true) {
     session.selectedId = id;
     if (activate) opened = id !== null;
