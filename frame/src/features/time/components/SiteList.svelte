@@ -61,7 +61,11 @@
           tone={mark?.tone}
           size={size === "page" ? 18 : 16}
           lit
-          fallback={place === "mail" ? Mail01Icon : place === "calendar" ? Calendar01Icon : Globe02Icon}
+          fallback={place === "mail"
+            ? Mail01Icon
+            : place === "calendar"
+              ? Calendar01Icon
+              : Globe02Icon}
         />
         <span class="name">{placeLabel(site.site)}</span>
         {#if size === "page"}

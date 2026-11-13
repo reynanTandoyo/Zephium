@@ -3901,5 +3901,13 @@
   "mail_settings_move_up": "上移",
   "mail_settings_move_down": "下移",
   "mail_settings_move_up_for": "上移 {email}",
-  "mail_settings_move_down_for": "下移 {email}"
+  "mail_settings_move_down_for": "下移 {email}",
+  "calendar_today_events": "今天的日程",
+  "calendar_nothing_more": "今天没有更多日程",
+  "calendar_next_event": "下一个日程",
+  "calendar_now": "现在",
+  "calendar_open_event": "在日历中打开 {title}",
+  "calendar_create_task": "创建任务",
+  "calendar_task_created": "任务已创建",
+  "calendar_task_failed": "无法创建任务。"
 }

@@ -3980,5 +3980,13 @@
   "mail_settings_move_up": "Up",
   "mail_settings_move_down": "Down",
   "mail_settings_move_up_for": "Move {email} up",
-  "mail_settings_move_down_for": "Move {email} down"
+  "mail_settings_move_down_for": "Move {email} down",
+  "calendar_today_events": "Today’s events",
+  "calendar_nothing_more": "Nothing more today",
+  "calendar_next_event": "Next event",
+  "calendar_now": "Now",
+  "calendar_open_event": "Open {title} in Calendar",
+  "calendar_create_task": "Create task",
+  "calendar_task_created": "Task created",
+  "calendar_task_failed": "The task could not be created."
 }

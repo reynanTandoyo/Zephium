@@ -3901,5 +3901,13 @@
   "mail_settings_move_up": "上移",
   "mail_settings_move_down": "下移",
   "mail_settings_move_up_for": "上移 {email}",
-  "mail_settings_move_down_for": "下移 {email}"
+  "mail_settings_move_down_for": "下移 {email}",
+  "calendar_today_events": "今天的行程",
+  "calendar_nothing_more": "今天沒有更多行程",
+  "calendar_next_event": "下一個行程",
+  "calendar_now": "現在",
+  "calendar_open_event": "在日曆中開啟 {title}",
+  "calendar_create_task": "建立待辦事項",
+  "calendar_task_created": "待辦事項已建立",
+  "calendar_task_failed": "無法建立待辦事項。"
 }

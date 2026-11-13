@@ -3901,5 +3901,13 @@
   "mail_settings_move_up": "Hoch",
   "mail_settings_move_down": "Runter",
   "mail_settings_move_up_for": "{email} nach oben",
-  "mail_settings_move_down_for": "{email} nach unten"
+  "mail_settings_move_down_for": "{email} nach unten",
+  "calendar_today_events": "Heutige Termine",
+  "calendar_nothing_more": "Heute nichts mehr",
+  "calendar_next_event": "Nächster Termin",
+  "calendar_now": "Jetzt",
+  "calendar_open_event": "{title} im Kalender öffnen",
+  "calendar_create_task": "Aufgabe erstellen",
+  "calendar_task_created": "Aufgabe erstellt",
+  "calendar_task_failed": "Die Aufgabe konnte nicht erstellt werden."
 }

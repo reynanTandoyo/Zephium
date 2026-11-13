@@ -20,6 +20,8 @@
     onedit,
     ondelete,
     onjoin,
+    task,
+    ontask,
     onclose,
   }: {
     event: PlacedEvent;
@@ -30,6 +32,9 @@
     onedit: () => void;
     ondelete: () => void;
     onjoin: (url: string) => void;
+    /** Where a task made from this event stands. */
+    task: "idle" | "pending" | "done" | "failed";
+    ontask: () => void;
     onclose: () => void;
   } = $props();
 
@@ -64,6 +69,23 @@
   {#if meeting}
     <Button variant="primary" onclick={() => onjoin(meeting.url)}>{m.calendar_join()}</Button>
   {/if}
+
+  <div class="task">
+    <Button
+      variant="ghost"
+      size="compact"
+      pending={task === "pending"}
+      disabled={task === "done"}
+      onclick={ontask}>{m.calendar_create_task()}</Button
+    >
+    <span class="task-state" role="status"
+      >{task === "done"
+        ? m.calendar_task_created()
+        : task === "failed"
+          ? m.calendar_task_failed()
+          : ""}</span
+    >
+  </div>
 
   <dl>
     {#if occurrence.location}
@@ -194,6 +216,18 @@
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+
+  .task {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .task-state {
+    color: var(--color-muted);
+    font-size: var(--text-label);
   }
 
   .error {

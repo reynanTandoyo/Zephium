@@ -10,7 +10,7 @@ import type {
   CalendarV1,
 } from "$shared/ipc/bindings";
 import { emitNativeEvent } from "$shared/testing/native-events";
-import { calendar, dayKey, startOfDay } from "$domain/calendar";
+import { calendar, dayKey, eventOpen, linkOf, parseEventUrl, startOfDay } from "$domain/calendar";
 import CalendarPage from "../components/CalendarPage.svelte";
 
 type Server = {
@@ -31,6 +31,7 @@ const native = vi.hoisted(() => ({
   remove: vi.fn(),
   addAccount: vi.fn(),
   open: vi.fn(),
+  createTask: vi.fn(),
 }));
 
 const ok = <T>(data: T) => ({ status: "ok" as const, data });
@@ -55,8 +56,16 @@ vi.mock("$shared/ipc/bindings", async () => {
     calendarDeleteOccurrence: native.removeOccurrence,
     calendarDeleteEvent: native.remove,
     browserOpenUrl: native.open,
+    runCommand: async () => ({ accepted: true, operation_id: null }),
   });
 });
+
+vi.mock("$domain/resources", () => ({
+  taskSession: () => ({ create: native.createTask }),
+}));
+vi.mock("$domain/tabs", () => ({
+  tabs: { profile: () => ({ id: "00000000000000000000000701", name: "Alex", kind: "default" }) },
+}));
 
 const today = startOfDay(new Date());
 const at = (time: string) => `${dayKey(today)}T${time}`;
@@ -215,11 +224,13 @@ beforeEach(() => {
     ok({ calendar_id: calendarId, uid }),
   );
   native.removeOccurrence.mockResolvedValue(ok(null));
+  native.createTask.mockResolvedValue("task-1");
   native.addAccount.mockImplementation(async () => err("unauthorized"));
   native.open.mockResolvedValue({ accepted: true, operation_id: null });
 });
 
 afterEach(() => {
+  eventOpen.clear();
   calendar.dispose();
   vi.clearAllMocks();
 });
@@ -551,4 +562,55 @@ test("shows a way to add calendars when there are none", async () => {
   const screen = await setup();
   await expect.element(screen.getByRole("heading", { name: "No calendars yet" })).toBeVisible();
   await expect.element(screen.getByRole("button", { name: "New event" }).first()).toBeDisabled();
+});
+
+test("an event becomes a task due when it starts, with a link back to the event", async () => {
+  const screen = await setup();
+  await eventButton(screen, /Standup/u).click();
+  await screen.getByRole("button", { name: "Create task" }).click();
+
+  await expect.element(screen.getByText("Task created")).toBeVisible();
+  expect(native.createTask).toHaveBeenCalledTimes(1);
+  const input = native.createTask.mock.calls[0]![0] as {
+    title: string;
+    dueDate: string;
+    dueTime: string;
+    context: { url: string; title: string };
+  };
+  expect([input.title, input.dueDate, input.dueTime]).toEqual(["Standup", dayKey(today), "10:00"]);
+  expect(parseEventUrl(input.context.url)).toEqual({
+    calendarId: "work",
+    uid: "standup",
+    at: at("10:00:00"),
+  });
+  // Once made, it is not made again from the same details.
+  await expect.element(screen.getByRole("button", { name: "Create task" })).toBeDisabled();
+});
+
+test("a task that could not be made says so and can be tried again", async () => {
+  native.createTask.mockResolvedValueOnce(null);
+  const screen = await setup();
+  await eventButton(screen, /Standup/u).click();
+  await screen.getByRole("button", { name: "Create task" }).click();
+  await expect.element(screen.getByText("The task could not be created.")).toBeVisible();
+  await screen.getByRole("button", { name: "Create task" }).click();
+  await expect.element(screen.getByText("Task created")).toBeVisible();
+  expect(native.createTask).toHaveBeenCalledTimes(2);
+});
+
+test("opens on the event another surface asked for, on its own day", async () => {
+  const later = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 21);
+  const start = `${dayKey(later)}T15:00:00`;
+  native.server.events = [
+    occurrence({
+      uid: "far",
+      summary: "Offsite dinner",
+      start,
+      end: `${dayKey(later)}T17:00:00`,
+    }),
+  ];
+  eventOpen.open(linkOf(native.server.events[0]!));
+  const screen = await setup();
+  await expect.element(screen.getByRole("heading", { name: "Offsite dinner" })).toBeVisible();
+  expect(eventOpen.pending()).toBeNull();
 });

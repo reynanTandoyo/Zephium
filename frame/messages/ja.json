@@ -3901,5 +3901,13 @@
   "mail_settings_move_up": "上へ",
   "mail_settings_move_down": "下へ",
   "mail_settings_move_up_for": "{email} を上へ移動",
-  "mail_settings_move_down_for": "{email} を下へ移動"
+  "mail_settings_move_down_for": "{email} を下へ移動",
+  "calendar_today_events": "今日の予定",
+  "calendar_nothing_more": "今日はもう予定なし",
+  "calendar_next_event": "次の予定",
+  "calendar_now": "今",
+  "calendar_open_event": "カレンダーで {title} を開く",
+  "calendar_create_task": "タスクを作成",
+  "calendar_task_created": "タスクを作成しました",
+  "calendar_task_failed": "タスクを作成できませんでした。"
 }

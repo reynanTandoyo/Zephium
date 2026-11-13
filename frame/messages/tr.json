@@ -3901,5 +3901,13 @@
   "mail_settings_move_up": "Yukarı",
   "mail_settings_move_down": "Aşağı",
   "mail_settings_move_up_for": "{email} hesabını yukarı taşı",
-  "mail_settings_move_down_for": "{email} hesabını aşağı taşı"
+  "mail_settings_move_down_for": "{email} hesabını aşağı taşı",
+  "calendar_today_events": "Bugünün etkinlikleri",
+  "calendar_nothing_more": "Bugün başka bir şey yok",
+  "calendar_next_event": "Sonraki etkinlik",
+  "calendar_now": "Şimdi",
+  "calendar_open_event": "{title} etkinliğini Takvim’de aç",
+  "calendar_create_task": "Görev oluştur",
+  "calendar_task_created": "Görev oluşturuldu",
+  "calendar_task_failed": "Görev oluşturulamadı."
 }

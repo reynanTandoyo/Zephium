@@ -1,4 +1,5 @@
 import type { CalendarOccurrenceV1 } from "$shared/ipc/bindings";
+import { linkId, linkOf } from "$domain/calendar-link";
 
 /** Calendar math in the viewer's local zone. Days are added by calendar
  *  arithmetic (`new Date(y, m, d + n)`), never by 24-hour offsets, so a
@@ -153,8 +154,7 @@ export type PlacedEvent = {
   allDay: boolean;
 };
 
-const occurrenceId = (occurrence: CalendarOccurrenceV1): string =>
-  `${occurrence.calendar_id}\u0000${occurrence.uid}\u0000${occurrence.recurrence_id ?? occurrence.start}`;
+const occurrenceId = (occurrence: CalendarOccurrenceV1): string => linkId(linkOf(occurrence));
 
 /** Reads an occurrence's times; an unreadable one is dropped, not guessed. */
 export function place(occurrence: CalendarOccurrenceV1): PlacedEvent | null {

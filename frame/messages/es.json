@@ -3901,5 +3901,13 @@
   "mail_settings_move_up": "Subir",
   "mail_settings_move_down": "Bajar",
   "mail_settings_move_up_for": "Subir {email}",
-  "mail_settings_move_down_for": "Bajar {email}"
+  "mail_settings_move_down_for": "Bajar {email}",
+  "calendar_today_events": "Eventos de hoy",
+  "calendar_nothing_more": "Nada más hoy",
+  "calendar_next_event": "Próximo evento",
+  "calendar_now": "Ahora",
+  "calendar_open_event": "Abrir {title} en Calendario",
+  "calendar_create_task": "Crear tarea",
+  "calendar_task_created": "Tarea creada",
+  "calendar_task_failed": "No se pudo crear la tarea."
 }

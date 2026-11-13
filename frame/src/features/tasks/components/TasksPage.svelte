@@ -2,6 +2,7 @@
   import { tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { commands } from "$shared/ipc/bindings";
+  import { openContext } from "../lib/open-context";
   import { taskSession } from "$domain/resources";
   import { surface as browser } from "$domain/surface";
   import { tabs } from "$domain/tabs";
@@ -170,6 +171,9 @@
       void session.undo();
     }
   }
+
+  const openPage = (url: string) =>
+    openContext(url, (page) => void commands.browserOpenUrl(page, false));
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -230,7 +234,7 @@
                 selectedId={session.selectedId}
                 onmove={(id, status, key) => session.move(id, status, key)}
                 onselect={(id) => void session.load(id)}
-                onopenpage={(url) => void commands.browserOpenUrl(url, false)}
+                onopenpage={openPage}
               />{/snippet}</LazyView
           >
         {:else}<Tasks
@@ -278,7 +282,7 @@
                   session.selectedId = null;
                   void session.setTrashed(id, !view.trashed);
                 }}
-                onopenpage={(url) => void commands.browserOpenUrl(url, false)}
+                onopenpage={openPage}
               />{/key}{/snippet}</LazyView
         >
       </div>{/if}

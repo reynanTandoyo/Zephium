@@ -30,6 +30,7 @@
   } from "../lib/overview";
   import FocusCard from "./FocusCard.svelte";
   import SiteList from "./SiteList.svelte";
+  import TodayEvents from "./TodayEvents.svelte";
 
   let {
     profile,
@@ -107,6 +108,7 @@
   </EmptyState>
 {:else}
   <div class="panel">
+    {#if preferences.enabled("calendar")}<TodayEvents />{/if}
     <section class="overview" aria-live="polite">
       <p class="total">{duration(sum.all)}</p>
       <p class="sub">

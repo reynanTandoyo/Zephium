@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack, type Snippet } from "svelte";
   import {
+    Calendar01Icon,
     CheckListIcon,
     Clock01Icon,
     Settings01Icon,
@@ -11,7 +12,10 @@
   import { events } from "$shared/ipc/native-events";
   import { preferences } from "$domain/preferences";
   import { newTabImage, imageFailed } from "$session/newtab-background.svelte";
+  import { today as agenda } from "$domain/calendar-agenda";
+  import { eventOpen, linkOf } from "$domain/calendar-link";
   import { taskCounts } from "$domain/resources";
+  import { surface } from "$domain/surface";
   import { tabs } from "$domain/tabs";
   import Icon from "$shared/ui/Icon";
   import IconButton from "$shared/ui/IconButton";
@@ -83,6 +87,29 @@
   );
   let today = $derived(dayKey(now));
 
+  // The next event of the day, read only while this page shows it, and only
+  // when Calendar is on and has an account.
+  let showEvents = $derived(!incognito && preferences.enabled("calendar"));
+  $effect(() => {
+    if (showEvents) return agenda.acquire();
+  });
+  let nextEvent = $derived(
+    showEvents && agenda.available()
+      ? (agenda.upcoming().find((event) => !event.allDay) ?? agenda.upcoming()[0] ?? null)
+      : null,
+  );
+  let nextWhen = $derived(
+    nextEvent === null
+      ? "–"
+      : nextEvent.allDay
+        ? m.calendar_all_day()
+        : nextEvent.start.getTime() <= now.getTime()
+          ? m.calendar_now()
+          : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(
+              nextEvent.start,
+            ),
+  );
+
   let firstName = $derived((tabs.profile()?.name ?? "").trim().split(/\s+/u)[0] ?? "");
   let greeting = $derived.by(() => {
     const words = greetingFor(now);
@@ -123,6 +150,7 @@
       : [
           ...(showTrackers ? ["trackers"] : []),
           ...(showFocus ? ["focus"] : []),
+          ...(showEvents && agenda.available() ? ["events"] : []),
           ...(showDue ? ["due"] : []),
         ],
   );
@@ -485,6 +513,23 @@
               aria-valuemax={focusGoalMinutes}
               aria-valuenow={Math.min(focusMinutes, focusGoalMinutes)}
               ><span class="fill" style:transform={`scaleX(${focusShare})`}></span></span
+            >
+          </button>
+        {:else if figure === "events"}
+          <button
+            type="button"
+            class="figure"
+            onclick={() =>
+              nextEvent
+                ? eventOpen.open(linkOf(nextEvent.occurrence))
+                : void surface.open("calendar")}
+          >
+            <Icon icon={Calendar01Icon} size={14} /><span class="name"
+              >{m.calendar_next_event()}</span
+            ><span class="value">{nextWhen}</span><span class="foot"
+              >{nextEvent
+                ? nextEvent.occurrence.summary || m.calendar_untitled()
+                : m.calendar_nothing_more()}</span
             >
           </button>
         {:else}

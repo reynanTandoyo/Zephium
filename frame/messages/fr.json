@@ -3901,5 +3901,13 @@
   "mail_settings_move_up": "Monter",
   "mail_settings_move_down": "Descendre",
   "mail_settings_move_up_for": "Monter {email}",
-  "mail_settings_move_down_for": "Descendre {email}"
+  "mail_settings_move_down_for": "Descendre {email}",
+  "calendar_today_events": "Événements du jour",
+  "calendar_nothing_more": "Plus rien aujourd’hui",
+  "calendar_next_event": "Prochain événement",
+  "calendar_now": "En cours",
+  "calendar_open_event": "Ouvrir {title} dans Calendrier",
+  "calendar_create_task": "Créer une tâche",
+  "calendar_task_created": "Tâche créée",
+  "calendar_task_failed": "La tâche n’a pas pu être créée."
 }

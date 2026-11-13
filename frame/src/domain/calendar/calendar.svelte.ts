@@ -8,6 +8,7 @@ import type {
 } from "$shared/ipc/bindings";
 import { commands } from "$shared/ipc/bindings";
 import { events } from "$shared/ipc/native-events";
+import { openMeeting } from "$domain/calendar-agenda";
 
 /** A failed operation: the backend's reason, or `unavailable` when the call
  *  itself could not be made. */
@@ -203,11 +204,7 @@ export const deleteEvent = (calendar: string, uid: string) =>
   run("delete", () => call(() => commands.calendarDeleteEvent(calendar, uid)));
 
 /** Opens a meeting address in a new browser tab. */
-export const openLink = (url: string): Promise<boolean> =>
-  commands.browserOpenUrl(url, true).then(
-    (admission) => admission.accepted,
-    () => false,
-  );
+export const openLink = openMeeting;
 
 async function initialize(generation: number) {
   // Listen before the first read: a change landing mid-read must not be lost.

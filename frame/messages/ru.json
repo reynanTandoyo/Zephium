@@ -3901,5 +3901,13 @@
   "mail_settings_move_up": "Вверх",
   "mail_settings_move_down": "Вниз",
   "mail_settings_move_up_for": "Переместить {email} вверх",
-  "mail_settings_move_down_for": "Переместить {email} вниз"
+  "mail_settings_move_down_for": "Переместить {email} вниз",
+  "calendar_today_events": "События на сегодня",
+  "calendar_nothing_more": "Больше ничего на сегодня",
+  "calendar_next_event": "Следующее событие",
+  "calendar_now": "Сейчас",
+  "calendar_open_event": "Открыть «{title}» в Календаре",
+  "calendar_create_task": "Создать задачу",
+  "calendar_task_created": "Задача создана",
+  "calendar_task_failed": "Не удалось создать задачу."
 }

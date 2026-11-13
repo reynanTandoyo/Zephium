@@ -3901,5 +3901,13 @@
   "mail_settings_move_up": "Su",
   "mail_settings_move_down": "Giù",
   "mail_settings_move_up_for": "Sposta {email} su",
-  "mail_settings_move_down_for": "Sposta {email} giù"
+  "mail_settings_move_down_for": "Sposta {email} giù",
+  "calendar_today_events": "Eventi di oggi",
+  "calendar_nothing_more": "Nient’altro oggi",
+  "calendar_next_event": "Prossimo evento",
+  "calendar_now": "Ora",
+  "calendar_open_event": "Apri {title} in Calendario",
+  "calendar_create_task": "Crea attività",
+  "calendar_task_created": "Attività creata",
+  "calendar_task_failed": "Impossibile creare l’attività."
 }

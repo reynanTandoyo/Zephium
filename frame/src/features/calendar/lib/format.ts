@@ -3,6 +3,8 @@ import * as m from "$shared/i18n/messages";
 import type { CalendarFault, CalendarView, PlacedEvent } from "$domain/calendar";
 import { addDays, dayNumber } from "$domain/calendar";
 
+export { safeColor } from "$domain/calendar";
+
 const formatter = (options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat(getLocale(), options);
 
@@ -92,7 +94,3 @@ export function faultText(fault: CalendarFault): string {
       return m.calendar_fault_unavailable();
   }
 }
-
-/** A calendar colour from the server, or the accent when it is not `#RRGGBB`. */
-export const safeColor = (color: string | null): string =>
-  color !== null && /^#[0-9a-f]{6}$/iu.test(color) ? color : "var(--color-accent)";
