@@ -22,7 +22,7 @@
   import SpamIcon from "@hugeicons/core-free-icons/SpamIcon";
   import * as m from "$shared/i18n/messages";
   import type { MailAccountV1 } from "$shared/ipc/bindings";
-  import { MailStore, type MailRow, type MailThread } from "$domain/mail";
+  import { mailtoInbox, MailStore, type MailRow, type MailThread } from "$domain/mail";
   import Button from "$shared/ui/Button";
   import Icon from "$shared/ui/Icon";
   import IconButton from "$shared/ui/IconButton";
@@ -52,6 +52,14 @@
       clearTimeout(searchTimer);
       store.dispose();
     };
+  });
+
+  // A clicked mailto: link waits in the inbox until the accounts are read; then
+  // it becomes a prefilled message, whatever Mail was showing.
+  $effect(() => {
+    if (!mailtoInbox.pending || store.accountsState !== "ready" || !store.accounts.length) return;
+    const link = mailtoInbox.take();
+    if (link && store.startComposeFromLink(link)) view = "mail";
   });
 
   const ready = $derived(store.open?.state === "ready" ? store.open : null);
@@ -213,6 +221,11 @@
       <div class="listcol">
         <div class="list-head">
           <h2>{title}</h2>
+          {#if store.offline}
+            <p class="offline" role="status" title={m.mail_offline_hint()}>
+              {m.mail_offline_badge()}
+            </p>
+          {/if}
           <SearchField
             label={m.mail_search()}
             placeholder={m.mail_search()}
@@ -419,6 +432,17 @@
     margin: 0;
     font-size: var(--text-page-title);
     font-weight: 600;
+  }
+
+  .offline {
+    justify-self: start;
+    margin: 0;
+    padding: 2px 8px;
+    border-radius: var(--radius-capsule);
+    background: var(--color-fill);
+    color: var(--color-muted);
+    font-size: var(--text-label);
+    font-weight: 500;
   }
 
   .detail {

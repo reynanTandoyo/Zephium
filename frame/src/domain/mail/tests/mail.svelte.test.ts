@@ -17,6 +17,7 @@ const host = vi.hoisted(() => ({
   watch: vi.fn(),
   images: vi.fn(),
   order: vi.fn(),
+  parse: vi.fn(),
 }));
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
@@ -34,6 +35,7 @@ vi.mock("$shared/ipc/bindings", async () => {
     mailWatch: host.watch,
     mailFetchRemoteImages: host.images,
     mailSetAccountOrder: host.order,
+    mailParseMailto: host.parse,
   });
 });
 vi.mock("$shared/ipc/native-events", () => ({
@@ -414,5 +416,127 @@ test("a refused reorder leaves the list as it was and says so", async () => {
   expect(await store.moveAccount("a2", -1)).toBe(false);
   expect(store.accounts.map((a) => a.id)).toEqual(["a1", "a2"]);
   expect(store.notice).toEqual({ action: "order", error: "busy" });
+  store.dispose();
+});
+
+const cached = (messages: MailMessageV1[]) =>
+  ok({ messages, next_before: null, total: messages.length, from_cache: true });
+
+test("offline shows when the list came from the cache and goes when a live page arrives", async () => {
+  twoAccounts();
+  host.messages.mockImplementation(() => cached([message(1)]));
+  const store = new MailStore();
+  await store.start();
+  expect(store.fromCache).toBe(true);
+  expect(store.offline).toBe(true);
+  host.messages.mockImplementation(() => page([message(1)]));
+  await store.loadList();
+  expect(store.offline).toBe(false);
+  store.dispose();
+});
+
+test("a sync that cannot reach the server says offline, keeps the cached folders and recovers", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  expect(store.offline).toBe(false);
+  host.sync.mockReturnValue(err("offline"));
+  host.messages.mockImplementation(() => cached([message(2)]));
+  await store.sync();
+  expect(store.offline).toBe(true);
+  expect(store.notice).toEqual({ action: "sync", error: "unavailable" });
+  expect(store.foldersOf("a1").length).toBeGreaterThan(0);
+  host.sync.mockImplementation((id: string) => host.folders(id));
+  host.messages.mockImplementation(() => page([message(2)]));
+  await store.sync();
+  expect(store.offline).toBe(false);
+  store.dispose();
+});
+
+test("an action that needs the server fails visibly offline and changes nothing", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  const row = store.rows[0]!;
+  expect(store.offline).toBe(false);
+  host.setFlags.mockReturnValue(err("offline"));
+  expect(await store.setFlagged([row], true)).toBe(false);
+  expect(store.notice).toEqual({ action: "flag", error: "offline" });
+  expect(store.rows.find((r) => r.key === row.key)?.message.flags.flagged).toBe(false);
+  expect(store.offline).toBe(true);
+  host.move.mockReturnValue(err("timeout"));
+  expect(await store.move([row], "Work")).toBe(false);
+  expect(store.notice).toEqual({ action: "move", error: "timeout" });
+  expect(store.rows.some((r) => r.key === row.key)).toBe(true);
+  store.dispose();
+});
+
+test("a server refusal is not offline", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  host.setFlags.mockReturnValue(err("server_rejected"));
+  await store.setFlagged([store.rows[0]!], true);
+  expect(store.notice?.error).toBe("server_rejected");
+  expect(store.offline).toBe(false);
+  store.dispose();
+});
+
+test("a body that is not cached and cannot be fetched offline fails with the cause", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  host.message.mockReturnValue(err("offline"));
+  await store.openRow(store.rows[0]!);
+  expect(store.open).toMatchObject({ state: "failed", error: "offline" });
+  expect(store.offline).toBe(true);
+  store.dispose();
+});
+
+const link = {
+  to: ["ann@example.org", "bob@example.org"],
+  cc: ["cy@example.org"],
+  bcc: [],
+  subject: "Hello",
+  body: "Line one",
+};
+
+test("a mailto link starts a message from the selected account with only its own fields", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  await store.select("a2", "INBOX");
+  expect(store.startComposeFromLink({ ...link, body: "" })).toBe(true);
+  expect(store.compose).toMatchObject({
+    account: "a2",
+    to: "ann@example.org, bob@example.org",
+    cc: "cy@example.org",
+    bcc: "",
+    subject: "Hello",
+  });
+  expect(store.startComposeFromLink(link)).toBe(true);
+  expect(store.compose?.text).toBe("Line one\n");
+  store.dispose();
+});
+
+test("a mailto link without any account starts nothing", () => {
+  const store = new MailStore();
+  expect(store.startComposeFromLink(link)).toBe(false);
+  expect(store.compose).toBeNull();
+});
+
+test("a link inside a message is parsed by Rust; a refused link starts nothing", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  host.parse.mockReturnValueOnce(ok(link));
+  expect(await store.composeFromLink("mailto:ann@example.org")).toBe(true);
+  expect(host.parse).toHaveBeenCalledWith("mailto:ann@example.org");
+  expect(store.compose?.subject).toBe("Hello");
+  store.closeCompose();
+  host.parse.mockReturnValueOnce(err("invalid_input"));
+  expect(await store.composeFromLink("mailto:a@example.org?subject=x%0D%0ABcc:evil")).toBe(false);
+  expect(store.compose).toBeNull();
+  expect(store.notice).toEqual({ action: "open", error: "invalid_input" });
   store.dispose();
 });

@@ -661,3 +661,76 @@ async fn test_credential_accepts_a_bearer_token_before_the_account_is_saved() {
         .unwrap();
     assert_eq!(report.imap, Some(MailError::AuthFailed));
 }
+
+#[tokio::test]
+async fn rules_mark_flag_and_move_only_new_inbox_mail_of_the_account() {
+    use zephium_mail::rules::{Rule, RuleAction, RuleField};
+    let rig = rig();
+    {
+        let mut state = rig.server.state.lock().unwrap();
+        for (from, subject) in [
+            ("Old <old@example.com>", "News old"),
+            ("Ann <ann@example.com>", "News 1"),
+            ("Boss <boss@example.com>", "Plan"),
+            ("Ann <ann@example.com>", "Other"),
+        ] {
+            state.folders[0].add(&[], &simple(from, subject, "text"));
+        }
+    }
+    let a = account(true);
+    let folders = rig.engine.folders(&a).await.unwrap();
+    let rule = |field, contains: &str, action, folder: Option<&str>| Rule {
+        field,
+        contains: contains.into(),
+        action,
+        folder: folder.map(Into::into),
+    };
+    let rules = vec![
+        rule(
+            RuleField::Subject,
+            "news",
+            RuleAction::Move,
+            Some("Archive"),
+        ),
+        rule(RuleField::From, "boss", RuleAction::Flag, None),
+        rule(RuleField::From, "boss", RuleAction::MarkRead, None),
+        rule(
+            RuleField::Subject,
+            "other",
+            RuleAction::Move,
+            Some("Nowhere"),
+        ),
+        rule(RuleField::Subject, "other", RuleAction::Move, Some("INBOX")),
+    ];
+    // UID 1 pre-dates the sync; UIDs 2..=4 are new.
+    let run = rig
+        .engine
+        .apply_rules(&a, "INBOX", &rules, 2, &folders)
+        .await
+        .unwrap();
+    assert_eq!(run.moved, [2]);
+    assert_eq!(run.flagged, [3]);
+    assert_eq!(run.seen, [3]);
+    assert!(!run.failed && run.changed());
+    {
+        let state = rig.server.state.lock().unwrap();
+        let inbox: Vec<u32> = state.folders[0].msgs.iter().map(|m| m.uid).collect();
+        assert_eq!(inbox, [1, 3, 4], "only the new news mail left the inbox");
+        assert_eq!(state.folders[4].msgs.len(), 1, "archive");
+        let boss = state.folders[0].msgs.iter().find(|m| m.uid == 3).unwrap();
+        assert!(boss.flags.contains(&"\\Seen".to_owned()));
+        assert!(boss.flags.contains(&"\\Flagged".to_owned()));
+    }
+    // No rules, or invalid ones, touch nothing.
+    let none = rig
+        .engine
+        .apply_rules(&a, "INBOX", &[], 1, &folders)
+        .await
+        .unwrap();
+    assert!(!none.changed());
+    let bad = vec![rule(RuleField::From, "", RuleAction::Flag, None)];
+    assert_eq!(
+        rig.engine.apply_rules(&a, "INBOX", &bad, 1, &folders).await,
+        Err(MailError::InvalidInput)
+    );
+}

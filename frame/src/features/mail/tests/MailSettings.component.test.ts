@@ -6,13 +6,16 @@ import { MailStore } from "$domain/mail";
 import MailSettings from "../components/MailSettings.svelte";
 import { account, failed, ok } from "./fixtures";
 
-const native = vi.hoisted(() => ({ order: vi.fn() }));
+const native = vi.hoisted(() => ({ order: vi.fn(), rules: vi.fn() }));
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
-  return mockBindings({ mailSetAccountOrder: native.order });
+  return mockBindings({ mailSetAccountOrder: native.order, mailRules: native.rules });
 });
 
-afterEach(() => native.order.mockReset());
+afterEach(() => {
+  native.order.mockReset();
+  native.rules.mockReset();
+});
 
 const three = [
   { ...account, id: "a", email: "a@example.com" },
@@ -21,6 +24,7 @@ const three = [
 ];
 
 function shown() {
+  native.rules.mockResolvedValue(ok([]));
   const store = new MailStore();
   store.accounts = three;
   render(MailSettings, { store, onadd: vi.fn(), onback: vi.fn() });

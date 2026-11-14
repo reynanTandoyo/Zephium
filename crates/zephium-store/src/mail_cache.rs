@@ -120,6 +120,34 @@ pub struct MailBodyRecord {
     pub truncated: bool,
 }
 
+/// Header rows read for one contact lookup, newest first.
+pub const MAX_CONTACT_SCAN_ROWS: usize = 5_000;
+/// Longest contact prefix searched, in bytes.
+pub const MAX_CONTACT_PREFIX_BYTES: usize = 64;
+/// Contacts returned for one lookup.
+pub const MAX_CONTACT_RESULTS: u32 = 20;
+
+/// An address seen in cached mail, for suggestions while writing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MailContact {
+    /// The most recent display name seen with this address.
+    pub name: Option<String>,
+    /// The address, as last written.
+    pub email: String,
+    /// Times seen in the scanned mail.
+    pub count: u32,
+    /// Unix seconds of the newest message it appeared in.
+    pub last: i64,
+}
+
+#[derive(serde::Deserialize)]
+struct StoredAddress {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    email: String,
+}
+
 /// The cache over one connection.
 pub struct MailCache<'a> {
     conn: &'a mut Connection,
@@ -143,6 +171,15 @@ fn message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailMessageRecord> {
         in_reply_to: row.get(11)?,
         references_json: row.get(12)?,
     })
+}
+
+/// The address starts with the prefix, or a word of the name does.
+fn contact_matches(prefix: &str, email: &str, name: Option<&str>) -> bool {
+    email.starts_with(prefix)
+        || name.is_some_and(|name| {
+            let name = name.to_lowercase();
+            name.starts_with(prefix) || name.split_whitespace().any(|word| word.starts_with(prefix))
+        })
 }
 
 impl<'a> MailCache<'a> {
@@ -449,6 +486,134 @@ impl<'a> MailCache<'a> {
             .collect()
     }
 
+    /// Addresses from cached mail that start with `prefix` (on the address or
+    /// on a word of the name), best first: recipients of sent mail and senders
+    /// of received mail, weighted by how often and how recently they appear.
+    /// Reads only the cache (at most [`MAX_CONTACT_SCAN_ROWS`] header rows) and
+    /// returns at most `limit.min(MAX_CONTACT_RESULTS)` entries. Junk, trash
+    /// and the accounts' own addresses are left out.
+    pub fn contacts(&self, prefix: &str, limit: u32) -> rusqlite::Result<Vec<MailContact>> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX)
+            });
+        self.contacts_at(prefix, limit, now)
+    }
+
+    /// [`Self::contacts`] with the clock given, for tests.
+    pub fn contacts_at(
+        &self,
+        prefix: &str,
+        limit: u32,
+        now: i64,
+    ) -> rusqlite::Result<Vec<MailContact>> {
+        let wanted = prefix.trim().to_lowercase();
+        if wanted.is_empty()
+            || wanted.len() > MAX_CONTACT_PREFIX_BYTES
+            || wanted.chars().any(char::is_control)
+        {
+            return Ok(Vec::new());
+        }
+        let limit = limit.clamp(1, MAX_CONTACT_RESULTS) as usize;
+        let own: Vec<String> = self
+            .conn
+            .prepare_cached("SELECT lower(email) FROM mail_accounts")?
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        // A pre-filter only: the exact test below decides.
+        let like = format!(
+            "%{}%",
+            wanted
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        let mut statement = self.conn.prepare_cached(
+            "SELECT m.from_json, m.to_json, m.cc_json, m.date, f.role
+             FROM mail_messages m
+             JOIN mail_folders f ON f.account_id = m.account_id AND f.path = m.folder
+             WHERE f.role NOT IN ('junk', 'trash')
+               AND (m.from_json LIKE ?1 ESCAPE '\\' OR m.to_json LIKE ?1 ESCAPE '\\'
+                    OR m.cc_json LIKE ?1 ESCAPE '\\')
+             ORDER BY m.date DESC LIMIT ?2",
+        )?;
+        struct Seen {
+            contact: MailContact,
+            score: f64,
+        }
+        let mut seen: Vec<Seen> = Vec::new();
+        let mut rows = statement.query(params![like, MAX_CONTACT_SCAN_ROWS as i64])?;
+        while let Some(row) = rows.next()? {
+            let (from, to, cc): (String, String, String) = (row.get(0)?, row.get(1)?, row.get(2)?);
+            let date: Option<i64> = row.get(3)?;
+            let role: String = row.get(4)?;
+            let sent = role == "sent";
+            let lists: &[&String] = if sent { &[&to, &cc] } else { &[&from] };
+            let when = date.unwrap_or(0);
+            let age_days = (now.saturating_sub(when).max(0) as f64) / 86_400.0;
+            // Each sighting counts one, fading with age; mail I wrote counts double.
+            let weight = (if sent { 2.0 } else { 1.0 }) / (1.0 + age_days / 90.0);
+            for list in lists {
+                let Ok(addresses) = serde_json::from_str::<Vec<StoredAddress>>(list) else {
+                    continue;
+                };
+                for address in addresses {
+                    let email = address.email.trim();
+                    let lower = email.to_lowercase();
+                    if email.is_empty()
+                        || email.len() > 254
+                        || email.chars().any(|c| c.is_control() || c.is_whitespace())
+                        || own.contains(&lower)
+                        || !contact_matches(&wanted, &lower, address.name.as_deref())
+                    {
+                        continue;
+                    }
+                    let name = address
+                        .name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty() && name.len() <= 256)
+                        .map(str::to_owned);
+                    match seen
+                        .iter_mut()
+                        .find(|entry| entry.contact.email.to_lowercase() == lower)
+                    {
+                        Some(entry) => {
+                            entry.contact.count = entry.contact.count.saturating_add(1);
+                            entry.contact.last = entry.contact.last.max(when);
+                            entry.score += weight;
+                            // Rows arrive newest first: keep the newest name.
+                            if entry.contact.name.is_none() {
+                                entry.contact.name = name;
+                            }
+                        }
+                        None => seen.push(Seen {
+                            contact: MailContact {
+                                name,
+                                email: email.to_owned(),
+                                count: 1,
+                                last: when,
+                            },
+                            score: weight,
+                        }),
+                    }
+                }
+            }
+        }
+        seen.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then(b.contact.last.cmp(&a.contact.last))
+                .then_with(|| a.contact.email.cmp(&b.contact.email))
+        });
+        Ok(seen
+            .into_iter()
+            .take(limit)
+            .map(|entry| entry.contact)
+            .collect())
+    }
+
     /// Updates the cached flags of one message.
     pub fn set_flags(
         &mut self,
@@ -690,6 +855,204 @@ mod tests {
             "starttls"
         );
         assert!(cache.account("zz").unwrap().is_none());
+    }
+
+    fn sent_message(uid: u32, to: &str, date: i64) -> MailMessageRecord {
+        MailMessageRecord {
+            to_json: to.into(),
+            from_json: r#"[{"name":"Ann","email":"ann@example.com"}]"#.into(),
+            date: Some(date),
+            ..message(uid)
+        }
+    }
+
+    fn received(uid: u32, from: &str, date: i64) -> MailMessageRecord {
+        MailMessageRecord {
+            from_json: from.into(),
+            date: Some(date),
+            ..message(uid)
+        }
+    }
+
+    fn contact_cache(conn: &mut Connection) {
+        let mut cache = MailCache::new(conn);
+        cache.save_account(&account("a1")).unwrap();
+        let mut sent = folder("Sent", 1);
+        sent.role = "sent".into();
+        let mut junk = folder("Junk", 1);
+        junk.role = "junk".into();
+        cache
+            .replace_folders("a1", &[folder("INBOX", 1), sent, junk])
+            .unwrap();
+    }
+
+    const NOW: i64 = 1_731_499_200;
+    const DAY: i64 = 86_400;
+
+    #[test]
+    fn contacts_rank_by_frequency_and_recency_and_match_names_and_addresses() {
+        let mut conn = meta();
+        contact_cache(&mut conn);
+        let mut cache = MailCache::new(&mut conn);
+        cache
+            .store_headers(
+                "a1",
+                "Sent",
+                Some(1),
+                &[
+                    sent_message(
+                        1,
+                        r#"[{"name":"Bob Brown","email":"bob@example.com"}]"#,
+                        NOW - DAY,
+                    ),
+                    sent_message(
+                        2,
+                        r#"[{"name":"Bob Brown","email":"bob@example.com"}]"#,
+                        NOW - 2 * DAY,
+                    ),
+                    sent_message(
+                        3,
+                        r#"[{"name":null,"email":"bea@example.com"}]"#,
+                        NOW - 3 * DAY,
+                    ),
+                ],
+            )
+            .unwrap();
+        cache
+            .store_headers(
+                "a1",
+                "INBOX",
+                Some(1),
+                &[
+                    received(
+                        1,
+                        r#"[{"name":"Bea Old","email":"bea@example.com"}]"#,
+                        NOW - 400 * DAY,
+                    ),
+                    received(
+                        2,
+                        r#"[{"name":"Bernd","email":"bernd@example.com"}]"#,
+                        NOW - 10 * DAY,
+                    ),
+                    received(
+                        3,
+                        r#"[{"name":"Carl","email":"carl@example.com"}]"#,
+                        NOW - DAY,
+                    ),
+                    received(
+                        4,
+                        r#"[{"name":"Bob Brown","email":"BOB@example.com"}]"#,
+                        NOW - 5 * DAY,
+                    ),
+                ],
+            )
+            .unwrap();
+        let found = cache.contacts_at("b", 10, NOW).unwrap();
+        let emails: Vec<&str> = found.iter().map(|c| c.email.as_str()).collect();
+        // Bob: two sent + one received (case-folded together); Bea: sent + old; Bernd: one received.
+        assert_eq!(
+            emails,
+            ["bob@example.com", "bea@example.com", "bernd@example.com"]
+        );
+        assert_eq!(found[0].count, 3);
+        assert_eq!(found[0].name.as_deref(), Some("Bob Brown"));
+        assert_eq!(found[0].last, NOW - DAY);
+        // A word of the name matches too, and Bea keeps the name from the newest row that had one.
+        let found = cache.contacts_at("old", 10, NOW).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name.as_deref(), Some("Bea Old"));
+        // Prefix on the address.
+        assert_eq!(
+            cache.contacts_at("CARL@", 10, NOW).unwrap()[0].email,
+            "carl@example.com"
+        );
+        // Substrings inside a word do not match.
+        assert!(cache.contacts_at("rown", 10, NOW).unwrap().is_empty());
+    }
+
+    #[test]
+    fn contacts_are_bounded_and_skip_junk_own_addresses_and_bad_input() {
+        let mut conn = meta();
+        contact_cache(&mut conn);
+        let mut cache = MailCache::new(&mut conn);
+        let many: Vec<MailMessageRecord> = (1..=30)
+            .map(|uid| {
+                received(
+                    uid,
+                    &format!(r#"[{{"name":"P {uid}","email":"p{uid}@example.com"}}]"#),
+                    NOW - i64::from(uid) * DAY,
+                )
+            })
+            .collect();
+        cache.store_headers("a1", "INBOX", Some(1), &many).unwrap();
+        cache
+            .store_headers(
+                "a1",
+                "Junk",
+                Some(1),
+                &[received(
+                    1,
+                    r#"[{"name":"P Spam","email":"pspam@example.com"}]"#,
+                    NOW,
+                )],
+            )
+            .unwrap();
+        cache
+            .store_headers(
+                "a1",
+                "Sent",
+                Some(1),
+                &[sent_message(
+                    1,
+                    r#"[{"name":"Me","email":"ann@example.com"}]"#,
+                    NOW,
+                )],
+            )
+            .unwrap();
+        let found = cache.contacts_at("p", 1_000, NOW).unwrap();
+        assert_eq!(found.len(), MAX_CONTACT_RESULTS as usize);
+        assert_eq!(found[0].email, "p1@example.com");
+        assert!(found.iter().all(|c| c.email != "pspam@example.com"));
+        assert_eq!(cache.contacts_at("p", 3, NOW).unwrap().len(), 3);
+        assert_eq!(cache.contacts_at("p", 0, NOW).unwrap().len(), 1);
+        // Own address, empty, control and oversized prefixes, SQL wildcards.
+        assert!(cache.contacts_at("ann@", 10, NOW).unwrap().is_empty());
+        assert!(cache.contacts_at("  ", 10, NOW).unwrap().is_empty());
+        assert!(cache.contacts_at("p\n", 10, NOW).unwrap().len() <= 20);
+        assert!(cache.contacts_at("p\u{0}x", 10, NOW).unwrap().is_empty());
+        assert!(cache
+            .contacts_at(&"p".repeat(MAX_CONTACT_PREFIX_BYTES + 1), 10, NOW)
+            .unwrap()
+            .is_empty());
+        assert!(cache.contacts_at("%", 10, NOW).unwrap().is_empty());
+        assert!(cache.contacts_at("_", 10, NOW).unwrap().is_empty());
+    }
+
+    #[test]
+    fn contacts_survive_malformed_stored_json_and_hostile_addresses() {
+        let mut conn = meta();
+        contact_cache(&mut conn);
+        let mut cache = MailCache::new(&mut conn);
+        cache
+            .store_headers(
+                "a1",
+                "INBOX",
+                Some(1),
+                &[
+                    received(1, r#"{"not":"a list"}"#, NOW),
+                    received(2, r#"[{"name":"X","email":"x y@example.com"}]"#, NOW),
+                    received(3, r#"[{"name":"X","email":"x\u0007@example.com"}]"#, NOW),
+                    received(
+                        4,
+                        r#"[{"name":"Xavier","email":"xavier@example.com"}]"#,
+                        NOW,
+                    ),
+                ],
+            )
+            .unwrap();
+        let found = cache.contacts_at("x", 10, NOW).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].email, "xavier@example.com");
     }
 
     #[test]

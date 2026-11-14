@@ -18,6 +18,7 @@ use zephium_mail::model::{
     MessageBody, MessageHeader, OutgoingAttachment, Security, WatchOutcome,
 };
 use zephium_mail::remote_images::{self, FetchedImage, ImageFetcher};
+use zephium_mail::rules::{self, Rule, RuleAction, RuleField};
 use zephium_mail::smtp::LettreSender;
 use zephium_mail::transport::TlsConnectorImpl;
 use zephium_mail::vault::{OsVault, PasswordVault};
@@ -38,6 +39,10 @@ const SETTING_AUTH: &str = "mail.auth";
 /// are missing from it (new accounts) follow in the order they were added;
 /// ids that no longer exist are ignored.
 const SETTING_ORDER: &str = "mail.account_order";
+/// JSON map of account id to that account's ordered rules (T-0036). Rules see
+/// only their own account's Inbox headers. Bounded by [`rules::MAX_RULES_BYTES`].
+const SETTING_RULES: &str = "mail.rules";
+const EVENT_COMPOSE: &str = "zephium:mail-compose";
 const MAX_IN_FLIGHT: usize = 8;
 const MAX_DRAFT_BYTES: usize = 48 * 1024 * 1024;
 
@@ -393,6 +398,58 @@ pub(crate) struct MailChanged {
     pub(crate) unread: u32,
     /// Messages that arrived, for `NewMail`.
     pub(crate) new_messages: u32,
+}
+
+/// An address suggested while writing, from cached mail only.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+pub(crate) struct MailContactV1 {
+    pub(crate) name: Option<String>,
+    pub(crate) email: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MailRuleFieldV1 {
+    From,
+    To,
+    Subject,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MailRuleActionV1 {
+    Move,
+    MarkRead,
+    Flag,
+}
+
+/// "If `field` contains `contains`, then `action`." `folder` is the
+/// destination of a move and `null` for the other actions.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+pub(crate) struct MailRuleV1 {
+    pub(crate) field: MailRuleFieldV1,
+    pub(crate) contains: String,
+    pub(crate) action: MailRuleActionV1,
+    #[serde(default)]
+    #[specta(optional)]
+    pub(crate) folder: Option<String>,
+}
+
+/// A parsed `mailto:` link: only the fields a compose window starts with.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+pub(crate) struct MailtoV1 {
+    pub(crate) to: Vec<String>,
+    pub(crate) cc: Vec<String>,
+    pub(crate) bcc: Vec<String>,
+    pub(crate) subject: String,
+    pub(crate) body: String,
+}
+
+/// A `mailto:` link was clicked and Mail should open a prefilled message.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[tauri_specta(event_name = "zephium:mail-compose")]
+pub(crate) struct MailComposeRequested {
+    pub(crate) mailto: MailtoV1,
 }
 
 // ---------------------------------------------------------------------------
@@ -911,6 +968,89 @@ fn classify(
     counts.map(|(path, unread)| (MailChangeKindV1::Counts, path, unread, 0))
 }
 
+fn mailto_out(parsed: zephium_mail::mailto::Mailto) -> MailtoV1 {
+    MailtoV1 {
+        to: parsed.to,
+        cc: parsed.cc,
+        bcc: parsed.bcc,
+        subject: parsed.subject,
+        body: parsed.body,
+    }
+}
+
+fn rule_in(rule: &MailRuleV1) -> Rule {
+    Rule {
+        field: match rule.field {
+            MailRuleFieldV1::From => RuleField::From,
+            MailRuleFieldV1::To => RuleField::To,
+            MailRuleFieldV1::Subject => RuleField::Subject,
+        },
+        contains: rule.contains.trim().to_owned(),
+        action: match rule.action {
+            MailRuleActionV1::Move => RuleAction::Move,
+            MailRuleActionV1::MarkRead => RuleAction::MarkRead,
+            MailRuleActionV1::Flag => RuleAction::Flag,
+        },
+        folder: rule.folder.clone(),
+    }
+}
+
+fn rule_out(rule: &Rule) -> MailRuleV1 {
+    MailRuleV1 {
+        field: match rule.field {
+            RuleField::From => MailRuleFieldV1::From,
+            RuleField::To => MailRuleFieldV1::To,
+            RuleField::Subject => MailRuleFieldV1::Subject,
+        },
+        contains: rule.contains.clone(),
+        action: match rule.action {
+            RuleAction::Move => MailRuleActionV1::Move,
+            RuleAction::MarkRead => MailRuleActionV1::MarkRead,
+            RuleAction::Flag => MailRuleActionV1::Flag,
+        },
+        folder: rule.folder.clone(),
+    }
+}
+
+/// Serializes the read-modify-write of the rule set.
+static RULES_LOCK: Mutex<()> = Mutex::new(());
+
+fn rule_set() -> rules::RuleSet {
+    use zephium_core::ports::store::Store;
+    APP_STORE
+        .get()
+        .and_then(|store| store.app_setting(SETTING_RULES))
+        .map(|json| rules::parse_rule_set(&json))
+        .unwrap_or_default()
+}
+
+fn rules_of(account: &str) -> Vec<Rule> {
+    rule_set().remove(account).unwrap_or_default()
+}
+
+/// Saves one account's rules (an empty list removes them). Validation and the
+/// size bound are enforced before anything is written.
+fn store_rules(account: &str, new_rules: Vec<Rule>) -> Result<(), MailError> {
+    use zephium_core::ports::store::Store;
+    rules::validate_rules(&new_rules)?;
+    let _guard = RULES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut set = rule_set();
+    if new_rules.is_empty() {
+        set.remove(account);
+    } else {
+        set.insert(account.to_owned(), new_rules);
+    }
+    let json = rules::serialize_rule_set(&set)?;
+    if APP_STORE
+        .get()
+        .is_some_and(|store| store.set_app_setting(SETTING_RULES.to_owned(), json))
+    {
+        Ok(())
+    } else {
+        Err(MailError::Busy)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Runtime
 // ---------------------------------------------------------------------------
@@ -1003,7 +1143,7 @@ async fn refresh_folders(
     runtime: &Runtime,
     account: &Account,
 ) -> Result<Vec<mail::Folder>, MailError> {
-    let live = runtime.engine.folders(account).await?;
+    let mut live = runtime.engine.folders(account).await?;
     let id = account.id.clone();
     let records: Vec<MailFolderRecord> = live.iter().map(folder_record).collect();
     let before = db(move |cache| {
@@ -1012,11 +1152,34 @@ async fn refresh_folders(
         Ok(before)
     })
     .await?;
-    let change = if before.is_empty() {
+    let mut change = if before.is_empty() {
         None
     } else {
         classify(&before, &live)
     };
+    if let Some((kind, folder, unread, arrived)) = change.as_mut() {
+        if *kind == MailChangeKindV1::NewMail {
+            let first_new = before
+                .iter()
+                .find(|old| old.path == *folder)
+                .and_then(|old| old.uid_next);
+            if let Some(first_new) = first_new {
+                if let Some((fresh, silenced)) =
+                    run_rules(app, runtime, account, folder, first_new, &live).await
+                {
+                    *unread = fresh
+                        .iter()
+                        .find(|candidate| candidate.path == *folder)
+                        .map_or(*unread, |candidate| candidate.unread);
+                    *arrived = arrived.saturating_sub(silenced);
+                    if *arrived == 0 {
+                        *kind = MailChangeKindV1::Counts;
+                    }
+                    live = fresh;
+                }
+            }
+        }
+    }
     if let Some((kind, folder, unread, new_messages)) = change {
         emit(
             app,
@@ -1030,6 +1193,52 @@ async fn refresh_folders(
         );
     }
     Ok(live)
+}
+
+/// Runs the account's rules over the Inbox mail a sync just found (UIDs from
+/// `first_new`). Returns the refreshed folder list and how many of the new
+/// messages the rules took out of the alert (moved or marked read), or `None`
+/// when no rule ran or none changed anything. Never fails a sync: the rules
+/// are best effort and report nothing but a code to the diagnostic log.
+async fn run_rules(
+    app: &tauri::AppHandle,
+    runtime: &Runtime,
+    account: &Account,
+    inbox: &str,
+    first_new: u32,
+    folders: &[mail::Folder],
+) -> Option<(Vec<mail::Folder>, u32)> {
+    let account_rules = rules_of(&account.id);
+    if account_rules.is_empty() {
+        return None;
+    }
+    let run = runtime
+        .engine
+        .apply_rules(account, inbox, &account_rules, first_new, folders)
+        .await;
+    log("rules", run.is_ok());
+    let run = run.ok().filter(rules::RuleRun::changed)?;
+    let (id, path) = (account.id.clone(), inbox.to_owned());
+    let (seen, flagged, moved) = (run.seen.clone(), run.flagged.clone(), run.moved.clone());
+    // The cache is an aid: it follows the server where it already has the rows.
+    let _ = db(move |cache| {
+        cache.update_flag_bit(&id, &path, &seen, FLAG_SEEN, true)?;
+        cache.update_flag_bit(&id, &path, &flagged, FLAG_FLAGGED, true)?;
+        cache.remove_messages(&id, &path, &moved)?;
+        Ok(())
+    })
+    .await;
+    if !run.moved.is_empty() {
+        announce_removed(app, &account.id, inbox);
+    }
+    let mut silenced: Vec<u32> = run.seen.iter().chain(&run.moved).copied().collect();
+    silenced.sort_unstable();
+    silenced.dedup();
+    let fresh = runtime.engine.folders(account).await.ok()?;
+    let id = account.id.clone();
+    let records: Vec<MailFolderRecord> = fresh.iter().map(folder_record).collect();
+    let _ = db(move |cache| cache.replace_folders(&id, &records)).await;
+    Some((fresh, u32::try_from(silenced.len()).unwrap_or(u32::MAX)))
 }
 
 fn spawn_watcher(
@@ -2018,6 +2227,135 @@ pub(crate) async fn mail_search(
     outcome.map_err(Into::into)
 }
 
+/// Addresses from cached mail that match what is being typed, best first.
+/// Reads only the local cache: no network, bounded rows and results.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn mail_contacts(
+    caller: WebviewWindow,
+    prefix: String,
+    limit: u32,
+) -> Reply<Vec<MailContactV1>> {
+    let _permit = gate(&caller, "mail_contacts")?;
+    let outcome = async {
+        let limit = limit.clamp(1, zephium_store::mail_cache::MAX_CONTACT_RESULTS);
+        let found = db(move |cache| cache.contacts(&prefix, limit)).await?;
+        Ok::<_, MailError>(
+            found
+                .into_iter()
+                .map(|contact| MailContactV1 {
+                    name: contact.name,
+                    email: contact.email,
+                })
+                .collect(),
+        )
+    }
+    .await;
+    log("contacts", outcome.is_ok());
+    outcome.map_err(Into::into)
+}
+
+/// One account's rules, in the order they run.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn mail_rules(caller: WebviewWindow, account: String) -> Reply<Vec<MailRuleV1>> {
+    let _permit = gate(&caller, "mail_rules")?;
+    let outcome = async {
+        let account = load_account(&account).await?;
+        Ok::<_, MailError>(rules_of(&account.id).iter().map(rule_out).collect())
+    }
+    .await;
+    log("rules_read", outcome.is_ok());
+    outcome.map_err(Into::into)
+}
+
+/// Replaces one account's rules. Invalid or oversized lists are refused whole.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn mail_set_rules(
+    caller: WebviewWindow,
+    account: String,
+    rules: Vec<MailRuleV1>,
+) -> Reply<()> {
+    let _permit = gate(&caller, "mail_set_rules")?;
+    let outcome = async {
+        let account = load_account(&account).await?;
+        if rules.len() > zephium_mail::rules::MAX_RULES_PER_ACCOUNT {
+            return Err(MailError::TooLarge);
+        }
+        let rules: Vec<Rule> = rules.iter().map(rule_in).collect();
+        store_rules(&account.id, rules)
+    }
+    .await;
+    log("set_rules", outcome.is_ok());
+    outcome.map_err(Into::into)
+}
+
+/// Parses a `mailto:` link for a compose window (RFC 6068, bounded; a link
+/// with a line break in a header field or an address that is not plain is
+/// refused). Used for links inside a message.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn mail_parse_mailto(caller: WebviewWindow, url: String) -> Reply<MailtoV1> {
+    let _permit = gate(&caller, "mail_parse_mailto")?;
+    let outcome = zephium_mail::mailto::parse(&url).map(mailto_out);
+    log("parse_mailto", outcome.is_ok());
+    outcome.map_err(Into::into)
+}
+
+/// True for a `mailto:` link the person clicked in a page: the one kind of
+/// external-app request Mail may take over.
+pub(crate) fn is_mailto_request(event: &zephium_core::ports::engine::EngineEvent) -> bool {
+    use zephium_core::ports::engine::EngineEvent;
+    matches!(
+        event,
+        EngineEvent::ExternalAppRequested { url, user_gesture: true, .. }
+            if zephium_mail::mailto::is_mailto(url)
+    )
+}
+
+/// Routes a clicked `mailto:` link to Zephium's compose when Mail is on and an
+/// account exists and the link parses. Otherwise `fallback` gets the event
+/// back unchanged, so the usual "open in another application" card appears.
+pub(crate) fn route_mailto(
+    app: tauri::AppHandle,
+    event: zephium_core::ports::engine::EngineEvent,
+    fallback: impl FnOnce(zephium_core::ports::engine::EngineEvent) + Send + 'static,
+) {
+    use zephium_core::ports::engine::EngineEvent;
+    tauri::async_runtime::spawn(async move {
+        let handled = match &event {
+            EngineEvent::ExternalAppRequested { url, .. } => open_mailto(&app, url).await,
+            _ => false,
+        };
+        log("mailto", handled);
+        if !handled {
+            fallback(event);
+        }
+    });
+}
+
+async fn open_mailto(app: &tauri::AppHandle, url: &str) -> bool {
+    if shutdown_started(app) || !enabled() {
+        return false;
+    }
+    let Ok(parsed) = zephium_mail::mailto::parse(url) else {
+        return false;
+    };
+    match db(|cache| cache.accounts()).await {
+        Ok(accounts) if !accounts.is_empty() => {}
+        _ => return false,
+    }
+    let request = MailComposeRequested {
+        mailto: mailto_out(parsed),
+    };
+    if !try_emit_to_privileged(app, MAIN_LABEL, EVENT_COMPOSE, &request) {
+        return false;
+    }
+    let _ = execute_command(app, "mode.mail");
+    true
+}
+
 /// Starts or stops watching an account's inbox for new mail. The watcher
 /// announces changes through `zephium:mail-changed`.
 #[tauri::command]
@@ -2384,5 +2722,81 @@ mod tests {
         write_attachment(&path, b"new").expect("write");
         assert_eq!(std::fs::read(&path).expect("read"), b"new");
         assert_eq!(std::fs::read_dir(dir.path()).expect("list").count(), 1);
+    }
+
+    #[test]
+    fn rules_cross_the_boundary_both_ways_and_are_validated_before_storing() {
+        let wire = MailRuleV1 {
+            field: MailRuleFieldV1::Subject,
+            contains: "  invoice ".into(),
+            action: MailRuleActionV1::Move,
+            folder: Some("Bills".into()),
+        };
+        let rule = rule_in(&wire);
+        assert_eq!(rule.contains, "invoice", "the text is trimmed");
+        assert_eq!(
+            rule_out(&rule),
+            MailRuleV1 {
+                contains: "invoice".into(),
+                ..wire
+            }
+        );
+        // Refusals happen before the store is touched (there is none in a unit test).
+        let bad = [
+            Rule {
+                contains: String::new(),
+                ..rule.clone()
+            },
+            Rule {
+                folder: None,
+                ..rule.clone()
+            },
+            Rule {
+                contains: "a
+Bcc: x"
+                    .into(),
+                ..rule.clone()
+            },
+        ];
+        for bad in bad {
+            assert_eq!(
+                store_rules("acc-1", vec![bad]),
+                Err(MailError::InvalidInput)
+            );
+        }
+        let many = vec![rule; rules::MAX_RULES_PER_ACCOUNT + 1];
+        assert_eq!(store_rules("acc-1", many), Err(MailError::TooLarge));
+    }
+
+    #[test]
+    fn only_a_clicked_mailto_link_is_taken_over() {
+        use zephium_core::ports::engine::EngineEvent;
+        let event = |url: &str, user_gesture: bool| EngineEvent::ExternalAppRequested {
+            id: zephium_core::ids::ItemId::generate(),
+            url: url.into(),
+            app: None,
+            user_gesture,
+            initiator: zephium_core::navigation::AppLinkSource::Page,
+        };
+        assert!(is_mailto_request(&event("mailto:a@example.com", true)));
+        assert!(is_mailto_request(&event(
+            "MAILTO:a@example.com?subject=x",
+            true
+        )));
+        assert!(!is_mailto_request(&event("mailto:a@example.com", false)));
+        assert!(!is_mailto_request(&event("zoommtg://zoom.us/join", true)));
+        assert!(!is_mailto_request(&EngineEvent::RuntimeRestartRequired));
+    }
+
+    #[test]
+    fn a_parsed_link_carries_only_the_compose_fields() {
+        let wire = mailto_out(
+            zephium_mail::mailto::parse("mailto:a@example.com?cc=b@example.com&subject=Hi&body=Yo")
+                .expect("parse"),
+        );
+        assert_eq!(wire.to, ["a@example.com"]);
+        assert_eq!(wire.cc, ["b@example.com"]);
+        assert!(wire.bcc.is_empty());
+        assert_eq!((wire.subject.as_str(), wire.body.as_str()), ("Hi", "Yo"));
     }
 }

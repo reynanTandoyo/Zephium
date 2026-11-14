@@ -13,6 +13,7 @@ const native = vi.hoisted(() => ({
   setFlags: vi.fn(),
   send: vi.fn(),
   saveDraft: vi.fn(),
+  contacts: vi.fn(),
 }));
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
@@ -24,6 +25,7 @@ vi.mock("$shared/ipc/bindings", async () => {
     mailSetFlags: native.setFlags,
     mailSend: native.send,
     mailSaveDraft: native.saveDraft,
+    mailContacts: native.contacts,
   });
 });
 
@@ -35,6 +37,7 @@ function start(signature = "") {
   native.accounts.mockResolvedValue(ok([{ ...account, signature }]));
   native.folders.mockResolvedValue(ok(folders));
   native.messages.mockResolvedValue(pageOf([message(1)]));
+  native.contacts.mockResolvedValue(ok([]));
 }
 
 test("a new message is sent with the typed recipients; success shows only after the answer", async () => {

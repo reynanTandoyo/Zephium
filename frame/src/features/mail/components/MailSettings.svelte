@@ -34,6 +34,13 @@
       <AccountEditor {store} {account} {index} count={store.accounts.length} />
     {/each}
   </ul>
+
+  <!-- Loaded when settings open: most people never edit rules, and it keeps Mail's first load small. -->
+  {#if store.accounts.length}
+    {#await import("./RuleEditor.svelte") then { default: RuleEditor }}
+      <RuleEditor {store} />
+    {/await}
+  {/if}
 </section>
 
 <style>

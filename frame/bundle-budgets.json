@@ -61,8 +61,12 @@
       "css": 0
     },
     "lazy:features/mail/components/MailPage.svelte": {
-      "js": 246441,
-      "css": 26636
+      "js": 269216,
+      "css": 28183
+    },
+    "lazy:features/mail/components/RuleEditor.svelte": {
+      "js": 8936,
+      "css": 884
     },
     "lazy:features/media/components/MediaPlayer.svelte": {
       "js": 8399,

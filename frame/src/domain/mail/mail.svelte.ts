@@ -7,10 +7,11 @@ import type {
   MailFlagV1,
   MailFolderRoleV1,
   MailFolderV1,
+  MailtoV1,
 } from "$shared/ipc/bindings";
 import { events } from "$shared/ipc/native-events";
 import { callMail, IMAGES_TIMEOUT, READ_TIMEOUT, WRITE_TIMEOUT, type MailFailure } from "./call";
-import { composeFor, type ComposeMode } from "./compose";
+import { composeFor, withSignature, type ComposeMode } from "./compose";
 import { ComposeSession } from "./compose.svelte";
 import { buildThreads, rowKey, type MailRow } from "./thread";
 
@@ -70,6 +71,10 @@ function orderFolders(folders: readonly MailFolderV1[]): MailFolderV1[] {
     );
 }
 
+/** Failures that mean the server could not be reached, not that it said no. */
+const UNREACHABLE: readonly MailFailure[] = ["offline", "timeout", "tls", "unavailable"];
+const unreachable = (error: MailFailure | null) => error !== null && UNREACHABLE.includes(error);
+
 const rowDate = (row: MailRow) => row.message.date ?? 0;
 const byNewest = (a: MailRow, b: MailRow) =>
   rowDate(b) - rowDate(a) || b.message.uid - a.message.uid;
@@ -92,6 +97,14 @@ export class MailStore {
   listError = $state<MailFailure | null>(null);
   /** The list is the local cache because the server could not be reached. */
   fromCache = $state(false);
+  /** The last request that needed the server could not reach it. */
+  private cut = $state(false);
+  /**
+   * Mail is showing what is saved on this computer: the list came from the
+   * cache, or the last server request found no connection. Reading what is
+   * cached still works; anything that needs the server says why it failed.
+   */
+  offline = $derived(this.fromCache || this.cut);
   loadingMore = $state(false);
   syncing = $state(false);
   open = $state<OpenMessage | null>(null);
@@ -210,8 +223,10 @@ export class MailStore {
     if (!outcome.ok) {
       if (!this.folderFailures.includes(account))
         this.folderFailures = [...this.folderFailures, account];
+      if (unreachable(outcome.error)) this.cut = true;
       return false;
     }
+    if (fresh) this.cut = false;
     this.folderFailures = this.folderFailures.filter((id) => id !== account);
     this.folders = { ...this.folders, [account]: outcome.value };
     return true;
@@ -303,6 +318,7 @@ export class MailStore {
     let failure: MailFailure | null = null;
     let succeeded = 0;
     let cached = false;
+    let live = false;
     for (const { source, outcome, page } of results) {
       if (outcome.ok === "aborted") return;
       if (!outcome.ok) {
@@ -314,14 +330,18 @@ export class MailStore {
       if (page && "messages" in outcome.value) {
         cursors[key] = outcome.value.next_before;
         cached ||= outcome.value.from_cache;
+        live ||= !outcome.value.from_cache;
         for (const message of outcome.value.messages) rows.push(this.rowOf(source, message));
       } else if (Array.isArray(outcome.value)) {
         cursors[key] = null;
+        live = true;
         for (const message of outcome.value) rows.push(this.rowOf(source, message));
       }
     }
     this.cursors = cursors;
     this.fromCache = cached;
+    if (live) this.cut = false;
+    else if (unreachable(failure)) this.cut = true;
     this.rows = rows.toSorted(byNewest);
     if (succeeded === 0) {
       this.listState = "failed";
@@ -443,6 +463,7 @@ export class MailStore {
       return;
     if (!outcome.ok) {
       this.open = { row, state: "failed", body: null, error: outcome.error, remote: noRemote() };
+      if (unreachable(outcome.error)) this.cut = true;
       return;
     }
     this.open = { row, state: "ready", body: outcome.value, error: null, remote: noRemote() };
@@ -499,7 +520,7 @@ export class MailStore {
     );
     if (outcome.ok === "aborted") return null;
     if (!outcome.ok) {
-      this.notice = { action: "open", error: outcome.error };
+      this.failedAction("open", outcome.error);
       return null;
     }
     return outcome.value;
@@ -568,7 +589,7 @@ export class MailStore {
       if (outcome.ok === "aborted") return false;
       if (!outcome.ok) {
         allOk = false;
-        this.notice = { action, error: outcome.error };
+        this.failedAction(action, outcome.error);
         continue;
       }
       const key = flag === "seen" ? "seen" : "flagged";
@@ -611,7 +632,7 @@ export class MailStore {
       if (outcome.ok === "aborted") return false;
       if (!outcome.ok) {
         allOk = false;
-        this.notice = { action, error: outcome.error };
+        this.failedAction(action, outcome.error);
         continue;
       }
       this.patchRows(group.rows, () => null);
@@ -661,13 +682,19 @@ export class MailStore {
       if (outcome.ok === "aborted") return false;
       if (!outcome.ok) {
         allOk = false;
-        this.notice = { action: "delete", error: outcome.error };
+        this.failedAction("delete", outcome.error);
         continue;
       }
       this.patchRows(group.rows, () => null);
     }
     this.markPending(rows, false);
     return allOk;
+  }
+
+  /** An action that needs the server failed; say so, and note a lost connection. */
+  private failedAction(action: MailNotice["action"], error: MailFailure) {
+    this.notice = { action, error };
+    if (unreachable(error)) this.cut = true;
   }
 
   dismissNotice() {
@@ -759,6 +786,51 @@ export class MailStore {
     this.compose?.dispose();
     this.compose = new ComposeSession(composeFor(mode, account, original), () => this.accounts);
     return true;
+  }
+
+  /**
+   * Starts a new message from a parsed `mailto:` link. Only the fields the
+   * link may set are used; the signature of the account the message is from
+   * goes below the body as in any new message.
+   */
+  startComposeFromLink(link: MailtoV1): boolean {
+    const accountId =
+      this.selection.account !== ALL_INBOXES
+        ? this.selection.account
+        : (this.accounts[0]?.id ?? "");
+    const account = this.account(accountId) ?? this.accounts[0];
+    if (!account) return false;
+    const blank = composeFor("new", account);
+    const text = link.body ? withSignature(`${link.body}\n`, account.signature) : blank.text;
+    this.compose?.dispose();
+    this.open = null;
+    this.compose = new ComposeSession(
+      {
+        ...blank,
+        to: link.to.join(", "),
+        cc: link.cc.join(", "),
+        bcc: link.bcc.join(", "),
+        subject: link.subject,
+        text,
+      },
+      () => this.accounts,
+    );
+    return true;
+  }
+
+  /** A `mailto:` link inside a message: Rust parses it, then the message is started. */
+  async composeFromLink(url: string): Promise<boolean> {
+    const outcome = await callMail(
+      () => commands.mailParseMailto(url),
+      READ_TIMEOUT,
+      this.lifetime.signal,
+    );
+    if (outcome.ok === "aborted") return false;
+    if (!outcome.ok) {
+      this.notice = { action: "open", error: outcome.error };
+      return false;
+    }
+    return this.startComposeFromLink(outcome.value);
   }
 
   closeCompose() {

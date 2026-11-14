@@ -211,6 +211,21 @@ export const commands = {
 	 */
 	mailWatch: (account: string, on: boolean) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_watch", { account, on })),
 	/**
+	 *  Addresses from cached mail that match what is being typed, best first.
+	 *  Reads only the local cache: no network, bounded rows and results.
+	 */
+	mailContacts: (prefix: string, limit: number) => typedError<MailContactV1[], MailErrorV1>(__TAURI_INVOKE("mail_contacts", { prefix, limit })),
+	/**  One account's rules, in the order they run. */
+	mailRules: (account: string) => typedError<MailRuleV1[], MailErrorV1>(__TAURI_INVOKE("mail_rules", { account })),
+	/**  Replaces one account's rules. Invalid or oversized lists are refused whole. */
+	mailSetRules: (account: string, rules: MailRuleV1[]) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_set_rules", { account, rules })),
+	/**
+	 *  Parses a `mailto:` link for a compose window (RFC 6068, bounded; a link
+	 *  with a line break in a header field or an address that is not plain is
+	 *  refused). Used for links inside a message.
+	 */
+	mailParseMailto: (url: string) => typedError<MailtoV1, MailErrorV1>(__TAURI_INVOKE("mail_parse_mailto", { url })),
+	/**
 	 *  A toast for a batch of new mail. The frame counts the batch and words it
 	 *  in the person's language; this only checks the text is a short line. No
 	 *  sender, subject or message body ever reaches this function.
@@ -813,6 +828,7 @@ export const events = {
 	zephiumImportProgress: makeEvent<ImportJobView>("zephium:import-progress"),
 	zephiumKeymapChanged: makeEvent<KeymapChanged>("zephium:keymap-changed"),
 	zephiumMailChanged: makeEvent<MailChanged>("zephium:mail-changed"),
+	zephiumMailCompose: makeEvent<MailComposeRequested>("zephium:mail-compose"),
 	zephiumPageAssistChanged: makeEvent<PageAssistChanged>("zephium:page-assist-changed"),
 	zephiumSwipe: makeEvent<SwipeScroll>("zephium:swipe"),
 	zephiumVoiceChanged: makeEvent<VoiceChanged>("zephium:voice-changed"),
@@ -1988,6 +2004,17 @@ export type MailChanged = {
 	new_messages: number,
 };
 
+/**  A `mailto:` link was clicked and Mail should open a prefilled message. */
+export type MailComposeRequested = {
+	mailto: MailtoV1,
+};
+
+/**  An address suggested while writing, from cached mail only. */
+export type MailContactV1 = {
+	name: string | null,
+	email: string,
+};
+
 export type MailDraftV1 = {
 	to: MailAddressV1[],
 	cc: MailAddressV1[],
@@ -2120,6 +2147,21 @@ export type MailRemoteImageV1 = {
 	data_url: string,
 };
 
+export type MailRuleActionV1 = "move" | "mark_read" | "flag";
+
+export type MailRuleFieldV1 = "from" | "to" | "subject";
+
+/**
+ *  "If `field` contains `contains`, then `action`." `folder` is the
+ *  destination of a move and `null` for the other actions.
+ */
+export type MailRuleV1 = {
+	field: MailRuleFieldV1,
+	contains: string,
+	action: MailRuleActionV1,
+	folder?: string | null,
+};
+
 export type MailSaveOutcomeV1 = "saved" | "cancelled";
 
 export type MailSecurityV1 = "tls" | "start_tls";
@@ -2135,6 +2177,15 @@ export type MailSendOutcomeV1 = {
 export type MailTestV1 = {
 	imap: MailErrorV1 | null,
 	smtp: MailErrorV1 | null,
+};
+
+/**  A parsed `mailto:` link: only the fields a compose window starts with. */
+export type MailtoV1 = {
+	to: string[],
+	cc: string[],
+	bcc: string[],
+	subject: string,
+	body: string,
 };
 
 export type Material = "none" | "vibrancy" | "liquid_glass" | "acrylic" | "mica" | "mica_alt";

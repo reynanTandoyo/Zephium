@@ -5,6 +5,7 @@ import { events } from "$shared/ipc/native-events";
 import { preferences } from "$domain/preferences";
 import { surface } from "$domain/surface";
 import { callMail, READ_TIMEOUT } from "./call";
+import { mailtoInbox } from "./mailto.svelte";
 
 /** Counts above this show as the cap with a plus. */
 const BADGE_CAP = 99;
@@ -72,6 +73,7 @@ export class MailUnread {
   private folders: Record<string, readonly MailFolderV1[]> = {};
   private holders = 0;
   private stop: (() => void) | null = null;
+  private releaseMailto: (() => void) | null = null;
   private generation = 0;
   private lifetime = new AbortController();
   private pending = 0;
@@ -85,7 +87,11 @@ export class MailUnread {
   /** Keeps the count live while a surface shows it. The result lets go once. */
   hold(): () => void {
     this.holders++;
-    if (this.holders === 1) void this.start();
+    if (this.holders === 1) {
+      void this.start();
+      // Clicked `mailto:` links arrive whenever Mail is on, not only on its page.
+      this.releaseMailto = mailtoInbox.hold();
+    }
     let held = true;
     return () => {
       if (!held) return;
@@ -118,6 +124,8 @@ export class MailUnread {
   }
 
   private halt() {
+    this.releaseMailto?.();
+    this.releaseMailto = null;
     this.generation++;
     this.stop?.();
     this.stop = null;
