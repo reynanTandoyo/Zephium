@@ -358,14 +358,6 @@
     border-radius: var(--radius-card);
   }
 
-  .oauth .note,
-  .oauth .problem,
-  .oauth .good {
-    margin: 0;
-    font-size: var(--text-body);
-    line-height: 1.5;
-  }
-
   .servers {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 88px;
@@ -405,5 +397,13 @@
 
   .good {
     color: var(--color-text);
+  }
+
+  .oauth .note,
+  .oauth .problem,
+  .oauth .good {
+    margin: 0;
+    font-size: var(--text-body);
+    line-height: 1.5;
   }
 </style>
