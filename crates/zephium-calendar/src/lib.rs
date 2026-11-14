@@ -20,12 +20,16 @@ pub mod persist;
 pub mod provider;
 pub mod recur;
 pub mod recurrence;
+pub mod reminders;
 pub mod service;
 pub mod store;
 pub mod tz;
 pub mod vtimezone;
 pub mod xml;
 
+/// Times the crate returns, re-exported so hosts name them without a
+/// second date-time dependency.
+pub use chrono;
 pub use error::{CalendarError, Result};
 pub use service::CalendarService;
 

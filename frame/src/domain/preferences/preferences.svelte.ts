@@ -66,6 +66,8 @@ const defaults = {
   "mail.enabled": "true",
   "mail.notifications": "true",
   "calendar.enabled": "true",
+  "calendar.reminders": "true",
+  "calendar.default_reminder": "none",
   "notes.enabled": "true",
   "tasks.enabled": "true",
   "time.enabled": "true",

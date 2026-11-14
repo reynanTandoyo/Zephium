@@ -281,6 +281,33 @@ fn mail_toast(title: &str, body: &str) -> Option<(String, String)> {
     Some((line(title)?, line(body)?))
 }
 
+/// Longest title or body a calendar toast carries.
+const CALENDAR_TEXT_MAX: usize = 120;
+
+/// A toast for one calendar reminder (or for a count of missed ones). `key`
+/// names it, so each reminder keeps its own toast. The title and body are the
+/// event's text, already in the interface language; they are shown as one
+/// line each. No description or attendee ever reaches this function.
+pub(crate) fn calendar_reminder(key: &str, title: &str, body: &str) {
+    let (Some(title), Some(body)) = (calendar_line(title), calendar_line(body)) else {
+        return;
+    };
+    ask_to_notify();
+    notify(&format!("app.zephium.calendar.{key}"), &title, &body);
+}
+
+/// One line of toast text: control characters become spaces, the ends are
+/// trimmed and the text is cut to [`CALENDAR_TEXT_MAX`] characters. Empty
+/// text yields nothing.
+fn calendar_line(text: &str) -> Option<String> {
+    let flat: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let line: String = flat.trim().chars().take(CALENDAR_TEXT_MAX).collect();
+    (!line.is_empty()).then_some(line)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,5 +374,28 @@ mod tests {
         assert_eq!(toast_tag(&long), toast_tag(&long.clone()));
         assert_ne!(toast_tag("app.zephium.focus"), toast_tag(&long));
         assert!(toast_tag(&long).len() <= 64);
+    }
+
+    #[test]
+    fn a_calendar_toast_is_one_trimmed_line_of_bounded_text() {
+        assert_eq!(
+            calendar_line("  Team sync\n room 4\t"),
+            Some("Team sync  room 4".into())
+        );
+        assert_eq!(calendar_line(" \r\n "), None);
+        let long = "m".repeat(CALENDAR_TEXT_MAX + 30);
+        assert_eq!(
+            calendar_line(&long).map(|line| line.chars().count()),
+            Some(CALENDAR_TEXT_MAX)
+        );
+        // Each reminder has its own toast; a missed-count toast is another.
+        assert_ne!(
+            toast_tag("app.zephium.calendar.calendar|a|u|-|t1"),
+            toast_tag("app.zephium.calendar.calendar|a|u|-|t2")
+        );
+        assert_ne!(
+            toast_tag("app.zephium.calendar.missed"),
+            toast_tag("app.zephium.calendar.calendar|a|u|-|t1")
+        );
     }
 }

@@ -72,6 +72,8 @@ pub const KEYS: &[&str] = &[
     "zoom.default",
     "privacy.smartscreen",
     "mail.notifications",
+    "calendar.reminders",
+    "calendar.default_reminder",
 ];
 
 /// SmartScreen ships on. Only an explicit persisted false disables the
@@ -344,9 +346,11 @@ pub fn value_allowed(key: &str, value: &str) -> bool {
         | "updates.auto-check"
         | "privacy.smartscreen"
         | "mail.notifications"
+        | "calendar.reminders"
         | "focus.breaks" => {
             matches!(value, "true" | "false")
         }
+        "calendar.default_reminder" => matches!(value, "none" | "5" | "10" | "15" | "30"),
         _ => false,
     }
 }

@@ -15,6 +15,7 @@ use crate::http::{
 use crate::ical;
 use crate::model::{Event, EventTime, TimeKind};
 use crate::recur::{self, MAX_OCCURRENCES_PER_EVENT};
+use crate::reminders::{self, Reminder};
 use crate::store::{
     CacheMeta, CachedRecord, CalendarStorage, EventCache, MemoryEventCache, SecretStore,
     StoredState,
@@ -535,6 +536,65 @@ impl CalendarService {
         keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.summary.cmp(&b.1.summary)));
         out.occurrences = keyed.into_iter().map(|(_, item)| item).collect();
         Ok(out)
+    }
+
+    /// Reminders from visible calendars whose alarms fall within a day either
+    /// side of `now`, earliest first and bounded. `default_minutes` applies to
+    /// timed events without an alarm. Occurrences the account declined are
+    /// skipped. Nothing here is shown or recorded; see [`crate::reminders`].
+    pub fn reminders(&self, now: DateTime<Utc>, default_minutes: Option<i64>) -> Vec<Reminder> {
+        let from = now - Duration::hours(reminders::HORIZON_HOURS);
+        let to = now + Duration::hours(reminders::HORIZON_HOURS);
+        let inner = self.lock();
+        let mut out: Vec<Reminder> = Vec::new();
+        let mut scanned = 0_usize;
+        'calendars: for calendar in inner.state.calendars.iter().filter(|c| c.visible) {
+            let Some(cache) = inner.caches.get(&calendar.id) else {
+                continue;
+            };
+            let address = inner
+                .state
+                .accounts
+                .iter()
+                .find(|account| account.id == calendar.account_id)
+                .and_then(|account| account.username.as_deref());
+            for resource in cache.resources.values() {
+                for event in &resource.events {
+                    let expansion = recur::expand(event, from, to, MAX_OCCURRENCES_PER_EVENT);
+                    for occurrence in &expansion.occurrences {
+                        scanned += 1;
+                        if scanned > reminders::MAX_SCANNED_OCCURRENCES {
+                            break 'calendars;
+                        }
+                        if reminders::declined_by(&occurrence.event.attendees, address) {
+                            continue;
+                        }
+                        for trigger in reminders::occurrence_triggers(occurrence, default_minutes) {
+                            if trigger < from || trigger > to {
+                                continue;
+                            }
+                            out.push(Reminder {
+                                key: reminders::reminder_key(
+                                    &calendar.id,
+                                    &occurrence.event.uid,
+                                    occurrence.instance.as_ref(),
+                                    trigger,
+                                ),
+                                title: occurrence.event.summary.clone(),
+                                start: occurrence.start.to_utc(),
+                                all_day: occurrence.start.is_date(),
+                                location: occurrence.event.location.clone(),
+                                trigger,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| a.trigger.cmp(&b.trigger).then_with(|| a.key.cmp(&b.key)));
+        out.dedup_by(|a, b| a.key == b.key);
+        out.truncate(reminders::MAX_REMINDERS);
+        out
     }
 
     // -- sync -----------------------------------------------------------------

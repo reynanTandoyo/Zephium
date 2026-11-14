@@ -609,6 +609,25 @@ export const fields = {
     description: m.feature_calendar_on,
     initial: true,
   },
+  "calendar.reminders": {
+    section: "features",
+    label: m.calendar_reminders_title,
+    description: m.calendar_reminders_on,
+    initial: true,
+  },
+  "calendar.default_reminder": {
+    section: "features",
+    label: m.calendar_default_reminder_title,
+    description: m.calendar_default_reminder_help,
+    initial: "none",
+    options: [
+      { value: "none", label: m.calendar_default_reminder_none },
+      { value: "5", label: m.calendar_default_reminder_option_5 },
+      { value: "10", label: m.calendar_default_reminder_option_10 },
+      { value: "15", label: m.calendar_default_reminder_option_15 },
+      { value: "30", label: m.calendar_default_reminder_option_30 },
+    ],
+  },
   "notes.enabled": {
     section: "features",
     label: m.feature_notes_title,
