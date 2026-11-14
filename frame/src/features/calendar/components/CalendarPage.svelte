@@ -18,6 +18,7 @@
   import * as m from "$shared/i18n/messages";
   import Button from "$shared/ui/Button";
   import EmptyState from "$shared/ui/EmptyState";
+  import LazyView from "$shared/ui/LazyView";
   import Icon from "$shared/ui/Icon";
   import IconButton from "$shared/ui/IconButton";
   import SegmentedControl from "$shared/ui/SegmentedControl";
@@ -46,7 +47,6 @@
   import type { CalendarEventDraftV1 } from "$shared/ipc/bindings";
   import { tabs } from "$domain/tabs";
   import { firstDayOfWeek } from "$domain/time";
-  import AccountsPanel from "./AccountsPanel.svelte";
   import AgendaList from "./AgendaList.svelte";
   import CalendarList from "./CalendarList.svelte";
   import EventDetails from "./EventDetails.svelte";
@@ -454,7 +454,15 @@
           oncancel={close}
         />
       {:else if panel.kind === "accounts"}
-        <AccountsPanel onclose={close} />
+        <!-- Account setup and its words load when it is opened. -->
+        <LazyView
+          loader={() => import("./AccountsPanel.svelte")}
+          loadingLabel={m.calendar_loading()}
+          failureLabel={m.calendar_load_failed()}
+          retryLabel={m.calendar_retry()}
+        >
+          {#snippet children(Accounts)}<Accounts onclose={close} />{/snippet}
+        </LazyView>
       {/if}
     </aside>
   {/if}

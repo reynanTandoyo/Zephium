@@ -1,6 +1,6 @@
 import { getLocale } from "$shared/i18n/runtime";
 import * as m from "$shared/i18n/messages";
-import type { CalendarFault, CalendarView, PlacedEvent } from "$domain/calendar";
+import type { CalendarFault, CalendarView, OauthFault, PlacedEvent } from "$domain/calendar";
 import { addDays, dayNumber } from "$domain/calendar";
 
 export { safeColor } from "$domain/calendar";
@@ -90,7 +90,36 @@ export function faultText(fault: CalendarFault): string {
     case "storage":
       return m.calendar_fault_storage();
     case "unsupported":
+      return m.calendar_fault_unsupported();
     case "unavailable":
       return m.calendar_fault_unavailable();
+  }
+}
+
+/** Why a sign-in failed. A cancelled one is the person’s own doing and says nothing. */
+export function oauthFaultText(fault: OauthFault): string | null {
+  switch (fault) {
+    case "cancelled":
+      return null;
+    case "denied":
+      return m.calendar_oauth_failed({ reason: m.calendar_oauth_error_denied() });
+    case "rejected":
+      return m.calendar_oauth_failed({ reason: m.calendar_oauth_error_rejected() });
+    case "timeout":
+    case "offline":
+      return m.calendar_oauth_failed({ reason: m.calendar_fault_network() });
+    case "credentials":
+      return m.calendar_oauth_failed({ reason: m.calendar_fault_auth() });
+    case "state_mismatch":
+    case "protocol":
+    case "sign_in_required":
+    case "busy":
+    case "internal":
+      return m.calendar_oauth_failed({ reason: m.calendar_oauth_error_failed() });
+    case "invalid_input":
+      return m.calendar_oauth_failed({ reason: m.calendar_oauth_error_invalid() });
+    case "unsupported":
+    default:
+      return faultText(fault as CalendarFault);
   }
 }

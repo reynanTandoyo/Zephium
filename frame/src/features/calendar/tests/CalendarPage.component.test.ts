@@ -32,6 +32,10 @@ const native = vi.hoisted(() => ({
   addAccount: vi.fn(),
   open: vi.fn(),
   createTask: vi.fn(),
+  signIn: vi.fn(),
+  addOauth: vi.fn(),
+  discard: vi.fn(),
+  cancel: vi.fn(),
 }));
 
 const ok = <T>(data: T) => ({ status: "ok" as const, data });
@@ -56,6 +60,10 @@ vi.mock("$shared/ipc/bindings", async () => {
     calendarDeleteOccurrence: native.removeOccurrence,
     calendarDeleteEvent: native.remove,
     browserOpenUrl: native.open,
+    oauthSignIn: native.signIn,
+    calendarAddOauthAccount: native.addOauth,
+    oauthDiscardGrant: native.discard,
+    oauthCancelSignIn: native.cancel,
     runCommand: async () => ({ accepted: true, operation_id: null }),
   });
 });
@@ -225,6 +233,28 @@ beforeEach(() => {
   );
   native.removeOccurrence.mockResolvedValue(ok(null));
   native.createTask.mockResolvedValue("task-1");
+  native.signIn.mockResolvedValue(
+    ok({
+      handle: "grant-1",
+      provider: "google",
+      client_id: "id",
+      tenant: null,
+      expires_in_secs: 600,
+    }),
+  );
+  native.addOauth.mockImplementation(async () => {
+    const account: CalendarAccountV1 = {
+      id: "oauth",
+      kind: "google",
+      name: "Gmail",
+      server_url: "https://www.googleapis.com",
+      username: null,
+    };
+    native.server.accounts.push(account);
+    return ok(account);
+  });
+  native.discard.mockResolvedValue(ok(null));
+  native.cancel.mockResolvedValue(ok(null));
   native.addAccount.mockImplementation(async () => err("unauthorized"));
   native.open.mockResolvedValue({ accepted: true, operation_id: null });
 });
@@ -613,4 +643,74 @@ test("opens on the event another surface asked for, on its own day", async () =>
   const screen = await setup();
   await expect.element(screen.getByRole("heading", { name: "Offsite dinner" })).toBeVisible();
   expect(eventOpen.pending()).toBeNull();
+});
+
+async function openAccounts(screen: Awaited<ReturnType<typeof setup>>) {
+  await screen.getByRole("button", { name: "Accounts" }).first().click();
+}
+
+test("signs in with Google, clears the secret on submit and adds the account", async () => {
+  const screen = await setup();
+  await openAccounts(screen);
+  await screen.getByRole("button", { name: "Sign in with Google" }).click();
+  await expect.element(screen.getByText(/docs\/fork-oauth\.md/u)).toBeVisible();
+
+  await screen.getByLabelText("Client ID").fill("client-123");
+  const secret = screen.getByLabelText("Client secret (optional)");
+  await expect.element(secret).toHaveAttribute("type", "password");
+  await secret.fill("shh-secret");
+  await screen.getByLabelText("Name").fill("Gmail");
+  await screen.getByRole("button", { name: "Sign in with Google" }).last().click();
+
+  await vi.waitFor(() => expect(native.addOauth).toHaveBeenCalledTimes(1));
+  expect(native.signIn).toHaveBeenCalledWith("google", "client-123", null, "shh-secret", [
+    "calendar",
+  ]);
+  expect(native.addOauth).toHaveBeenCalledWith("grant-1", "Gmail");
+  expect(document.body.innerHTML).not.toContain("shh-secret");
+  // The account is listed once native has it, with its kind.
+  await expect.element(screen.getByText("Google Calendar")).toBeVisible();
+  expect(native.discard).not.toHaveBeenCalled();
+});
+
+test("a refused account discards the grant and keeps the form with its reason, secret cleared", async () => {
+  native.addOauth.mockResolvedValue(err("unauthorized"));
+  const screen = await setup();
+  await openAccounts(screen);
+  await screen.getByRole("button", { name: "Sign in with Google" }).click();
+  await screen.getByLabelText("Client ID").fill("client-123");
+  const secret = screen.getByLabelText("Client secret (optional)");
+  await secret.fill("shh-secret");
+  await screen.getByRole("button", { name: "Sign in with Google" }).last().click();
+
+  await vi.waitFor(() => expect(native.discard).toHaveBeenCalledWith("grant-1"));
+  await expect.element(screen.getByRole("alert")).toBeVisible();
+  await expect.element(secret).toHaveValue("");
+  await expect.element(screen.getByText(/cleared after it was sent/u)).toBeVisible();
+});
+
+test("Microsoft asks for a tenant, warns about single occurrences, and a cancelled sign-in says nothing", async () => {
+  let release!: (value: unknown) => void;
+  native.signIn.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+  const screen = await setup();
+  await openAccounts(screen);
+  await screen.getByRole("button", { name: "Sign in with Microsoft" }).click();
+  await expect.element(screen.getByLabelText("Tenant (optional)")).toBeVisible();
+  await expect.element(screen.getByLabelText("Client secret (optional)")).not.toBeInTheDocument();
+  await expect.element(screen.getByText(/single occurrence of a repeating event/u)).toBeVisible();
+
+  await screen.getByLabelText("Client ID").fill("ms-client");
+  await screen.getByLabelText("Tenant (optional)").fill("organizations");
+  await screen.getByRole("button", { name: "Sign in with Microsoft" }).last().click();
+  await expect.element(screen.getByText("Waiting for the browser…")).toBeVisible();
+  await screen.getByRole("button", { name: "Cancel sign-in" }).click();
+  expect(native.cancel).toHaveBeenCalledTimes(1);
+  release(err("cancelled" as never));
+
+  expect(native.signIn).toHaveBeenCalledWith("microsoft", "ms-client", "organizations", null, [
+    "calendar",
+  ]);
+  await expect.element(screen.getByLabelText("Client ID")).toBeVisible();
+  await expect.element(screen.getByRole("alert")).not.toBeInTheDocument();
+  expect(native.addOauth).not.toHaveBeenCalled();
 });
