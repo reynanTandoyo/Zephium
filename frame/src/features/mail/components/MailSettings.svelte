@@ -9,7 +9,6 @@
   import Button from "$shared/ui/Button";
   import { reasonText } from "../lib/text";
   import AccountEditor from "./AccountEditor.svelte";
-  import RuleEditor from "./RuleEditor.svelte";
 
   let { store, onadd, onback }: { store: MailStore; onadd: () => void; onback: () => void } =
     $props();
@@ -36,7 +35,12 @@
     {/each}
   </ul>
 
-  {#if store.accounts.length}<RuleEditor {store} />{/if}
+  <!-- Loaded when settings open: most people never edit rules, and it keeps Mail's first load small. -->
+  {#if store.accounts.length}
+    {#await import("./RuleEditor.svelte") then { default: RuleEditor }}
+      <RuleEditor {store} />
+    {/await}
+  {/if}
 </section>
 
 <style>

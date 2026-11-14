@@ -130,7 +130,7 @@ test("Offline shows while the list is the saved copy and goes when the server an
   await expect.element(page.getByRole("status").filter({ hasText: /^Offline$/u })).toBeVisible();
   await expect.element(page.getByText("Offline: showing saved messages")).toBeVisible();
   native.messages.mockResolvedValue(pageOf([message(1)]));
-  await page.getByRole("button", { name: /Sync/u }).click();
+  await page.getByRole("button", { name: /Check for new mail/u }).click();
   await expect
     .element(page.getByRole("status").filter({ hasText: /^Offline$/u }))
     .not.toBeInTheDocument();
@@ -144,7 +144,11 @@ test("a sync that cannot reach the server shows Offline and keeps the folders", 
   await expect
     .element(page.getByRole("status").filter({ hasText: /^Offline$/u }))
     .not.toBeInTheDocument();
-  await page.getByRole("button", { name: /Sync/u }).click();
+  // With the server gone, the list that follows the sync is the saved copy too.
+  native.messages.mockResolvedValue(
+    ok({ messages: [message(1)], next_before: null, total: 1, from_cache: true }),
+  );
+  await page.getByRole("button", { name: /Check for new mail/u }).click();
   await expect.element(page.getByRole("status").filter({ hasText: /^Offline$/u })).toBeVisible();
   await expect.element(page.getByText("Ann Example")).toBeVisible();
 });
@@ -197,7 +201,7 @@ test("stored rules load in order and a new rule is saved exactly as typed", asyn
     { field: "from", contains: "boss", action: "flag", folder: null },
     { field: "from", contains: "Newsletter", action: "mark_read", folder: null },
   ]);
-  await expect.element(page.getByText("Saved.")).toBeVisible();
+  await expect.element(page.getByText("Saved", { exact: true })).toBeVisible();
 });
 
 test("a move rule needs a folder, and choosing one enables saving", async () => {
@@ -208,7 +212,7 @@ test("a move rule needs a folder, and choosing one enables saving", async () => 
   await page.getByLabelText("Text to look for").fill("invoice");
   await page.getByRole("button", { name: "Action" }).click();
   await page.getByRole("option", { name: "Move to folder" }).click();
-  await expect.element(page.getByText("Choose a folder.")).not.toBeInTheDocument();
+  await expect.element(page.getByText("Choose a folder.")).toBeVisible();
   await expect.element(page.getByRole("button", { name: "Save rules" })).toBeDisabled();
   await page.getByRole("button", { name: "Folder" }).click();
   await page.getByRole("option", { name: "Archive" }).click();
@@ -237,7 +241,7 @@ test("rules are reordered and removed, and a refused save is reported", async ()
   expect(native.setRules).toHaveBeenCalledWith("acc-1", [
     { field: "subject", contains: "two", action: "mark_read", folder: null },
   ]);
-  await expect.element(page.getByText("Saved.")).not.toBeInTheDocument();
+  await expect.element(page.getByText("Saved", { exact: true })).not.toBeInTheDocument();
 });
 
 test("a rule list that cannot be read says why and offers a retry", async () => {

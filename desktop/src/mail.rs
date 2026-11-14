@@ -2753,12 +2753,16 @@ mod tests {
             },
             Rule {
                 contains: "a
-Bcc: x".into(),
+Bcc: x"
+                    .into(),
                 ..rule.clone()
             },
         ];
         for bad in bad {
-            assert_eq!(store_rules("acc-1", vec![bad]), Err(MailError::InvalidInput));
+            assert_eq!(
+                store_rules("acc-1", vec![bad]),
+                Err(MailError::InvalidInput)
+            );
         }
         let many = vec![rule; rules::MAX_RULES_PER_ACCOUNT + 1];
         assert_eq!(store_rules("acc-1", many), Err(MailError::TooLarge));
@@ -2775,7 +2779,10 @@ Bcc: x".into(),
             initiator: zephium_core::navigation::AppLinkSource::Page,
         };
         assert!(is_mailto_request(&event("mailto:a@example.com", true)));
-        assert!(is_mailto_request(&event("MAILTO:a@example.com?subject=x", true)));
+        assert!(is_mailto_request(&event(
+            "MAILTO:a@example.com?subject=x",
+            true
+        )));
         assert!(!is_mailto_request(&event("mailto:a@example.com", false)));
         assert!(!is_mailto_request(&event("zoommtg://zoom.us/join", true)));
         assert!(!is_mailto_request(&EngineEvent::RuntimeRestartRequired));
