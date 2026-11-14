@@ -85,7 +85,7 @@ test("Features, and the Work group as AI and Work go off, both themes", async ()
   await shoot("models", "ai");
 
   settings.select("features");
-  await page.getByRole("switch", { name: "AI" }).click();
+  await page.getByRole("switch", { name: "AI", exact: true }).click();
   await settle();
   for (const theme of ["dark", "light"]) {
     document.documentElement.dataset.theme = theme;
