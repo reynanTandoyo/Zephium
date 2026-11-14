@@ -1133,3 +1133,22 @@ async fn a_single_event_reports_no_series() {
     assert!(only.series_start.is_none() && only.series_end.is_none());
     assert!(only.series_tzid.is_none() && only.rrule.is_none() && only.recurrence.is_none());
 }
+
+#[tokio::test]
+async fn reminders_come_from_visible_calendars_with_the_default_offset() {
+    let h = signed_in().await;
+    h.service.sync_all().await;
+    // "Planning" starts 08:00Z on 12 January; the clock reads 07:00Z.
+    let now = utc("2026-01-12T07:00:00Z");
+    assert!(h.service.reminders(now, None).is_empty());
+    let found = h.service.reminders(now, Some(15));
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].title, "Planning");
+    assert_eq!(found[0].trigger, utc("2026-01-12T07:45:00Z"));
+    assert!(!found[0].all_day);
+    assert!(found[0].key.starts_with("calendar|"));
+    // A hidden calendar gives no reminders.
+    let work = h.service.calendars()[0].clone();
+    h.service.set_visible(&work.id, false).expect("hide");
+    assert!(h.service.reminders(now, Some(15)).is_empty());
+}

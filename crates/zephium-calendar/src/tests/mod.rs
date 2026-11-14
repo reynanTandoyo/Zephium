@@ -7,6 +7,7 @@ mod oauth;
 mod persist;
 mod recur;
 mod recurrence;
+mod reminders;
 mod service;
 
 use crate::error::{CalendarError, Result};
