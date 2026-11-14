@@ -13,6 +13,10 @@ const host = vi.hoisted(() => ({
   events: vi.fn(),
   setVisible: vi.fn(),
   create: vi.fn(),
+  signIn: vi.fn(),
+  addOauth: vi.fn(),
+  discard: vi.fn(),
+  cancel: vi.fn(),
   updateOccurrence: vi.fn(),
   deleteOccurrence: vi.fn(),
   sync: vi.fn(),
@@ -27,6 +31,10 @@ vi.mock("$shared/ipc/bindings", async () => {
     calendarEvents: host.events,
     calendarSetVisible: host.setVisible,
     calendarCreateEvent: host.create,
+    oauthSignIn: host.signIn,
+    calendarAddOauthAccount: host.addOauth,
+    oauthDiscardGrant: host.discard,
+    oauthCancelSignIn: host.cancel,
     calendarUpdateOccurrence: host.updateOccurrence,
     calendarDeleteOccurrence: host.deleteOccurrence,
     calendarSync: host.sync,
@@ -256,4 +264,84 @@ test("changes and deletes one occurrence by its recurrence id, then reads back",
     ok: false,
     error: "not_found",
   });
+});
+
+const grant = {
+  handle: "h1",
+  provider: "google",
+  client_id: "id",
+  tenant: null,
+  expires_in_secs: 600,
+};
+
+test("signs in for calendar, adds the account and reads back", async () => {
+  await init();
+  host.signIn.mockResolvedValue(ok(grant));
+  host.addOauth.mockResolvedValue(ok({ ...account, kind: "google" }));
+  const before = host.accounts.mock.calls.length;
+  const result = await store.addOauthAccount("google", " id ", "ignored", "s3cret", " Mine ");
+  expect(result).toEqual({ ok: true });
+  // Google sends its secret and no tenant; the purpose is calendar only.
+  expect(host.signIn).toHaveBeenCalledWith("google", "id", null, "s3cret", ["calendar"]);
+  expect(host.addOauth).toHaveBeenCalledWith("h1", "Mine");
+  expect(host.discard).not.toHaveBeenCalled();
+  expect(host.accounts.mock.calls.length).toBe(before + 1);
+  expect(store.busy()).toBeNull();
+});
+
+test("Microsoft sends its tenant, or none for the default, and no secret", async () => {
+  await init();
+  host.signIn.mockResolvedValue(ok({ ...grant, provider: "microsoft" }));
+  host.addOauth.mockResolvedValue(ok({ ...account, kind: "microsoft" }));
+  await store.addOauthAccount("microsoft", "id", " organizations ", "ignored", "");
+  expect(host.signIn).toHaveBeenLastCalledWith("microsoft", "id", "organizations", null, [
+    "calendar",
+  ]);
+  expect(host.addOauth).toHaveBeenLastCalledWith("h1", null);
+  await store.addOauthAccount("microsoft", "id", "  ", "", "");
+  expect(host.signIn).toHaveBeenLastCalledWith("microsoft", "id", null, null, ["calendar"]);
+});
+
+test("a grant the backend refuses is discarded, and the reason is kept", async () => {
+  await init();
+  host.signIn.mockResolvedValue(ok(grant));
+  host.addOauth.mockResolvedValue(err("unsupported"));
+  host.discard.mockRejectedValue(new Error("gone"));
+  const result = await store.addOauthAccount("google", "id", "", "", "");
+  expect(result).toEqual({ ok: false, error: "unsupported" });
+  expect(host.discard).toHaveBeenCalledWith("h1");
+  expect(store.busy()).toBeNull();
+});
+
+test("a failed or cancelled sign-in adds nothing", async () => {
+  await init();
+  host.signIn.mockResolvedValue({ status: "error" as const, error: "cancelled" });
+  expect(await store.addOauthAccount("google", "id", "", "", "")).toEqual({
+    ok: false,
+    error: "cancelled",
+  });
+  expect(host.addOauth).not.toHaveBeenCalled();
+  host.signIn.mockRejectedValue(new Error("no host"));
+  expect(await store.addOauthAccount("google", "id", "", "", "")).toEqual({
+    ok: false,
+    error: "unavailable",
+  });
+});
+
+test("a sign-in waits for none other, and can be cancelled", async () => {
+  await init();
+  let release!: (value: unknown) => void;
+  host.signIn.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+  const first = store.addOauthAccount("google", "id", "", "", "");
+  expect(store.busy()).toBe("account");
+  expect(await store.addOauthAccount("google", "id", "", "", "")).toEqual({
+    ok: false,
+    error: "busy",
+  });
+  host.cancel.mockResolvedValue(ok(null));
+  store.cancelSignIn();
+  expect(host.cancel).toHaveBeenCalledTimes(1);
+  release({ status: "error", error: "cancelled" });
+  await first;
+  expect(store.busy()).toBeNull();
 });

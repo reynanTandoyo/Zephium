@@ -5,6 +5,8 @@ import type {
   CalendarEventDraftV1,
   CalendarOccurrenceV1,
   CalendarV1,
+  OAuthErrorV1,
+  OAuthProviderV1,
 } from "$shared/ipc/bindings";
 import { commands } from "$shared/ipc/bindings";
 import { events } from "$shared/ipc/native-events";
@@ -14,6 +16,9 @@ import { openMeeting } from "$domain/calendar-agenda";
  *  itself could not be made. */
 export type CalendarFault = CalendarError | "unavailable";
 export type CalendarResult<T = null> = { ok: true; value: T } | { ok: false; error: CalendarFault };
+
+/** Why a sign-in or the account it should add failed. */
+export type OauthFault = OAuthErrorV1 | CalendarFault;
 
 export type LoadState = "idle" | "loading" | "ready" | "failed";
 export type Busy = "sync" | "account" | "save" | "delete" | "visibility" | null;
@@ -155,6 +160,57 @@ export const addAccount = (
   run("account", () =>
     call(() => commands.calendarAddAccount(serverUrl.trim(), username.trim(), password, name)),
   );
+
+/** Signs in with Microsoft or Google in the person's browser and adds the
+ *  calendars that grant reaches. The client secret is passed through and kept
+ *  nowhere; a grant the calendar backend refuses is discarded, never left
+ *  waiting for its ten minutes to run out. */
+export async function addOauthAccount(
+  provider: OAuthProviderV1,
+  clientId: string,
+  tenant: string,
+  clientSecret: string,
+  name: string,
+): Promise<{ ok: true } | { ok: false; error: OauthFault }> {
+  if (working !== null) return { ok: false, error: "busy" };
+  working = "account";
+  try {
+    const signed = await commands
+      .oauthSignIn(
+        provider,
+        clientId.trim(),
+        provider === "microsoft" ? tenant.trim() || null : null,
+        provider === "google" ? clientSecret || null : null,
+        ["calendar"],
+      )
+      .catch(() => null);
+    if (signed === null) return { ok: false, error: "unavailable" };
+    if (signed.status === "error") return { ok: false, error: signed.error };
+    const { handle } = signed.data;
+    const added = await call(() => commands.calendarAddOauthAccount(handle, name.trim() || null));
+    if (!added.ok) {
+      try {
+        await commands.oauthDiscardGrant(handle);
+      } catch {
+        // The handle expires on its own; nothing more to do.
+      }
+      return added;
+    }
+    await refresh();
+    return { ok: true };
+  } finally {
+    working = null;
+  }
+}
+
+/** Stops a sign-in that is waiting for the browser. */
+export function cancelSignIn(): void {
+  try {
+    void commands.oauthCancelSignIn().catch(() => {});
+  } catch {
+    // Nothing was waiting.
+  }
+}
 
 export const addSubscription = (url: string, name: string) =>
   run("account", () => call(() => commands.calendarAddSubscription(url.trim(), name.trim())));
