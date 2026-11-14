@@ -4,17 +4,22 @@
 //! `calendar.json` in the profile data directory is imported once and renamed
 //! to `calendar.json.migrated`. Passwords live only in the OS credential vault
 //! (`app.zephium.calendar|<account id>`) and never cross IPC outward. All
-//! domain logic is in `zephium-calendar`.
+//! domain logic is in `zephium-calendar`. Reminders (T-0044) are shown from a
+//! background scheduler here; their ledger is one app setting.
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use zephium_calendar::api::{
     parse_instant, CalendarAccountV1, CalendarDiscoveryV1, CalendarEventDraftV1,
     CalendarEventRefV1, CalendarEventsV1, CalendarSyncReportV1, CalendarV1,
 };
+use zephium_calendar::chrono::{DateTime, Utc};
 use zephium_calendar::http::{ReqwestClient, Secret};
 use zephium_calendar::persist::StoreCalendar;
+use zephium_calendar::reminders::{self, Ledger, Plan, Reminder, DEFAULT_CHOICES};
 use zephium_calendar::store::VaultSecrets;
 use zephium_calendar::{CalendarError, CalendarService};
+use zephium_core::ports::store::Store;
 
 /// How often the background task looks for calendars that are due. A CalDAV
 /// calendar is due once its last refresh is 15 minutes old (see
@@ -22,6 +27,19 @@ use zephium_calendar::{CalendarError, CalendarService};
 const REFRESH_EVERY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 /// How often the background task checks for shutdown while waiting.
 const SHUTDOWN_POLL: std::time::Duration = std::time::Duration::from_secs(2);
+/// Settings: `calendar.reminders` ("false" turns reminders off) and
+/// `calendar.default_reminder` (minutes, for timed events without an alarm).
+const REMINDERS_SETTING: &str = "calendar.reminders";
+const DEFAULT_REMINDER_SETTING: &str = "calendar.default_reminder";
+/// The reminder ledger: when the last pass ran and which reminders were shown.
+const LEDGER_SETTING: &str = "calendar.reminder-ledger";
+/// Longest location a reminder toast shows after its start time.
+const LOCATION_MAX: usize = 60;
+/// The first reminder pass waits for the saved events to be read.
+const REMINDER_START_DELAY: std::time::Duration = std::time::Duration::from_secs(8);
+/// Bumped whenever calendars or events change, so the reminder scheduler
+/// plans again instead of sleeping on an older plan.
+static REPLAN: AtomicU64 = AtomicU64::new(0);
 
 /// Calendars, accounts or events changed; read them again.
 #[derive(Clone, Debug, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
@@ -33,6 +51,7 @@ pub(crate) struct CalendarChanged {
 struct CalendarState(Arc<CalendarService>);
 
 fn changed(app: &tauri::AppHandle) {
+    REPLAN.fetch_add(1, Ordering::AcqRel);
     emit_to_privileged(
         app,
         MAIN_LABEL,
@@ -71,6 +90,7 @@ pub(crate) fn install(app: &tauri::AppHandle, data_dir: &std::path::Path) {
         }
     };
     app.manage(CalendarState(service.clone()));
+    spawn_reminders(app.clone(), service.clone());
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         // Read the saved events off the setup path.
@@ -92,6 +112,106 @@ pub(crate) fn install(app: &tauri::AppHandle, data_dir: &std::path::Path) {
             }
         }
     });
+}
+
+/// Runs the reminder scheduler: a pass now and then one at each next
+/// reminder, at least once a minute, and at once when calendars change.
+fn spawn_reminders(app: tauri::AppHandle, service: Arc<CalendarService>) {
+    tauri::async_runtime::spawn(async move {
+        let mut ledger = Ledger::load(app_setting(LEDGER_SETTING).as_deref());
+        let seen = REPLAN.load(Ordering::Acquire);
+        if wait_for_replan(&app, REMINDER_START_DELAY, seen).await {
+            return;
+        }
+        loop {
+            let seen = REPLAN.load(Ordering::Acquire);
+            let now = Utc::now();
+            let plan = reminder_pass(&service, &mut ledger, now);
+            if shutdown_started(&app) {
+                return;
+            }
+            let wait = Ledger::wait_after(&plan, now);
+            if wait_for_replan(&app, wait, seen).await {
+                return;
+            }
+        }
+    });
+}
+
+/// One scheduler pass at `now`: reads the two settings, finds the reminders,
+/// shows the due ones and saves the ledger when it is due. The result says
+/// what was shown and when to look again.
+fn reminder_pass(service: &CalendarService, ledger: &mut Ledger, now: DateTime<Utc>) -> Plan {
+    let enabled = app_setting(REMINDERS_SETTING).as_deref() != Some("false");
+    let default = app_setting(DEFAULT_REMINDER_SETTING)
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|minutes| DEFAULT_CHOICES.contains(minutes));
+    let found = if enabled {
+        service.reminders(now, default)
+    } else {
+        Vec::new()
+    };
+    let plan = ledger.pass(now, &found);
+    if let Some(saved) = ledger.save_if_due(now, &plan) {
+        if let Some(store) = crate::APP_STORE.get() {
+            store.set_app_setting(LEDGER_SETTING.into(), saved);
+        }
+    }
+    if enabled {
+        for reminder in &plan.due {
+            show_reminder(reminder, now);
+        }
+        if plan.missed > 0 {
+            let title = crate::menu_text::message("calendar_reminders_title", "Calendar reminders");
+            let body = crate::menu_text::message(
+                "calendar_reminders_missed",
+                "{count} calendar reminders were missed.",
+            )
+            .replace("{count}", &plan.missed.to_string());
+            crate::focus_alerts::calendar_reminder("missed", &title, &body);
+        }
+    }
+    plan
+}
+
+/// The toast for one reminder: the event's title, then its start time and,
+/// when short, its location. Nothing else of the event is shown.
+fn show_reminder(reminder: &Reminder, now: DateTime<Utc>) {
+    let title = if reminder.title.trim().is_empty() {
+        crate::menu_text::message("calendar_reminder_untitled", "Untitled event")
+    } else {
+        reminder.title.clone()
+    };
+    let when = if reminder.all_day {
+        crate::menu_text::message("calendar_reminder_all_day", "All day")
+    } else {
+        reminders::start_label(reminder.start, now)
+    };
+    let location = reminder.location.trim();
+    let body = if !location.is_empty() && location.chars().count() <= LOCATION_MAX {
+        format!("{when}, {location}")
+    } else {
+        when
+    };
+    crate::focus_alerts::calendar_reminder(&reminder.key, &title, &body);
+}
+
+/// Sleeps up to `wait`, returning early when calendars changed since `seen`.
+/// `true` when shutdown began meanwhile.
+async fn wait_for_replan(app: &tauri::AppHandle, wait: std::time::Duration, seen: u64) -> bool {
+    let mut waited = std::time::Duration::ZERO;
+    while waited < wait {
+        if shutdown_started(app) {
+            return true;
+        }
+        if REPLAN.load(Ordering::Acquire) != seen {
+            return false;
+        }
+        let step = SHUTDOWN_POLL.min(wait - waited);
+        tokio::time::sleep(step).await;
+        waited += step;
+    }
+    shutdown_started(app)
 }
 
 /// Sleeps for `duration`; `true` when shutdown began meanwhile.
