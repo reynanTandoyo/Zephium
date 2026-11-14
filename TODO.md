@@ -70,9 +70,6 @@ Last ID: T-0046
 
 ## Open
 
-- [ ] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
-  - Shares sign-in with T-0034; only if needed (see T-0019).
-  - 2026-11-13: backend done (`2e9d71508`..`0e618bca7` + META v31 `oauth` account kind): Google Calendar API v3 and Microsoft Graph (calendarView/delta) providers, `calendar_add_oauth_account(grant, name)`, guide updated. Tests: calendar 87, oauth 39, store calendar 9 + migrations 61 pass, clippy clean (Windows, fakes only). Open: `oauth_sign_in` `purposes` argument (mail follow-ups worker), the UI fields in Calendar accounts, occurrence edits on Microsoft unsupported.
 - [ ] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: - · updated: 2026-11-13
   - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
 - [ ] T-0002 · Launch `pnpm dev` and confirm "Zephium Dev" starts · area: desktop, frame · owner: - · updated: 2026-11-13
@@ -92,6 +89,10 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: orca w3-calendar-oauth + w2-calendar-ui · updated: 2026-11-13
+  - Shares sign-in with T-0034; only if needed (see T-0019).
+  - 2026-11-13: backend done (`2e9d71508`..`0e618bca7` + META v31 `oauth` account kind): Google Calendar API v3 and Microsoft Graph (calendarView/delta) providers, `calendar_add_oauth_account(grant, name)`, guide updated. Tests: calendar 87, oauth 39, store calendar 9 + migrations 61 pass, clippy clean (Windows, fakes only). Open: `oauth_sign_in` `purposes` argument (mail follow-ups worker), the UI fields in Calendar accounts, occurrence edits on Microsoft unsupported.
+  - UI (merged `541b8e70a`): "Sign in with Microsoft/Google" in Calendar Accounts (client ID, tenant, never-echoed optional secret), `oauth_sign_in` with purposes `[calendar]` → `calendar_add_oauth_account`; AccountsPanel lazy, no budget change. Frame gates, 75 calendar unit + 26 component tests pass (Windows). Real sign-in with Microsoft/Google not tested.
 - [x] T-0036 · Mail: extras · area: crates/zephium-mail, frame/src/features/mail · owner: orca w3-mail-extras · updated: 2026-11-13
   - POP3 (optional), offline mode, rules/filters, contact suggestions from sent mail, `mailto:` links opening Zephium's compose.
   - `8c6f2159d`..`a1f5706e4`: contact suggestions (`mail_contacts`), `mailto:` from pages opens compose (RFC 6068 parser, narrow hook in the desktop engine event sink, event `zephium:mail-compose`), offline indicator from the cache, per-account rules (`mail.rules`, lazy RuleEditor). clippy clean; zephium-mail 84, store mail 15, desktop mail 22 tests, frame gates, 112 unit + 43 mail component tests, build pass (Windows). Not done: POP3 (optional; does not fit the IMAP-only engine), registering as the Windows default mail app (system setting). Mail budget entry updated (fork-only), RuleEditor entry added.
