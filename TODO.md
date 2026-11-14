@@ -75,7 +75,6 @@ Last ID: T-0046
 - [ ] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: - · updated: 2026-11-13
   - Shares sign-in with T-0034; only if needed (see T-0019).
   - 2026-11-13: backend done (`2e9d71508`..`0e618bca7` + META v31 `oauth` account kind): Google Calendar API v3 and Microsoft Graph (calendarView/delta) providers, `calendar_add_oauth_account(grant, name)`, guide updated. Tests: calendar 87, oauth 39, store calendar 9 + migrations 61 pass, clippy clean (Windows, fakes only). Open: `oauth_sign_in` `purposes` argument (mail follow-ups worker), the UI fields in Calendar accounts, occurrence edits on Microsoft unsupported.
-- [ ] T-0044 · Calendar: reminders as Windows notifications · area: desktop/src/focus_alerts.rs, crates/zephium-calendar · owner: - · updated: 2026-11-13
 - [ ] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: - · updated: 2026-11-13
   - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
 - [ ] T-0002 · Launch `pnpm dev` and confirm "Zephium Dev" starts · area: desktop, frame · owner: - · updated: 2026-11-13
@@ -88,11 +87,15 @@ Last ID: T-0046
   - Scope today: 158 macOS-named `.rs` files (about 83k lines), `zephium-webext-macos` (11k) and `zephium-terra-macos-probe` (23k), 1,895 `target_os = "macos"` sites in 188 files, 29 frame files, Swift, plist and macOS CI jobs.
   - Decide the scope first: whole files and crates only, or also the `cfg` blocks. The `cfg` edits in shared files cause conflicts on every upstream merge.
   - Acceptance: Windows `cargo clippy --workspace --all-targets --locked -- -D warnings`, the Windows nextest set and `pnpm --dir frame run check` pass, and `pnpm build:custom` works.
+- [ ] T-0047 · Fix the AI apps mock in settings component tests · area: frame/src/features/settings/tests, frame/src/domain/ai · owner: - · updated: 2026-11-14
+  - `FeaturesLook.component.test.ts` passes but logs an unhandled rejection: `AiApps.scan` reads `response.value.apps` from a null mock (`apps.svelte.ts:47`). Comes from T-0008, not this batch.
 
 ## Blocked
 
 ## Done
 
+- [x] T-0044 · Calendar: reminders as Windows notifications · area: desktop/src/focus_alerts.rs, crates/zephium-calendar · owner: orca w3-reminders · updated: 2026-11-13
+  - `677d62183`, `bfea83a50`, `cf7d5820e`: reminder plan + fired-reminder ledger in `zephium-calendar`, desktop scheduler, toast via `focus_alerts` (title + start + short location), switches `calendar.reminders` and `calendar.default_reminder`. clippy clean; calendar 108, preferences 19, focus_alerts 7 tests, frame typecheck/lint/build/settings unit tests pass (Windows). Limits: no native toast observed, scheduler loop not unit-tested, settings changes apply within 60 s.
 - [x] T-0046 · Calendar: links with Time, Tasks and meeting links · area: frame/src/features/time, frame/src/features/tasks, frame/src/features/calendar · owner: orca w2-calendar-ui · updated: 2026-11-13
   - Today's events in the Time panel / new tab; link events to Tasks; open Teams/Meet/Zoom links as tabs.
   - `46c4b2000`, `abc36b826`: today's events in the Time panel and new tab, "Create task" from an event (link back via reserved address `calendar.zephium.invalid` in the task context), calendar mark on tasks, Join within 10 min. Frame gates + 31 component tests + calendar domain unit tests pass (Windows). Tasks.svelte JS budget +110 bytes (lazy import made it larger). Limits: hidden when time tracking is off or in private windows; a second task per event possible after reload.
