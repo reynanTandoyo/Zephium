@@ -67,6 +67,10 @@ pub(crate) enum MailErrorV1 {
     Unsupported,
     Busy,
     Internal,
+    /// The outgoing server refused a recipient or the sender address.
+    AddressRejected,
+    /// No Trash folder: a delete needs a confirmed `permanent` flag.
+    NoTrash,
     /// Mail is switched off in Settings.
     Disabled,
 }
@@ -87,6 +91,8 @@ impl From<MailError> for MailErrorV1 {
             MailError::Unsupported => Self::Unsupported,
             MailError::Busy => Self::Busy,
             MailError::Internal => Self::Internal,
+            MailError::AddressRejected => Self::AddressRejected,
+            MailError::NoTrash => Self::NoTrash,
         }
     }
 }
@@ -1295,6 +1301,10 @@ fn spawn_watcher(
         const POLL: Duration = Duration::from_secs(120);
         let mut backoff = 5u64;
         loop {
+            // Switched off or shutting down: end without touching the server.
+            if shutdown_started(&app) || !enabled() {
+                break;
+            }
             let Ok(account) = load_account(&account_id).await else {
                 break;
             };
@@ -1338,6 +1348,108 @@ fn spawn_watcher(
     });
 }
 
+/// How often the supervisor compares the running watchers with the accounts
+/// and the `mail.enabled` switch.
+const WATCH_RECONCILE: Duration = Duration::from_secs(15);
+
+/// What the supervisor does: `(accounts to start, watchers to stop)`. With
+/// Mail off every watcher stops and none starts; with Mail on each account
+/// has one watcher and a watcher of a removed account stops.
+fn watcher_plan(
+    on: bool,
+    running: &std::collections::HashSet<String>,
+    accounts: &[String],
+) -> (Vec<String>, Vec<String>) {
+    if !on {
+        let mut stop: Vec<String> = running.iter().cloned().collect();
+        stop.sort();
+        return (Vec::new(), stop);
+    }
+    let start = accounts
+        .iter()
+        .filter(|id| !running.contains(*id))
+        .cloned()
+        .collect();
+    let mut stop: Vec<String> = running
+        .iter()
+        .filter(|id| !accounts.contains(id))
+        .cloned()
+        .collect();
+    stop.sort();
+    (start, stop)
+}
+
+/// Starts the account's watcher. A running one is kept unless `restart`.
+fn start_watcher(
+    app: &tauri::AppHandle,
+    runtime: &std::sync::Arc<Runtime>,
+    account_id: &str,
+    restart: bool,
+) -> Result<(), MailError> {
+    let mut watchers = runtime.watchers.lock().map_err(|_| MailError::Internal)?;
+    if watchers.contains_key(account_id) && !restart {
+        return Ok(());
+    }
+    if let Some(old) = watchers.remove(account_id) {
+        old.notify_one();
+    }
+    let stop = std::sync::Arc::new(Notify::new());
+    watchers.insert(account_id.to_owned(), stop.clone());
+    drop(watchers);
+    spawn_watcher(app.clone(), runtime.clone(), account_id.to_owned(), stop);
+    Ok(())
+}
+
+fn stop_watchers(runtime: &Runtime, ids: &[String]) {
+    if let Ok(mut watchers) = runtime.watchers.lock() {
+        for id in ids {
+            if let Some(stop) = watchers.remove(id) {
+                stop.notify_one();
+            }
+        }
+    }
+}
+
+async fn reconcile_watchers(app: &tauri::AppHandle, runtime: &std::sync::Arc<Runtime>) {
+    let running: std::collections::HashSet<String> = runtime
+        .watchers
+        .lock()
+        .map(|watchers| watchers.keys().cloned().collect())
+        .unwrap_or_default();
+    let on = enabled() && !shutdown_started(app);
+    let accounts: Vec<String> = if on {
+        match db(|cache| cache.accounts()).await {
+            Ok(records) => records.into_iter().map(|record| record.id).collect(),
+            // The store is busy: change nothing this round.
+            Err(_) => return,
+        }
+    } else {
+        Vec::new()
+    };
+    let (start, stop) = watcher_plan(on, &running, &accounts);
+    stop_watchers(runtime, &stop);
+    for id in start {
+        let _ = start_watcher(app, runtime, &id, false);
+    }
+}
+
+/// Keeps one inbox watcher per account while Mail is on, independent of any
+/// open frame: starts them at launch, when an account appears or Mail is
+/// switched on, and stops them all when Mail is switched off and at shutdown.
+pub(crate) fn install(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let runtime = runtime();
+        loop {
+            reconcile_watchers(&app, &runtime).await;
+            if shutdown_started(&app) {
+                break;
+            }
+            tokio::time::sleep(WATCH_RECONCILE).await;
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Autoconfig over HTTPS
 // ---------------------------------------------------------------------------
@@ -1346,14 +1458,24 @@ struct HttpsFetcher(reqwest::Client);
 
 impl HttpsFetcher {
     fn new() -> Option<Self> {
+        // The same policy as the image fetcher: no proxy (it would resolve
+        // names where the address check cannot see), public addresses only
+        // at connect time, and every redirect passes `check_url` again, so a
+        // redirect cannot lead to a private, loopback or link-local host.
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
             .user_agent("Zephium")
+            .no_proxy()
+            .https_only(true)
+            .referer(false)
+            .dns_resolver(std::sync::Arc::new(PublicOnlyResolver))
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() > 3 || attempt.url().scheme() != "https" {
-                    attempt.stop()
-                } else {
+                // `previous` includes the first request.
+                let followed = attempt.previous().len().saturating_sub(1);
+                if remote_images::redirect_allowed(followed, attempt.url()) {
                     attempt.follow()
+                } else {
+                    attempt.stop()
                 }
             }))
             .build()
@@ -1365,16 +1487,18 @@ impl HttpsFetcher {
 impl ConfigFetcher for HttpsFetcher {
     fn fetch<'a>(&'a self, url: &'a str) -> BoxFuture<'a, Result<Vec<u8>, MailError>> {
         Box::pin(async move {
-            if !url.starts_with("https://") {
-                return Err(MailError::InvalidInput);
-            }
+            // Plain `https:` to a public host; the resolver checks the addresses.
+            let url = remote_images::check_url(url)?;
             let mut response = self
                 .0
                 .get(url)
                 .send()
                 .await
                 .map_err(|_| MailError::Offline)?;
-            if !response.status().is_success() || response.url().scheme() != "https" {
+            // A redirect the policy stopped arrives as a 3xx: not a config.
+            if !response.status().is_success()
+                || remote_images::check_url(response.url().as_str()).is_err()
+            {
                 return Err(MailError::NotFound);
             }
             if response
@@ -1693,6 +1817,7 @@ async fn add_account(
             new_messages: 0,
         },
     );
+    let _ = start_watcher(app, &runtime(), &account.id, false);
     Ok(account)
 }
 
@@ -1757,6 +1882,8 @@ pub(crate) async fn mail_update_account(
         }
         // Server settings or the password may have changed: start clean.
         runtime().engine.forget(&account.id).await;
+        // The watcher holds its own connection: restart it on the new settings.
+        let _ = start_watcher(&app, &runtime(), &account.id, true);
         emit(
             &app,
             &MailChanged {
@@ -2215,7 +2342,9 @@ pub(crate) async fn mail_move(
     outcome.map_err(Into::into)
 }
 
-/// Deletes messages: into Trash, or for good from Trash.
+/// Deletes messages: into Trash, or for good from Trash. An account with no
+/// Trash folder answers `no_trash` and removes nothing, unless `permanent` is
+/// true, which the frame sets only after the person confirmed.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn mail_delete(
@@ -2223,12 +2352,16 @@ pub(crate) async fn mail_delete(
     account: String,
     folder: String,
     uids: Vec<u32>,
+    permanent: bool,
 ) -> Reply<()> {
     let _permit = gate(&caller, "mail_delete")?;
     let app = caller.app_handle().clone();
     let outcome = async {
         let account = load_account(&account).await?;
-        runtime().engine.delete(&account, &folder, &uids).await?;
+        runtime()
+            .engine
+            .delete(&account, &folder, &uids, permanent)
+            .await?;
         let (id, path, gone) = (account.id.clone(), folder.clone(), uids);
         let _ = db(move |cache| cache.remove_messages(&id, &path, &gone)).await;
         announce_removed(&app, &account.id, &folder);
@@ -2440,15 +2573,11 @@ pub(crate) async fn mail_watch(caller: WebviewWindow, account: String, on: bool)
     let outcome = async {
         let account = load_account(&account).await?;
         let runtime = runtime();
-        let mut watchers = runtime.watchers.lock().map_err(|_| MailError::Internal)?;
-        if let Some(stop) = watchers.remove(&account.id) {
-            stop.notify_one();
-        }
         if on {
-            let stop = std::sync::Arc::new(Notify::new());
-            watchers.insert(account.id.clone(), stop.clone());
-            drop(watchers);
-            spawn_watcher(app, runtime.clone(), account.id, stop);
+            // The backend already watches every account; this is idempotent.
+            start_watcher(&app, &runtime, &account.id, false)?;
+        } else {
+            stop_watchers(&runtime, &[account.id]);
         }
         Ok::<_, MailError>(())
     }
@@ -2517,6 +2646,37 @@ mod tests {
             "only the inbox raises NewMail"
         );
         assert_eq!(classify(&[], &new_mail), None);
+    }
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|id| (*id).to_owned()).collect()
+    }
+
+    #[test]
+    fn every_account_gets_a_watcher_at_start_and_none_is_doubled() {
+        let none = std::collections::HashSet::new();
+        let (start, stop) = watcher_plan(true, &none, &ids(&["a", "b"]));
+        assert_eq!((start, stop), (ids(&["a", "b"]), Vec::new()));
+        let running: std::collections::HashSet<String> = ids(&["a"]).into_iter().collect();
+        let (start, stop) = watcher_plan(true, &running, &ids(&["a", "b"]));
+        assert_eq!((start, stop), (ids(&["b"]), Vec::new()));
+    }
+
+    #[test]
+    fn switching_mail_off_stops_every_watcher_and_on_restarts_them() {
+        let running: std::collections::HashSet<String> = ids(&["b", "a"]).into_iter().collect();
+        let (start, stop) = watcher_plan(false, &running, &ids(&["a", "b", "c"]));
+        assert_eq!((start, stop), (Vec::new(), ids(&["a", "b"])));
+        let (start, stop) =
+            watcher_plan(true, &std::collections::HashSet::new(), &ids(&["a", "b"]));
+        assert_eq!((start, stop), (ids(&["a", "b"]), Vec::new()));
+    }
+
+    #[test]
+    fn a_removed_accounts_watcher_stops() {
+        let running: std::collections::HashSet<String> = ids(&["a", "gone"]).into_iter().collect();
+        let (start, stop) = watcher_plan(true, &running, &ids(&["a"]));
+        assert_eq!((start, stop), (Vec::new(), ids(&["gone"])));
     }
 
     #[test]
@@ -2750,6 +2910,42 @@ mod tests {
         assert_eq!(clean_order(ids(&["../x"])), Err(MailError::InvalidInput));
         let many = (0..=MAX_ACCOUNTS).map(|n| format!("m{n}")).collect();
         assert_eq!(clean_order(many), Err(MailError::InvalidInput));
+    }
+
+    #[test]
+    fn the_autoconfig_client_refuses_private_targets_and_redirects_to_them() {
+        let fetcher = HttpsFetcher::new().expect("client");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        for url in [
+            "http://autoconfig.example.com/config.xml",
+            "https://127.0.0.1/config.xml",
+            "https://[::1]/config.xml",
+            "https://169.254.169.254/latest/meta-data",
+            "https://192.168.1.1/config.xml",
+            "https://localhost/config.xml",
+            "https://router.local/config.xml",
+        ] {
+            let result = runtime.block_on(fetcher.fetch(url));
+            assert_eq!(result, Err(MailError::InvalidInput), "{url}");
+        }
+        // Redirect hops obey the same URL policy as the first request.
+        let hop = |next: &str| {
+            remote_images::redirect_allowed(0, &reqwest::Url::parse(next).expect("url"))
+        };
+        assert!(hop("https://autoconfig.provider.example/v1.1/example.com"));
+        for next in [
+            "https://10.0.0.5/x",
+            "https://127.0.0.1/x",
+            "https://169.254.169.254/x",
+            "https://[fe80::1]/x",
+            "https://intranet/x",
+            "http://autoconfig.provider.example/x",
+        ] {
+            assert!(!hop(next), "{next}");
+        }
     }
 
     #[test]

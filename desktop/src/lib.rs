@@ -7089,6 +7089,7 @@ pub fn run() {
                 updates::schedule_native_checks(app.handle());
                 work_models::install(app.handle());
                 calendar::install(app.handle(), &data_dir);
+                mail::install(app.handle());
                 // The benchmark must not reach the person's keychain: the
                 // keychain asks for their password.
                 #[cfg(feature = "adblock-qa")]
