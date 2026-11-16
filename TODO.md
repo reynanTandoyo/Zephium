@@ -70,9 +70,6 @@ Last ID: T-0046
 
 ## Open
 
-- [ ] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: - · updated: 2026-11-13
-  - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
-  - 2026-11-16: calendar side done (`8fbe83362`, `6d1d94f1b`): iTIP parse, attendee match, sequence compare, REPLY builder, apply to CalDAV calendars; IPC `calendar_invitation_parse`/`_respond`/`_apply_cancel`/`_apply_reply`. calendar 126 tests pass, clippy clean (Windows). Nothing auto-sent. Open: mail side (detection, From/organizer check, card, sending the REPLY); Google/Microsoft calendars cannot store invited events.
 - [ ] T-0002 · Launch `pnpm dev` and confirm "Zephium Dev" starts · area: desktop, frame · owner: - · updated: 2026-11-13
   - Must not touch the installed Zephium or its profile.
 - [ ] T-0004 · Decide on fork releases for colleague updates · area: .github, desktop · owner: - · updated: 2026-11-13
@@ -91,6 +88,10 @@ Last ID: T-0046
 
 ## Done
 
+- [x] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: orca w3-invites + w3-mail-extras · updated: 2026-11-13
+  - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
+  - 2026-11-16: calendar side done (`8fbe83362`, `6d1d94f1b`): iTIP parse, attendee match, sequence compare, REPLY builder, apply to CalDAV calendars; IPC `calendar_invitation_parse`/`_respond`/`_apply_cancel`/`_apply_reply`. calendar 126 tests pass, clippy clean (Windows). Nothing auto-sent. Open: mail side (detection, From/organizer check, card, sending the REPLY); Google/Microsoft calendars cannot store invited events.
+  - Mail side `2b75ce6d2`: invitation detection, lazy InvitationCard, From must match ORGANIZER (request/cancel) or the attendee (reply) else read-only, reply sent only on click as iMIP `text/calendar; method=REPLY`, settings `calendar.invitation_decline`/`_cancel`. clippy clean; zephium-mail 89, preferences 19, desktop mail 23, frame gates, 127 unit + 52 mail component tests pass (Windows). Limits: no alias addresses, only the first calendar part per message, no live-server interop test. Tasks.svelte budget +63 bytes (shared bindings chunk).
 - [x] T-0040 · Calendar: Google Calendar / Microsoft Graph accounts (OAuth) · area: crates/zephium-calendar · owner: orca w3-calendar-oauth + w2-calendar-ui · updated: 2026-11-13
   - Shares sign-in with T-0034; only if needed (see T-0019).
   - 2026-11-13: backend done (`2e9d71508`..`0e618bca7` + META v31 `oauth` account kind): Google Calendar API v3 and Microsoft Graph (calendarView/delta) providers, `calendar_add_oauth_account(grant, name)`, guide updated. Tests: calendar 87, oauth 39, store calendar 9 + migrations 61 pass, clippy clean (Windows, fakes only). Open: `oauth_sign_in` `purposes` argument (mail follow-ups worker), the UI fields in Calendar accounts, occurrence edits on Microsoft unsupported.
