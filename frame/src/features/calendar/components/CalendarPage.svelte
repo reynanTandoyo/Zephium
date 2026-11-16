@@ -56,6 +56,7 @@
   import ScopeChoice from "./ScopeChoice.svelte";
   import TimeGrid from "./TimeGrid.svelte";
   import { faultText, viewTitle } from "../lib/format";
+  import { withUniqueIds } from "../lib/keys";
 
   type Panel =
     | { kind: "details"; id: string }
@@ -87,7 +88,7 @@
     void calendar.setRange(range.fromText, range.toText);
   });
 
-  const placed = $derived(placeAll(calendar.occurrences()));
+  const placed = $derived(withUniqueIds(placeAll(calendar.occurrences())));
   const writable = $derived(calendar.writableCalendars());
   const calendarName = (id: string) =>
     calendar.calendars().find((entry) => entry.id === id)?.name ?? "";

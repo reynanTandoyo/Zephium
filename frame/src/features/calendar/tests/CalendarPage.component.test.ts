@@ -300,6 +300,32 @@ test("switches between day, week, month and agenda, by button and by key", async
   await expect.element(eventButton(screen, /Standup/u)).toBeVisible();
 });
 
+test("two resources with the same UID and start are both listed in day, week and agenda", async () => {
+  native.server.events.push(
+    occurrence({ uid: "twin", summary: "Twin one", start: at("16:00:00"), end: at("17:00:00") }),
+    occurrence({ uid: "twin", summary: "Twin two", start: at("16:00:00"), end: at("17:00:00") }),
+  );
+  const screen = await setup();
+  for (const view of ["Day", "Week", "Agenda"]) {
+    await screen.getByRole("radio", { name: view }).click();
+    await expect.element(eventButton(screen, /Twin one/u)).toBeVisible();
+    await expect.element(eventButton(screen, /Twin two/u)).toBeVisible();
+  }
+});
+
+test("two all-day resources with the same UID are both listed in the month", async () => {
+  const tomorrow = dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
+  const after = dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2));
+  native.server.events.push(
+    occurrence({ uid: "twin", summary: "Twin one", all_day: true, start: tomorrow, end: after }),
+    occurrence({ uid: "twin", summary: "Twin two", all_day: true, start: tomorrow, end: after }),
+  );
+  const screen = await setup();
+  await screen.getByRole("radio", { name: "Month" }).click();
+  await expect.element(eventButton(screen, /Twin one/u)).toBeVisible();
+  await expect.element(eventButton(screen, /Twin two/u)).toBeVisible();
+});
+
 test("the Today button and arrows move the view", async () => {
   const screen = await setup();
   await expect.element(eventButton(screen, /Standup/u)).toBeVisible();
