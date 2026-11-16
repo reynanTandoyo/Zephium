@@ -68,6 +68,8 @@ const defaults = {
   "calendar.enabled": "true",
   "calendar.reminders": "true",
   "calendar.default_reminder": "none",
+  "calendar.invitation_decline": "keep",
+  "calendar.invitation_cancel": "mark",
   "notes.enabled": "true",
   "tasks.enabled": "true",
   "time.enabled": "true",

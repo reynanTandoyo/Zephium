@@ -315,6 +315,36 @@ pub struct AttachmentInfo {
     pub content_id: Option<String>,
     /// True when it is shown inline in the HTML body.
     pub inline: bool,
+    /// The `method` parameter of a calendar part (`REQUEST`, `CANCEL`, `REPLY`...),
+    /// upper-cased; `None` for other parts or when the part names none.
+    #[serde(default)]
+    pub method: Option<String>,
+}
+
+impl AttachmentInfo {
+    /// A calendar invitation: a `text/calendar` (or legacy `application/ics`)
+    /// part, or a file named `*.ics`, small enough to be read.
+    #[must_use]
+    pub fn is_calendar(&self) -> bool {
+        let named = self.filename.to_ascii_lowercase().ends_with(".ics");
+        let typed = matches!(
+            self.content_type.as_str(),
+            "text/calendar" | "application/ics" | "text/x-vcalendar"
+        );
+        (typed || named) && (self.size as usize) <= limits::MAX_INVITATION_BYTES
+    }
+}
+
+impl MessageBody {
+    /// The calendar parts of the message, at most [`limits::MAX_INVITATION_PARTS`].
+    #[must_use]
+    pub fn invitation_parts(&self) -> Vec<&AttachmentInfo> {
+        self.attachments
+            .iter()
+            .filter(|part| part.is_calendar())
+            .take(limits::MAX_INVITATION_PARTS)
+            .collect()
+    }
 }
 
 /// An inline image referenced from the HTML as `cid:`.
@@ -379,6 +409,18 @@ pub struct Draft {
     pub in_reply_to: Option<String>,
     /// Thread references, oldest first, without brackets.
     pub references: Vec<String>,
+    /// An iMIP reply: the text body plus a `text/calendar; method=...` alternative.
+    #[serde(default)]
+    pub calendar: Option<CalendarBody>,
+}
+
+/// The `text/calendar` alternative of an outgoing iMIP message.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CalendarBody {
+    /// `REPLY` is the only method this app sends.
+    pub method: String,
+    /// The iCalendar text (UTF-8).
+    pub ics: String,
 }
 
 /// A change the server pushed while watching.

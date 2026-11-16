@@ -318,6 +318,28 @@ pub(crate) struct MailBodyV1 {
     pub(crate) truncated: bool,
     pub(crate) attachments: Vec<MailAttachmentV1>,
     pub(crate) inline_images: Vec<MailInlineImageV1>,
+    /// Calendar invitations in the message (`text/calendar` parts and `.ics`
+    /// files), at most four. Read one with `mail_invitation_bytes`.
+    pub(crate) invitations: Vec<MailInvitationPartV1>,
+}
+
+/// A calendar part of a message.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+pub(crate) struct MailInvitationPartV1 {
+    /// The attachment index, as for `mail_attachment`.
+    pub(crate) part: u32,
+    /// The part's `method` parameter in capitals (`REQUEST`, `CANCEL`,
+    /// `REPLY`...), when it names one.
+    pub(crate) method: Option<String>,
+    pub(crate) filename: String,
+    pub(crate) size: u32,
+}
+
+/// The `text/calendar` alternative of a reply. Only `REPLY` is accepted.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
+pub(crate) struct MailCalendarBodyV1 {
+    pub(crate) method: String,
+    pub(crate) ics: String,
 }
 
 /// A remote image the backend fetched for a message, as a `data:` URL. The
@@ -356,6 +378,11 @@ pub(crate) struct MailDraftV1 {
     pub(crate) attachments: Vec<MailOutgoingAttachmentV1>,
     pub(crate) in_reply_to: Option<String>,
     pub(crate) references: Vec<String>,
+    /// Makes the message an iMIP reply: `text` and this iCalendar text are
+    /// sent as alternatives. Not allowed together with `html` or attachments.
+    #[serde(default)]
+    #[specta(optional)]
+    pub(crate) calendar: Option<MailCalendarBodyV1>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, specta::Type, Eq, PartialEq)]
@@ -860,6 +887,16 @@ fn body_out(body: &MessageBody) -> MailBodyV1 {
                 data_base64: base64::engine::general_purpose::STANDARD.encode(&image.data),
             })
             .collect(),
+        invitations: body
+            .invitation_parts()
+            .into_iter()
+            .map(|part| MailInvitationPartV1 {
+                part: part.part,
+                method: part.method.clone(),
+                filename: part.filename.clone(),
+                size: part.size,
+            })
+            .collect(),
     }
 }
 
@@ -925,6 +962,13 @@ fn draft_in(draft: &MailDraftV1) -> Reply<Draft> {
         attachments,
         in_reply_to: draft.in_reply_to.clone(),
         references: draft.references.clone(),
+        calendar: draft
+            .calendar
+            .as_ref()
+            .map(|calendar| zephium_mail::model::CalendarBody {
+                method: calendar.method.clone(),
+                ics: calendar.ics.clone(),
+            }),
     })
 }
 
@@ -2007,6 +2051,36 @@ pub(crate) async fn mail_fetch_remote_images(
         .map_err(Into::into)
 }
 
+/// The bytes of one calendar part, base64, for `calendar_invitation_parse`.
+/// Only a part the message listed as a calendar invitation is handed out,
+/// at most 1 MiB; nothing is written to disk and nothing is sent.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn mail_invitation_bytes(
+    caller: WebviewWindow,
+    account: String,
+    folder: String,
+    uid: u32,
+    part: u32,
+) -> Reply<String> {
+    use base64::Engine as _;
+    let _permit = gate(&caller, "mail_invitation_bytes")?;
+    let outcome = async {
+        let account = load_account(&account).await?;
+        let (info, bytes) = runtime()
+            .engine
+            .attachment(&account, &folder, uid, part)
+            .await?;
+        if !info.is_calendar() || bytes.len() > zephium_mail::limits::MAX_INVITATION_BYTES {
+            return Err(MailError::InvalidInput);
+        }
+        Ok::<_, MailError>(base64::engine::general_purpose::STANDARD.encode(bytes))
+    }
+    .await;
+    log("invitation_bytes", outcome.is_ok());
+    outcome.map_err(Into::into)
+}
+
 /// Saves one attachment where the person chooses. The bytes never reach the frame.
 #[tauri::command]
 #[specta::specta]
@@ -2499,6 +2573,7 @@ mod tests {
             size: 3,
             content_id: content_id.map(str::to_owned),
             inline: content_id.is_some(),
+            method: None,
         };
         let mut body = MessageBody {
             header: header(),
@@ -2623,6 +2698,7 @@ mod tests {
             }],
             in_reply_to: None,
             references: Vec::new(),
+            calendar: None,
         };
         let ok = draft_in(&draft(
             base64::engine::general_purpose::STANDARD.encode(b"hi"),
@@ -2798,5 +2874,63 @@ Bcc: x"
         assert_eq!(wire.cc, ["b@example.com"]);
         assert!(wire.bcc.is_empty());
         assert_eq!((wire.subject.as_str(), wire.body.as_str()), ("Hi", "Yo"));
+    }
+
+    #[test]
+    fn a_body_lists_its_calendar_parts_and_a_draft_carries_only_a_reply_alternative() {
+        let mut body = MessageBody {
+            header: header(),
+            ..MessageBody::default()
+        };
+        body.attachments = vec![
+            AttachmentInfo {
+                part: 0,
+                filename: "a.pdf".into(),
+                content_type: "application/pdf".into(),
+                size: 3,
+                content_id: None,
+                inline: false,
+                method: None,
+            },
+            AttachmentInfo {
+                part: 1,
+                filename: "invite.ics".into(),
+                content_type: "text/calendar".into(),
+                size: 90,
+                content_id: None,
+                inline: false,
+                method: Some("REQUEST".into()),
+            },
+        ];
+        let wire = body_out(&body);
+        assert_eq!(
+            wire.invitations,
+            vec![MailInvitationPartV1 {
+                part: 1,
+                method: Some("REQUEST".into()),
+                filename: "invite.ics".into(),
+                size: 90,
+            }]
+        );
+        let draft = MailDraftV1 {
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Accepted: Plan".into(),
+            text: "ok".into(),
+            html: None,
+            attachments: vec![],
+            in_reply_to: None,
+            references: vec![],
+            calendar: Some(MailCalendarBodyV1 {
+                method: "REPLY".into(),
+                ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n".into(),
+            }),
+        };
+        let converted = draft_in(&draft).expect("converts");
+        assert_eq!(
+            converted.calendar.as_ref().map(|c| c.method.as_str()),
+            Some("REPLY")
+        );
     }
 }

@@ -70,6 +70,24 @@
       ? [...new Set(rendered.links)]
       : (segments?.flatMap((s) => (s.url ? [s.url] : [])) ?? []),
   );
+  /** The calendar invitation of the message: the part that names a method, else the first. */
+  const invitationPart = $derived(
+    body?.invitations.find((part) => part.method) ?? body?.invitations[0] ?? null,
+  );
+  const invitationSource = $derived.by(() => {
+    const account = open ? store.account(open.row.account) : undefined;
+    if (!open || !account || !body || !invitationPart) return null;
+    return {
+      account: open.row.account,
+      folder: open.row.folder,
+      uid: open.row.message.uid,
+      part: invitationPart.part,
+      from: body.header.from,
+      messageId: body.header.message_id,
+      own: [account.email],
+      ownName: account.display_name,
+    };
+  });
   const attachments = $derived((body?.attachments ?? []).filter((a) => !a.inline || !a.content_id));
   const thread = $derived(
     open ? store.threads.find((t) => t.rows.some((row) => row.key === open.row.key)) : undefined,
@@ -150,6 +168,15 @@
       </div>
     {/if}
     {#if body.truncated}<p class="banner" role="status">{m.mail_truncated()}</p>{/if}
+
+    {#if invitationSource && open}
+      <!-- Loaded only for messages that carry an invitation; keyed so another message starts afresh. -->
+      {#key `${open.row.key}/${invitationSource.part}`}
+        {#await import("./InvitationCard.svelte") then { default: InvitationCard }}
+          <InvitationCard source={invitationSource} />
+        {/await}
+      {/key}
+    {/if}
 
     {#if target}
       <div class="target" role="alertdialog" aria-label={m.mail_link_target()}>

@@ -41,6 +41,12 @@ pub const MAX_SNIPPET_BYTES: usize = 240;
 pub const MAX_REFERENCES: usize = 32;
 /// Bytes of an autoconfig XML document.
 pub const MAX_AUTOCONFIG_BYTES: usize = 64 * 1024;
+/// Bytes of one calendar invitation (`text/calendar` part or `.ics`) handed out.
+pub const MAX_INVITATION_BYTES: usize = 1024 * 1024;
+/// Calendar parts listed for one message.
+pub const MAX_INVITATION_PARTS: usize = 4;
+/// Bytes of the iCalendar text attached to an outgoing reply.
+pub const MAX_OUTGOING_CALENDAR_BYTES: usize = 256 * 1024;
 /// Bytes of a search query.
 pub const MAX_QUERY_BYTES: usize = 256;
 /// Messages returned from one search.

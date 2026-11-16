@@ -37,6 +37,7 @@ const original = {
   truncated: false,
   attachments: [],
   inline_images: [],
+  invitations: [],
 };
 
 test("reply addresses the sender, quotes the text and threads the headers", () => {

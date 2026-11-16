@@ -254,6 +254,12 @@ export const commands = {
 	 */
 	mailParseMailto: (url: string) => typedError<MailtoV1, MailErrorV1>(__TAURI_INVOKE("mail_parse_mailto", { url })),
 	/**
+	 *  The bytes of one calendar part, base64, for `calendar_invitation_parse`.
+	 *  Only a part the message listed as a calendar invitation is handed out,
+	 *  at most 1 MiB; nothing is written to disk and nothing is sent.
+	 */
+	mailInvitationBytes: (account: string, folder: string, uid: number, part: number) => typedError<string, MailErrorV1>(__TAURI_INVOKE("mail_invitation_bytes", { account, folder, uid, part })),
+	/**
 	 *  A toast for a batch of new mail. The frame counts the batch and words it
 	 *  in the person's language; this only checks the text is a short line. No
 	 *  sender, subject or message body ever reaches this function.
@@ -2141,6 +2147,17 @@ export type MailBodyV1 = {
 	truncated: boolean,
 	attachments: MailAttachmentV1[],
 	inline_images: MailInlineImageV1[],
+	/**
+	 *  Calendar invitations in the message (`text/calendar` parts and `.ics`
+	 *  files), at most four. Read one with `mail_invitation_bytes`.
+	 */
+	invitations: MailInvitationPartV1[],
+};
+
+/**  The `text/calendar` alternative of a reply. Only `REPLY` is accepted. */
+export type MailCalendarBodyV1 = {
+	method: string,
+	ics: string,
 };
 
 export type MailChangeKindV1 =
@@ -2188,6 +2205,11 @@ export type MailDraftV1 = {
 	attachments: MailOutgoingAttachmentV1[],
 	in_reply_to: string | null,
 	references: string[],
+	/**
+	 *  Makes the message an iMIP reply: `text` and this iCalendar text are
+	 *  sent as alternatives. Not allowed together with `html` or attachments.
+	 */
+	calendar?: MailCalendarBodyV1 | null,
 };
 
 export type MailEndpointV1 = {
@@ -2228,6 +2250,19 @@ export type MailInlineImageV1 = {
 	content_id: string,
 	content_type: string,
 	data_base64: string,
+};
+
+/**  A calendar part of a message. */
+export type MailInvitationPartV1 = {
+	/**  The attachment index, as for `mail_attachment`. */
+	part: number,
+	/**
+	 *  The part's `method` parameter in capitals (`REQUEST`, `CANCEL`,
+	 *  `REPLY`...), when it names one.
+	 */
+	method: string | null,
+	filename: string,
+	size: number,
 };
 
 /**  One row of the message list. */

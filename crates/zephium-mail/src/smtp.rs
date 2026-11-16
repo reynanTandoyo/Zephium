@@ -7,15 +7,18 @@ use lettre::address::Envelope;
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
+use mail_builder::headers::content_type::ContentType;
+use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
 
 use crate::auth::Credential;
 use crate::error::{MailError, Result};
 use crate::limits::{
-    MAX_OUTGOING_BYTES, MAX_RECIPIENTS, MAX_REFERENCES, MAX_SUBJECT_BYTES, SEND_TIMEOUT,
+    MAX_OUTGOING_BYTES, MAX_OUTGOING_CALENDAR_BYTES, MAX_RECIPIENTS, MAX_REFERENCES,
+    MAX_SUBJECT_BYTES, SEND_TIMEOUT,
 };
 use crate::mime::sanitize_filename;
-use crate::model::{email_ok, Account, Address, Draft, Endpoint, Security};
+use crate::model::{email_ok, Account, Address, CalendarBody, Draft, Endpoint, Security};
 
 /// A composed message ready for SMTP or for APPEND.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -50,6 +53,31 @@ fn mailbox(address: &Address) -> Result<(String, String)> {
 
 fn mailboxes(list: &[Address]) -> Result<Vec<(String, String)>> {
     list.iter().map(mailbox).collect()
+}
+
+/// `multipart/alternative`: the text, then `text/calendar; method=REPLY`.
+fn calendar_alternative<'x>(text: &str, calendar: &CalendarBody) -> Result<MimePart<'x>> {
+    if calendar.method != "REPLY"
+        || calendar.ics.len() > MAX_OUTGOING_CALENDAR_BYTES
+        || calendar.ics.contains('\0')
+        || !calendar
+            .ics
+            .trim_start()
+            .to_ascii_uppercase()
+            .starts_with("BEGIN:VCALENDAR")
+    {
+        return Err(MailError::InvalidInput);
+    }
+    let calendar_type = ContentType::new("text/calendar")
+        .attribute("method", calendar.method.clone())
+        .attribute("charset", "utf-8");
+    Ok(MimePart::new(
+        "multipart/alternative",
+        BodyPart::Multipart(vec![
+            MimePart::new("text/plain", text.to_owned()),
+            MimePart::new(calendar_type, calendar.ics.clone()),
+        ]),
+    ))
 }
 
 /// Builds the message. `include_bcc` is true only for a draft kept on the
@@ -88,8 +116,18 @@ pub fn compose(account: &Account, draft: &Draft, include_bcc: bool, now: i64) ->
         .from((account.display_name.clone(), account.email.clone()))
         .subject(draft.subject.clone())
         .date(now)
-        .message_id(message_id.clone())
-        .text_body(draft.text.clone());
+        .message_id(message_id.clone());
+    builder = match &draft.calendar {
+        Some(calendar) => {
+            // An iMIP reply: the plain text and the `text/calendar` part are
+            // alternatives of one another, nothing else rides along.
+            if draft.html.is_some() || !draft.attachments.is_empty() {
+                return Err(MailError::InvalidInput);
+            }
+            builder.body(calendar_alternative(&draft.text, calendar)?)
+        }
+        None => builder.text_body(draft.text.clone()),
+    };
     if !to.is_empty() {
         builder = builder.to(to.clone());
     }
@@ -308,7 +346,77 @@ mod tests {
             }],
             in_reply_to: Some("m0@example.com".into()),
             references: vec!["m-1@example.com".into(), "m0@example.com".into()],
+            calendar: None,
         }
+    }
+
+    const REPLY_ICS: &str = "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:u1\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    fn reply() -> Draft {
+        Draft {
+            to: vec![address("org@example.com")],
+            subject: "Accepted: Plan".into(),
+            text: "Ann accepted.".into(),
+            calendar: Some(CalendarBody {
+                method: "REPLY".into(),
+                ics: REPLY_ICS.into(),
+            }),
+            ..Draft::default()
+        }
+    }
+
+    #[test]
+    fn a_reply_is_text_and_text_calendar_alternatives_with_the_method() {
+        let composed = compose(&account(), &reply(), false, 1_700_000_000).unwrap();
+        let raw = String::from_utf8_lossy(&composed.raw).to_string();
+        assert!(raw.contains("multipart/alternative"));
+        let plain = raw.find("text/plain").unwrap();
+        let calendar = raw.find("text/calendar").unwrap();
+        assert!(
+            plain < calendar,
+            "the calendar part is the preferred, last alternative"
+        );
+        assert!(raw.contains("method=\"REPLY\""));
+        let body = crate::mime::parse_message(&composed.raw).unwrap();
+        assert_eq!(body.header.subject, "Accepted: Plan");
+        assert_eq!(body.text.as_deref().map(str::trim), Some("Ann accepted."));
+        let parts = body.invitation_parts();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].method.as_deref(), Some("REPLY"));
+        let (_, bytes) = crate::mime::attachment_bytes(&composed.raw, parts[0].part).unwrap();
+        assert!(String::from_utf8(bytes).unwrap().contains("METHOD:REPLY"));
+    }
+
+    #[test]
+    fn a_reply_refuses_other_methods_oversized_or_bogus_calendar_text_and_extras() {
+        let with = |f: &dyn Fn(&mut Draft)| {
+            let mut draft = reply();
+            f(&mut draft);
+            compose(&account(), &draft, false, 0)
+        };
+        assert_eq!(
+            with(&|d| d.calendar.as_mut().unwrap().method = "REQUEST".into()),
+            Err(MailError::InvalidInput)
+        );
+        assert_eq!(
+            with(&|d| d.calendar.as_mut().unwrap().ics = "not a calendar".into()),
+            Err(MailError::InvalidInput)
+        );
+        assert_eq!(
+            with(&|d| d.calendar.as_mut().unwrap().ics = format!(
+                "BEGIN:VCALENDAR\r\n{}",
+                "X".repeat(MAX_OUTGOING_CALENDAR_BYTES)
+            )),
+            Err(MailError::InvalidInput)
+        );
+        assert_eq!(
+            with(&|d| d.html = Some("<p>x</p>".into())),
+            Err(MailError::InvalidInput)
+        );
+        assert_eq!(
+            with(&|d| d.subject = "Accepted\r\nBcc: x@example.com".into()),
+            Err(MailError::InvalidInput)
+        );
     }
 
     #[test]

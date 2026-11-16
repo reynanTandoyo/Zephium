@@ -57,6 +57,7 @@ export function body(header: MailMessageV1, over: Partial<MailBodyV1> = {}): Mai
     truncated: false,
     attachments: [],
     inline_images: [],
+    invitations: [],
     ...over,
   };
 }

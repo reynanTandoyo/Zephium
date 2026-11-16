@@ -1831,6 +1831,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             mail::mail_rules,
             mail::mail_set_rules,
             mail::mail_parse_mailto,
+            mail::mail_invitation_bytes,
             focus_alerts::mail_notify_new,
             oauth::oauth_sign_in,
             oauth::oauth_cancel_sign_in,

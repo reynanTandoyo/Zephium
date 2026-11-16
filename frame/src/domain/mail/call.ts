@@ -1,4 +1,4 @@
-import type { MailErrorV1, OAuthErrorV1 } from "$shared/ipc/bindings";
+import type { CalendarError, MailErrorV1, OAuthErrorV1 } from "$shared/ipc/bindings";
 import { observe } from "$shared/lib/observe";
 
 /** Why a mail request did not succeed: the backend's closed set, or ours. */
@@ -36,6 +36,18 @@ export function callOAuth<T>(
   milliseconds: number,
   signal?: AbortSignal,
 ): Promise<OAuthOutcome<T> | { ok: "aborted" }> {
+  return callNative(request, milliseconds, signal);
+}
+
+/** Why a calendar request (an invitation answer) did not succeed. */
+export type CalendarFailure = CalendarError | "timeout" | "unavailable";
+
+/** The same for the calendar commands Mail uses to answer an invitation. */
+export function callCalendar<T>(
+  request: () => Promise<Reply<T, CalendarError>>,
+  milliseconds: number,
+  signal?: AbortSignal,
+): Promise<{ ok: true; value: T } | { ok: false; error: CalendarFailure } | { ok: "aborted" }> {
   return callNative(request, milliseconds, signal);
 }
 

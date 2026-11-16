@@ -628,6 +628,26 @@ export const fields = {
       { value: "30", label: m.calendar_default_reminder_option_30 },
     ],
   },
+  "calendar.invitation_decline": {
+    section: "features",
+    label: m.calendar_invitation_decline_title,
+    description: m.calendar_invitation_decline_help,
+    initial: "keep",
+    options: [
+      { value: "keep", label: m.calendar_invitation_decline_keep },
+      { value: "remove", label: m.calendar_invitation_decline_remove },
+    ],
+  },
+  "calendar.invitation_cancel": {
+    section: "features",
+    label: m.calendar_invitation_cancel_title,
+    description: m.calendar_invitation_cancel_help,
+    initial: "mark",
+    options: [
+      { value: "mark", label: m.calendar_invitation_cancel_mark },
+      { value: "remove", label: m.calendar_invitation_cancel_remove },
+    ],
+  },
   "notes.enabled": {
     section: "features",
     label: m.feature_notes_title,

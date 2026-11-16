@@ -235,6 +235,11 @@ fn attachment_info(index: usize, part: &mail_parser::MessagePart<'_>) -> Attachm
         .content_disposition()
         .is_some_and(|d| d.ctype().eq_ignore_ascii_case("inline"))
         || content_id.is_some();
+    let method = part
+        .content_type()
+        .and_then(|c| c.attribute("method"))
+        .map(|m| m.trim().to_ascii_uppercase())
+        .filter(|m| !m.is_empty() && m.len() <= 16 && m.chars().all(|c| c.is_ascii_alphabetic()));
     AttachmentInfo {
         part: u32::try_from(index).unwrap_or(u32::MAX),
         filename,
@@ -242,6 +247,7 @@ fn attachment_info(index: usize, part: &mail_parser::MessagePart<'_>) -> Attachm
         size: u32::try_from(part.len()).unwrap_or(u32::MAX),
         content_id,
         inline,
+        method,
     }
 }
 
@@ -429,5 +435,92 @@ mod tests {
         )
         .unwrap();
         assert_eq!(parsed.snippet, "Hello bold end");
+    }
+
+    const ICS: &str = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:u1\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    fn invite_mail(parts: &str) -> Vec<u8> {
+        format!(
+            "From: Org <org@example.com>\r\nTo: me@example.com\r\nSubject: Invitation: Plan\r\n\
+             MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"outer\"\r\n\r\n{parts}--outer--\r\n"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn a_text_calendar_alternative_is_found_with_its_method() {
+        let raw = invite_mail(&format!(
+            "--outer\r\nContent-Type: multipart/alternative; boundary=\"alt\"\r\n\r\n\
+             --alt\r\nContent-Type: text/plain\r\n\r\nYou are invited.\r\n\
+             --alt\r\nContent-Type: text/calendar; charset=utf-8; method=request\r\n\r\n{ICS}\
+             --alt--\r\n"
+        ));
+        let body = parse_message(&raw).unwrap();
+        let parts = body.invitation_parts();
+        assert_eq!(parts.len(), 1, "{:?}", body.attachments);
+        assert_eq!(parts[0].method.as_deref(), Some("REQUEST"));
+        assert_eq!(
+            body.text.as_deref().map(str::trim),
+            Some("You are invited.")
+        );
+        let (_, bytes) = attachment_bytes(&raw, parts[0].part).unwrap();
+        assert!(String::from_utf8(bytes).unwrap().contains("METHOD:REQUEST"));
+    }
+
+    #[test]
+    fn an_ics_attachment_is_found_by_name_or_type_and_others_are_not() {
+        let raw = invite_mail(&format!(
+            "--outer\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n\
+             --outer\r\nContent-Type: application/octet-stream; name=\"invite.ICS\"\r\n\
+             Content-Disposition: attachment; filename=\"invite.ICS\"\r\n\r\n{ICS}\
+             --outer\r\nContent-Type: application/ics\r\nContent-Disposition: attachment\r\n\r\n{ICS}\
+             --outer\r\nContent-Type: application/pdf; name=\"plan.pdf\"\r\n\
+             Content-Disposition: attachment; filename=\"plan.pdf\"\r\n\r\n%PDF\r\n"
+        ));
+        let body = parse_message(&raw).unwrap();
+        let parts = body.invitation_parts();
+        assert_eq!(parts.len(), 2, "{:?}", body.attachments);
+        assert!(parts.iter().all(|p| p.method.is_none()));
+        assert!(body.attachments.iter().any(|a| a.filename == "plan.pdf"));
+        assert!(!body
+            .attachments
+            .iter()
+            .find(|a| a.filename == "plan.pdf")
+            .unwrap()
+            .is_calendar());
+    }
+
+    #[test]
+    fn calendar_parts_are_bounded_in_number_size_and_method_text() {
+        let many: String = (0..8)
+            .map(|n| {
+                format!(
+                    "--outer\r\nContent-Type: text/calendar; method=REQUEST\r\n\
+                     Content-Disposition: attachment; filename=\"i{n}.ics\"\r\n\r\n{ICS}"
+                )
+            })
+            .collect();
+        let body = parse_message(&invite_mail(&many)).unwrap();
+        assert_eq!(
+            body.invitation_parts().len(),
+            crate::limits::MAX_INVITATION_PARTS
+        );
+        let junk = invite_mail(&format!(
+            "--outer\r\nContent-Type: text/calendar; method=\"RE QUEST;x\"\r\n\
+             Content-Disposition: attachment; filename=\"a.ics\"\r\n\r\n{ICS}"
+        ));
+        let part = &parse_message(&junk).unwrap().attachments[0];
+        assert_eq!(part.method, None);
+        let big = AttachmentInfo {
+            part: 0,
+            filename: "x.ics".into(),
+            content_type: "text/calendar".into(),
+            size: u32::try_from(crate::limits::MAX_INVITATION_BYTES).unwrap() + 1,
+            content_id: None,
+            inline: false,
+            method: None,
+        };
+        assert!(!big.is_calendar());
+        assert!(AttachmentInfo { size: 10, ..big }.is_calendar());
     }
 }
