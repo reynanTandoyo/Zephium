@@ -89,7 +89,7 @@ Last ID: T-0046
 ## Done
 
 - [x] T-0048 · Review round 1 of the mail/calendar batch and its fixes · area: crates/zephium-{mail,calendar,oauth,store}, desktop, frame mail · owner: orca review-1 + fix-mail + fix-calendar · updated: 2026-11-16
-  - Review (claude-fable-5-2), report `C:\Project\zephium-orcaevieweview-1-report.md`: blocking B1 invitation settings default (`e00720933`) and B2 sub-hourly RRULE DoS (`15fcb4a30`) fixed; B3 Tasks budget +63 approved by the coordinator.
+  - Review (claude-fable-5-2), report `C:\Project\zephium-orca\review\review-1-report.md`: blocking B1 invitation settings default (`e00720933`) and B2 sub-hourly RRULE DoS (`15fcb4a30`) fixed; B3 Tasks budget +63 approved by the coordinator.
   - Fixes: mail N1 watchers after restart, N3 stop on switch-off/shutdown, N5 mailto keeps drafts, N6 IMAP byte limits, N9 no silent expunge, N10 image URL parity, N12 SMTP errors + autoconfig redirects (`88896a479`, `81f9c2bdd`, `099a60c76`); calendar/oauth N2 chunked vault, N3 calendar.enabled gate, N4 META v32 indexes, N7 sender check in Rust, N8 loopback 400, N12 redirect guard (`c37ca947f`..`65088507f`). All with tests, clippy clean (Windows).
   - Open: mail cache unencrypted in the shared meta database (incl. incognito); META v29–v32 numbering will collide with upstream (plan before the next upstream merge).
 - [x] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: orca w3-invites + w3-mail-extras · updated: 2026-11-13
