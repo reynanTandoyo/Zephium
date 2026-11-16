@@ -406,3 +406,114 @@ fn a_series_that_began_before_a_rule_change_gets_a_zone_that_reaches_today() {
         "{text}"
     );
 }
+
+// -- floating and unknown zones -------------------------------------------------
+
+#[test]
+fn a_floating_time_is_the_viewers_wall_clock_not_utc() {
+    use crate::model::with_floating_zone;
+    use crate::recur::expand;
+    let ics = wrap(
+        "BEGIN:VEVENT\r\nUID:f@x\r\nSUMMARY:Late\r\nDTSTART:20260111T233000\r\nDTEND:20260112T003000\r\n\
+         END:VEVENT\r\n",
+    );
+    let event = parse_calendar(&ics).expect("parse").remove(0);
+    assert_eq!(event.start.kind, TimeKind::Floating);
+    with_floating_zone(chrono_tz::Europe::Berlin, || {
+        assert_eq!(event.start.to_utc(), utc("2026-01-11T22:30:00Z"));
+        // Visible on the 11th in Berlin (22:30Z), though 23:30 UTC would also be.
+        let day = |from: &str, to: &str| expand(&event, utc(from), utc(to), 10).occurrences.len();
+        assert_eq!(day("2026-01-11T00:00:00Z", "2026-01-11T23:00:00Z"), 1);
+        // It ends 23:30 UTC; read as UTC it would still be running at 23:45.
+        assert_eq!(day("2026-01-11T23:00:00Z", "2026-01-12T12:00:00Z"), 1);
+        assert_eq!(day("2026-01-11T23:45:00Z", "2026-01-12T12:00:00Z"), 0);
+    });
+    with_floating_zone(chrono_tz::America::New_York, || {
+        assert_eq!(event.start.to_utc(), utc("2026-01-12T04:30:00Z"));
+    });
+}
+
+#[test]
+fn floating_times_follow_daylight_saving_in_the_local_zone() {
+    use crate::model::{with_floating_zone, EventTime};
+    use crate::recur::expand;
+    let floating = |text: &str| EventTime {
+        kind: TimeKind::Floating,
+        local: chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S").expect("time"),
+    };
+    with_floating_zone(chrono_tz::Europe::Berlin, || {
+        // Winter and summer offsets.
+        assert_eq!(
+            floating("2026-01-15T09:00:00").to_utc(),
+            utc("2026-01-15T08:00:00Z")
+        );
+        assert_eq!(
+            floating("2026-07-15T09:00:00").to_utc(),
+            utc("2026-07-15T07:00:00Z")
+        );
+        // The skipped hour moves forward; the repeated hour is read once, first.
+        assert_eq!(
+            floating("2026-03-29T02:30:00").to_utc(),
+            utc("2026-03-29T01:30:00Z")
+        );
+        assert_eq!(
+            floating("2026-10-25T02:30:00").to_utc(),
+            utc("2026-10-25T00:30:00Z")
+        );
+        // A daily floating series keeps 09:00 on the wall across the change.
+        let ics = wrap(
+            "BEGIN:VEVENT\r\nUID:d@x\r\nSUMMARY:Daily\r\nDTSTART:20260326T090000\r\nDTEND:20260326T093000\r\n\
+             RRULE:FREQ=DAILY;COUNT=6\r\nEND:VEVENT\r\n",
+        );
+        let event = parse_calendar(&ics).expect("parse").remove(0);
+        let mut starts: Vec<_> = expand(
+            &event,
+            utc("2026-03-25T00:00:00Z"),
+            utc("2026-04-05T00:00:00Z"),
+            20,
+        )
+        .occurrences
+        .iter()
+        .map(|o| o.start.to_utc())
+        .collect();
+        starts.sort();
+        assert_eq!(starts.len(), 6);
+        assert_eq!(starts[0], utc("2026-03-26T08:00:00Z"));
+        assert_eq!(starts[2], utc("2026-03-28T08:00:00Z"));
+        assert_eq!(starts[3], utc("2026-03-29T07:00:00Z"));
+        assert_eq!(starts[5], utc("2026-03-31T07:00:00Z"));
+    });
+}
+
+#[test]
+fn unknown_zone_names_are_mapped_or_read_as_local() {
+    use crate::tz::resolve;
+    // Windows names beyond the common ones, and a custom offset name.
+    assert_eq!(
+        resolve("Mexico Standard Time"),
+        Some(chrono_tz::America::Mexico_City)
+    );
+    assert_eq!(
+        resolve("Tasmania Standard Time"),
+        Some(chrono_tz::Australia::Hobart)
+    );
+    assert_eq!(
+        resolve("(UTC+01:00) Amsterdam, Berlin, Rome"),
+        Some(chrono_tz::Etc::GMTMinus1)
+    );
+    assert_eq!(resolve("UTC-05:00"), Some(chrono_tz::Etc::GMTPlus5));
+    assert_eq!(resolve("GMT+2"), Some(chrono_tz::Etc::GMTMinus2));
+    assert_eq!(resolve("(UTC+05:30) Chennai"), None);
+    assert_eq!(resolve("Customized Time Zone"), None);
+    assert_eq!(resolve("UTC+13:00"), None);
+    // An event in a zone nobody knows is floating, so it is local time.
+    let ics = wrap(
+        "BEGIN:VEVENT\r\nUID:u@x\r\nSUMMARY:Odd\r\nDTSTART;TZID=Customized Time Zone:20260115T090000\r\n\
+         DTEND;TZID=Customized Time Zone:20260115T100000\r\nEND:VEVENT\r\n",
+    );
+    let event = parse_calendar(&ics).expect("parse").remove(0);
+    assert_eq!(event.start.kind, TimeKind::Floating);
+    crate::model::with_floating_zone(chrono_tz::Europe::Berlin, || {
+        assert_eq!(event.start.to_utc(), utc("2026-01-15T08:00:00Z"));
+    });
+}
