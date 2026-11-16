@@ -469,7 +469,12 @@ async fn a_redirect_from_a_public_host_never_enters_the_local_network() {
         "https://intranet/x",
     ] {
         let fake = Fake::default();
-        fake.route(Method::Get, "/a", "", response(302, &[("location", target)], ""));
+        fake.route(
+            Method::Get,
+            "/a",
+            "",
+            response(302, &[("location", target)], ""),
+        );
         let url = Url::parse("https://cal.example.com/a").expect("url");
         let result = send(&fake, HttpRequest::new(Method::Get, url)).await;
         assert_eq!(result.err(), Some(CalendarError::Forbidden), "{target}");
@@ -486,7 +491,9 @@ async fn a_redirect_from_a_public_host_never_enters_the_local_network() {
     );
     fake.route(Method::Get, "/b", "", response(200, &[], "ok"));
     let url = Url::parse("https://cal.example.com/a").expect("url");
-    let reply = send(&fake, HttpRequest::new(Method::Get, url)).await.expect("sent");
+    let reply = send(&fake, HttpRequest::new(Method::Get, url))
+        .await
+        .expect("sent");
     assert_eq!(reply.status, 200);
 }
 
@@ -501,7 +508,9 @@ async fn a_private_server_the_person_typed_may_redirect_within_the_local_network
     );
     fake.route(Method::Get, "/b", "", response(200, &[], "ok"));
     let url = Url::parse("https://192.168.1.10/a").expect("url");
-    let reply = send(&fake, HttpRequest::new(Method::Get, url)).await.expect("sent");
+    let reply = send(&fake, HttpRequest::new(Method::Get, url))
+        .await
+        .expect("sent");
     assert_eq!(reply.status, 200);
 
     let named = Fake::default();
@@ -513,7 +522,9 @@ async fn a_private_server_the_person_typed_may_redirect_within_the_local_network
     );
     named.route(Method::Get, "/b", "", response(200, &[], "ok"));
     let url = Url::parse("https://cal/a").expect("url");
-    assert!(send(&named, HttpRequest::new(Method::Get, url)).await.is_ok());
+    assert!(send(&named, HttpRequest::new(Method::Get, url))
+        .await
+        .is_ok());
 }
 
 #[test]

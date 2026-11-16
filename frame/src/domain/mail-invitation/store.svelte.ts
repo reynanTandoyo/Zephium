@@ -131,7 +131,8 @@ export class MailInvitation {
     if (generation !== this.generation || bytes.ok === "aborted") return;
     if (!bytes.ok) return this.fail();
     const parsed = await callCalendar(
-      () => commands.calendarInvitationParse(
+      () =>
+        commands.calendarInvitationParse(
           bytes.value,
           [...own],
           this.source.from.map((address) => address.email),

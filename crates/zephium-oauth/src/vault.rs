@@ -338,7 +338,10 @@ mod tests {
             if bytes.len() > WINDOWS_BLOB_MAX {
                 return Err(OAuthError::Credentials);
             }
-            self.0.lock().unwrap().insert(target.to_owned(), bytes.to_vec());
+            self.0
+                .lock()
+                .unwrap()
+                .insert(target.to_owned(), bytes.to_vec());
             Ok(())
         }
 
@@ -378,7 +381,10 @@ mod tests {
             assert!(map.contains_key("app.zephium.oauth|acct-1|2"));
             assert!(map.values().all(|blob| blob.len() <= WINDOWS_BLOB_MAX));
         }
-        assert_eq!(decode(&get_record(&entries, "acct-1").unwrap()).unwrap(), secret);
+        assert_eq!(
+            decode(&get_record(&entries, "acct-1").unwrap()).unwrap(),
+            secret
+        );
     }
 
     #[test]
@@ -402,7 +408,10 @@ mod tests {
         // The entry is the bare JSON an older build wrote and reads.
         assert_eq!(decode(&map["app.zephium.oauth|acct-1"]).unwrap(), secret);
         drop(map);
-        assert_eq!(decode(&get_record(&entries, "acct-1").unwrap()).unwrap(), secret);
+        assert_eq!(
+            decode(&get_record(&entries, "acct-1").unwrap()).unwrap(),
+            secret
+        );
     }
 
     #[test]
@@ -413,7 +422,10 @@ mod tests {
         let small = secret_with(30);
         put_record(&entries, "acct-1", &encode(&small).unwrap()).unwrap();
         assert_eq!(entries.0.lock().unwrap().len(), 1);
-        assert_eq!(decode(&get_record(&entries, "acct-1").unwrap()).unwrap(), small);
+        assert_eq!(
+            decode(&get_record(&entries, "acct-1").unwrap()).unwrap(),
+            small
+        );
         put_record(&entries, "acct-1", &encode(&secret_with(6000)).unwrap()).unwrap();
         put_record(&entries, "acct-2", &encode(&small).unwrap()).unwrap();
         remove_record(&entries, "acct-1").unwrap();
@@ -428,7 +440,11 @@ mod tests {
         let bytes = encode(&secret_with(6000)).unwrap();
         put_record(&entries, "acct-1", &bytes).unwrap();
         // A missing chunk.
-        entries.0.lock().unwrap().remove("app.zephium.oauth|acct-1|1");
+        entries
+            .0
+            .lock()
+            .unwrap()
+            .remove("app.zephium.oauth|acct-1|1");
         assert!(get_record(&entries, "acct-1").is_err());
         // A short chunk (length disagrees with the header).
         put_record(&entries, "acct-1", &bytes).unwrap();
@@ -437,7 +453,10 @@ mod tests {
             .lock()
             .unwrap()
             .insert("app.zephium.oauth|acct-1|1".into(), vec![b'x'; 10]);
-        assert_eq!(get_record(&entries, "acct-1").unwrap_err(), OAuthError::Credentials);
+        assert_eq!(
+            get_record(&entries, "acct-1").unwrap_err(),
+            OAuthError::Credentials
+        );
         // Headers that claim too much.
         for header in [
             b"ZCH1\x00\x00\x00\x00\x10".to_vec(),
@@ -445,8 +464,15 @@ mod tests {
             b"ZCH1\x02\x00\x10\x00\x00".to_vec(),
             b"ZCH1\x02".to_vec(),
         ] {
-            entries.0.lock().unwrap().insert("app.zephium.oauth|acct-1".into(), header);
-            assert_eq!(get_record(&entries, "acct-1").unwrap_err(), OAuthError::Credentials);
+            entries
+                .0
+                .lock()
+                .unwrap()
+                .insert("app.zephium.oauth|acct-1".into(), header);
+            assert_eq!(
+                get_record(&entries, "acct-1").unwrap_err(),
+                OAuthError::Credentials
+            );
         }
         // Writing more than the record bound is refused before any entry is written.
         let fresh = WindowsSized::default();

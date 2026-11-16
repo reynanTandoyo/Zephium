@@ -604,7 +604,13 @@ fn known_invitation(id: &str) -> Result<(Invitation, Vec<String>), CalendarError
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
         .find(|item| item.id == id)
-        .map(|item| (item.invitation.clone(), item.own.clone(), item.sender_verified))
+        .map(|item| {
+            (
+                item.invitation.clone(),
+                item.own.clone(),
+                item.sender_verified,
+            )
+        })
         .ok_or(CalendarError::NotFound)?;
     if verified {
         Ok((invitation, own))
