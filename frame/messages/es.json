@@ -3864,6 +3864,7 @@
   "mail_error_no_folder": "Esta cuenta no tiene una carpeta para eso.",
   "mail_error_address_rejected": "El servidor rechazó un destinatario o la dirección del remitente.",
   "mail_error_no_trash": "Esta cuenta no tiene carpeta de papelera.",
+  "mail_sign_in_failed": "Error al iniciar sesión. Revisa la contraseña o vuelve a iniciar sesión y luego actualiza.",
   "mail_delete_forever_title": "Esta cuenta no tiene carpeta de papelera, así que al eliminar el mensaje se borra para siempre. ¿Eliminarlo definitivamente?",
   "mail_delete_forever_confirm": "Eliminar definitivamente",
   "mail_delete_forever_cancel": "Cancelar",

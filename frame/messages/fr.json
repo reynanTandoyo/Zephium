@@ -3864,6 +3864,7 @@
   "mail_error_no_folder": "Ce compte n'a pas de dossier pour cela.",
   "mail_error_address_rejected": "Le serveur a refusé un destinataire ou l'adresse de l'expéditeur.",
   "mail_error_no_trash": "Ce compte n'a pas de dossier Corbeille.",
+  "mail_sign_in_failed": "Échec de la connexion. Vérifiez le mot de passe ou reconnectez-vous, puis actualisez.",
   "mail_delete_forever_title": "Ce compte n'a pas de dossier Corbeille : la suppression efface le message définitivement. Le supprimer définitivement ?",
   "mail_delete_forever_confirm": "Supprimer définitivement",
   "mail_delete_forever_cancel": "Annuler",

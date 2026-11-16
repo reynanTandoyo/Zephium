@@ -3864,6 +3864,7 @@
   "mail_error_no_folder": "이 계정에는 해당하는 폴더가 없습니다.",
   "mail_error_address_rejected": "서버가 받는 사람 또는 보낸 사람 주소를 거부했습니다.",
   "mail_error_no_trash": "이 계정에는 휴지통 폴더가 없습니다.",
+  "mail_sign_in_failed": "로그인에 실패했습니다. 비밀번호를 확인하거나 다시 로그인한 후 새로 고치세요.",
   "mail_delete_forever_title": "이 계정에는 휴지통 폴더가 없어 삭제하면 메시지가 영구적으로 사라집니다. 영구 삭제할까요?",
   "mail_delete_forever_confirm": "영구 삭제",
   "mail_delete_forever_cancel": "취소",

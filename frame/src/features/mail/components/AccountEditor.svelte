@@ -68,6 +68,9 @@
 <li class="account">
   <div class="head">
     <h3>{account.email}</h3>
+    {#if account.sign_in_failed}
+      <p class="signin" role="status">{m.mail_sign_in_failed()}</p>
+    {/if}
     <div class="bar" role="group" aria-label={m.mail_settings_order({ email: account.email })}>
       <Button
         size="compact"
@@ -132,6 +135,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+  }
+
+  .signin {
+    margin: 0;
+    color: var(--color-danger);
+    font-size: var(--text-label);
   }
 
   h3 {

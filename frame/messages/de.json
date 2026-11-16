@@ -3864,6 +3864,7 @@
   "mail_error_no_folder": "Dieses Konto hat dafür keinen Ordner.",
   "mail_error_address_rejected": "Der Server hat einen Empfänger oder die Absenderadresse abgelehnt.",
   "mail_error_no_trash": "Dieses Konto hat keinen Papierkorb.",
+  "mail_sign_in_failed": "Anmeldung fehlgeschlagen. Prüfen Sie das Passwort oder melden Sie sich erneut an und aktualisieren Sie dann.",
   "mail_delete_forever_title": "Dieses Konto hat keinen Papierkorb, daher wird die Nachricht beim Löschen endgültig entfernt. Endgültig löschen?",
   "mail_delete_forever_confirm": "Endgültig löschen",
   "mail_delete_forever_cancel": "Abbrechen",

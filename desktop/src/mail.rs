@@ -130,6 +130,10 @@ pub(crate) struct MailAccountV1 {
     #[serde(default)]
     #[specta(optional)]
     pub(crate) oauth: Option<MailOAuthV1>,
+    /// The server refused the sign-in while watching the inbox: the password
+    /// or token needs attention. Cleared by updating the account or refreshing.
+    #[serde(default)]
+    pub(crate) sign_in_failed: bool,
 }
 
 /// The OAuth identity of an account. No token.
@@ -545,6 +549,7 @@ fn account_out(account: &Account) -> MailAccountV1 {
         colour: account.colour.clone(),
         signature: account.signature.clone(),
         save_sent_copy: account.save_sent_copy,
+        sign_in_failed: is_sign_in_failed(&account.id),
         oauth: match &account.auth {
             AuthKind::Password => None,
             AuthKind::Oauth {
@@ -1108,6 +1113,9 @@ fn store_rules(account: &str, new_rules: Vec<Rule>) -> Result<(), MailError> {
 struct Runtime {
     engine: MailEngine,
     watchers: Mutex<HashMap<String, std::sync::Arc<Notify>>>,
+    /// Accounts whose watcher stopped because the server refused the sign-in.
+    /// They stay stopped until the account is updated or the person refreshes.
+    sign_in_failed: Mutex<std::collections::HashSet<String>>,
 }
 
 fn runtime() -> std::sync::Arc<Runtime> {
@@ -1122,6 +1130,7 @@ fn runtime() -> std::sync::Arc<Runtime> {
                 )
                 .with_tokens(oauth::token_manager()),
                 watchers: Mutex::new(HashMap::new()),
+                sign_in_failed: Mutex::new(std::collections::HashSet::new()),
             })
         })
         .clone()
@@ -1324,11 +1333,16 @@ fn spawn_watcher(
                     let _ = refresh_folders(&app, &runtime, &account).await;
                     Some(POLL)
                 }
-                Err(_) => {
-                    let wait = Duration::from_secs(backoff);
-                    backoff = (backoff * 2).min(300);
-                    Some(wait)
-                }
+                Err(error) => match watch_failure(error, backoff) {
+                    WatchStep::StopSignIn => {
+                        set_sign_in_failed(&app, &runtime, &account_id, true);
+                        break;
+                    }
+                    WatchStep::Retry { wait, next } => {
+                        backoff = next;
+                        Some(wait)
+                    }
+                },
             };
             if let Some(wait) = pause {
                 tokio::select! {
@@ -1359,6 +1373,7 @@ fn watcher_plan(
     on: bool,
     running: &std::collections::HashSet<String>,
     accounts: &[String],
+    blocked: &std::collections::HashSet<String>,
 ) -> (Vec<String>, Vec<String>) {
     if !on {
         let mut stop: Vec<String> = running.iter().cloned().collect();
@@ -1367,7 +1382,7 @@ fn watcher_plan(
     }
     let start = accounts
         .iter()
-        .filter(|id| !running.contains(*id))
+        .filter(|id| !running.contains(*id) && !blocked.contains(*id))
         .cloned()
         .collect();
     let mut stop: Vec<String> = running
@@ -1379,6 +1394,60 @@ fn watcher_plan(
     (start, stop)
 }
 
+/// Longest wait between two watcher attempts after failures.
+const WATCH_BACKOFF_CAP: u64 = 3600;
+
+/// What a watcher does after a failed attempt.
+#[derive(Debug, Eq, PartialEq)]
+enum WatchStep {
+    /// The server refused the sign-in: stop, and say so, until the account is
+    /// updated or the person refreshes. Retrying would only hammer the server
+    /// and may lock the account.
+    StopSignIn,
+    /// Any other failure: wait, doubling up to an hour.
+    Retry { wait: Duration, next: u64 },
+}
+
+fn watch_failure(error: MailError, backoff: u64) -> WatchStep {
+    match error {
+        MailError::AuthFailed | MailError::Credentials => WatchStep::StopSignIn,
+        _ => WatchStep::Retry {
+            wait: Duration::from_secs(backoff),
+            next: (backoff * 2).min(WATCH_BACKOFF_CAP),
+        },
+    }
+}
+
+fn is_sign_in_failed(account_id: &str) -> bool {
+    runtime()
+        .sign_in_failed
+        .lock()
+        .is_ok_and(|failed| failed.contains(account_id))
+}
+
+/// Records or clears the sign-in state and tells the frame when it changed.
+fn set_sign_in_failed(app: &tauri::AppHandle, runtime: &Runtime, account_id: &str, failed: bool) {
+    let changed = runtime.sign_in_failed.lock().is_ok_and(|mut set| {
+        if failed {
+            set.insert(account_id.to_owned())
+        } else {
+            set.remove(account_id)
+        }
+    });
+    if changed {
+        emit(
+            app,
+            &MailChanged {
+                account: account_id.to_owned(),
+                kind: MailChangeKindV1::Accounts,
+                folder: None,
+                unread: 0,
+                new_messages: 0,
+            },
+        );
+    }
+}
+
 /// Starts the account's watcher. A running one is kept unless `restart`.
 fn start_watcher(
     app: &tauri::AppHandle,
@@ -1386,6 +1455,10 @@ fn start_watcher(
     account_id: &str,
     restart: bool,
 ) -> Result<(), MailError> {
+    if restart {
+        // The account changed: a refused sign-in deserves a new try.
+        set_sign_in_failed(app, runtime, account_id, false);
+    }
     let mut watchers = runtime.watchers.lock().map_err(|_| MailError::Internal)?;
     if watchers.contains_key(account_id) && !restart {
         return Ok(());
@@ -1426,7 +1499,12 @@ async fn reconcile_watchers(app: &tauri::AppHandle, runtime: &std::sync::Arc<Run
     } else {
         Vec::new()
     };
-    let (start, stop) = watcher_plan(on, &running, &accounts);
+    let blocked: std::collections::HashSet<String> = runtime
+        .sign_in_failed
+        .lock()
+        .map(|set| set.clone())
+        .unwrap_or_default();
+    let (start, stop) = watcher_plan(on, &running, &accounts, &blocked);
     stop_watchers(runtime, &stop);
     for id in start {
         let _ = start_watcher(app, runtime, &id, false);
@@ -1922,6 +2000,9 @@ pub(crate) async fn mail_remove_account(caller: WebviewWindow, account: String) 
         {
             stop.notify_one();
         }
+        if let Ok(mut failed) = runtime.sign_in_failed.lock() {
+            failed.remove(&account);
+        }
         runtime.engine.forget(&account).await;
         OsVault.remove(&account)?;
         oauth::token_manager().sign_out(&account).await?;
@@ -2025,7 +2106,12 @@ pub(crate) async fn mail_sync(caller: WebviewWindow, account: String) -> Reply<V
     let app = caller.app_handle().clone();
     let outcome = async {
         let account = load_account(&account).await?;
-        let live = refresh_folders(&app, &runtime(), &account).await?;
+        let runtime = runtime();
+        let live = refresh_folders(&app, &runtime, &account).await?;
+        // The server accepted the sign-in: the person's refresh also revives a
+        // watcher that had stopped on a refusal.
+        set_sign_in_failed(&app, &runtime, &account.id, false);
+        let _ = start_watcher(&app, &runtime, &account.id, false);
         Ok::<_, MailError>(live.iter().map(folder_out).collect())
     }
     .await;
@@ -2574,7 +2660,9 @@ pub(crate) async fn mail_watch(caller: WebviewWindow, account: String, on: bool)
         let account = load_account(&account).await?;
         let runtime = runtime();
         if on {
-            // The backend already watches every account; this is idempotent.
+            // The backend already watches every account; this is idempotent,
+            // except that asking again revives a watcher stopped on a refusal.
+            set_sign_in_failed(&app, &runtime, &account.id, false);
             start_watcher(&app, &runtime, &account.id, false)?;
         } else {
             stop_watchers(&runtime, &[account.id]);
@@ -2655,28 +2743,64 @@ mod tests {
     #[test]
     fn every_account_gets_a_watcher_at_start_and_none_is_doubled() {
         let none = std::collections::HashSet::new();
-        let (start, stop) = watcher_plan(true, &none, &ids(&["a", "b"]));
+        let (start, stop) = watcher_plan(true, &none, &ids(&["a", "b"]), &none);
         assert_eq!((start, stop), (ids(&["a", "b"]), Vec::new()));
         let running: std::collections::HashSet<String> = ids(&["a"]).into_iter().collect();
-        let (start, stop) = watcher_plan(true, &running, &ids(&["a", "b"]));
+        let (start, stop) = watcher_plan(true, &running, &ids(&["a", "b"]), &none);
         assert_eq!((start, stop), (ids(&["b"]), Vec::new()));
     }
 
     #[test]
     fn switching_mail_off_stops_every_watcher_and_on_restarts_them() {
         let running: std::collections::HashSet<String> = ids(&["b", "a"]).into_iter().collect();
-        let (start, stop) = watcher_plan(false, &running, &ids(&["a", "b", "c"]));
+        let none = std::collections::HashSet::new();
+        let (start, stop) = watcher_plan(false, &running, &ids(&["a", "b", "c"]), &none);
         assert_eq!((start, stop), (Vec::new(), ids(&["a", "b"])));
-        let (start, stop) =
-            watcher_plan(true, &std::collections::HashSet::new(), &ids(&["a", "b"]));
+        let (start, stop) = watcher_plan(
+            true,
+            &std::collections::HashSet::new(),
+            &ids(&["a", "b"]),
+            &none,
+        );
         assert_eq!((start, stop), (ids(&["a", "b"]), Vec::new()));
     }
 
     #[test]
     fn a_removed_accounts_watcher_stops() {
         let running: std::collections::HashSet<String> = ids(&["a", "gone"]).into_iter().collect();
-        let (start, stop) = watcher_plan(true, &running, &ids(&["a"]));
+        let none = std::collections::HashSet::new();
+        let (start, stop) = watcher_plan(true, &running, &ids(&["a"]), &none);
         assert_eq!((start, stop), (Vec::new(), ids(&["gone"])));
+    }
+
+    #[test]
+    fn an_account_whose_sign_in_was_refused_is_not_restarted_by_the_supervisor() {
+        let none = std::collections::HashSet::new();
+        let blocked: std::collections::HashSet<String> = ids(&["b"]).into_iter().collect();
+        let (start, stop) = watcher_plan(true, &none, &ids(&["a", "b"]), &blocked);
+        assert_eq!((start, stop), (ids(&["a"]), Vec::new()));
+    }
+
+    #[test]
+    fn failed_watchers_back_off_up_to_an_hour_and_a_refused_sign_in_stops_them() {
+        let mut backoff = 5;
+        let mut waits = Vec::new();
+        for _ in 0..12 {
+            let WatchStep::Retry { wait, next } = watch_failure(MailError::Offline, backoff) else {
+                panic!("a network failure retries");
+            };
+            waits.push(wait.as_secs());
+            backoff = next;
+        }
+        assert_eq!(waits[..4], [5, 10, 20, 40]);
+        assert_eq!(*waits.last().expect("waits"), WATCH_BACKOFF_CAP);
+        assert!(waits.windows(2).all(|pair| pair[0] <= pair[1]));
+        for error in [MailError::AuthFailed, MailError::Credentials] {
+            assert_eq!(watch_failure(error, 5), WatchStep::StopSignIn);
+        }
+        for error in [MailError::Timeout, MailError::Tls, MailError::Protocol] {
+            assert!(matches!(watch_failure(error, 5), WatchStep::Retry { .. }));
+        }
     }
 
     #[test]

@@ -3864,6 +3864,7 @@
   "mail_error_no_folder": "このアカウントには該当するフォルダーがありません。",
   "mail_error_address_rejected": "サーバーが宛先または送信者のアドレスを拒否しました。",
   "mail_error_no_trash": "このアカウントにはごみ箱フォルダーがありません。",
+  "mail_sign_in_failed": "サインインに失敗しました。パスワードを確認するか、もう一度サインインしてから更新してください。",
   "mail_delete_forever_title": "このアカウントにはごみ箱フォルダーがないため、削除するとメッセージは完全に消えます。完全に削除しますか？",
   "mail_delete_forever_confirm": "完全に削除",
   "mail_delete_forever_cancel": "キャンセル",

@@ -3864,6 +3864,7 @@
   "mail_error_no_folder": "Questo account non ha una cartella per questo.",
   "mail_error_address_rejected": "Il server ha rifiutato un destinatario o l'indirizzo del mittente.",
   "mail_error_no_trash": "Questo account non ha una cartella Cestino.",
+  "mail_sign_in_failed": "Accesso non riuscito. Controlla la password o accedi di nuovo, poi aggiorna.",
   "mail_delete_forever_title": "Questo account non ha una cartella Cestino, quindi eliminando il messaggio lo si rimuove per sempre. Eliminarlo definitivamente?",
   "mail_delete_forever_confirm": "Elimina definitivamente",
   "mail_delete_forever_cancel": "Annulla",

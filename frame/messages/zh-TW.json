@@ -3864,6 +3864,7 @@
   "mail_error_no_folder": "此帳戶沒有對應的資料夾。",
   "mail_error_address_rejected": "伺服器拒絕了某個收件者或寄件者位址。",
   "mail_error_no_trash": "此帳號沒有垃圾桶資料夾。",
+  "mail_sign_in_failed": "登入失敗。請檢查密碼或重新登入，然後重新整理。",
   "mail_delete_forever_title": "此帳號沒有垃圾桶資料夾，刪除後郵件將永久移除。要永久刪除嗎？",
   "mail_delete_forever_confirm": "永久刪除",
   "mail_delete_forever_cancel": "取消",

@@ -29,6 +29,7 @@ export const account = (id = "a1", over: Partial<MailAccountV1> = {}): MailAccou
   colour: "#3366cc",
   signature: "",
   save_sent_copy: true,
+  sign_in_failed: false,
   ...over,
 });
 

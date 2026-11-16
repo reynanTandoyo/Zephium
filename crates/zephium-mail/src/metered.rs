@@ -52,18 +52,83 @@ impl ReadBudget {
     }
 }
 
+/// Follows the server's bytes just far enough to see literal announcements
+/// (`{123}` or `{123+}` at the end of a line) and the literal bytes that follow.
+/// The client library allocates what a literal announces before the bytes
+/// arrive, so an announcement larger than the command's budget is refused here,
+/// before the client sees it.
+#[derive(Debug, Default)]
+struct LiteralScanner {
+    remaining: u64,
+    tail: Vec<u8>,
+}
+
+impl LiteralScanner {
+    /// False when `bytes` announce a literal bigger than `limit`.
+    fn feed(&mut self, mut bytes: &[u8], limit: u64) -> bool {
+        while !bytes.is_empty() {
+            if self.remaining > 0 {
+                let skip =
+                    usize::try_from(self.remaining).map_or(bytes.len(), |n| n.min(bytes.len()));
+                self.remaining -= skip as u64;
+                bytes = &bytes[skip..];
+                continue;
+            }
+            let Some(end) = bytes.iter().position(|b| *b == b'\n') else {
+                self.tail.extend_from_slice(bytes);
+                let excess = self.tail.len().saturating_sub(32);
+                self.tail.drain(..excess);
+                return true;
+            };
+            self.tail.extend_from_slice(&bytes[..end]);
+            bytes = &bytes[end + 1..];
+            let announced = literal_size(&self.tail);
+            self.tail.clear();
+            if let Some(size) = announced {
+                if size > limit {
+                    return false;
+                }
+                self.remaining = size;
+            }
+        }
+        true
+    }
+}
+
+/// The size in a line that ends with `{n}` or `{n+}` (before CR), if any.
+fn literal_size(line: &[u8]) -> Option<u64> {
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let line = line.strip_suffix(b"}")?;
+    let line = line.strip_suffix(b"+").unwrap_or(line);
+    let digits = line.iter().rev().take_while(|b| b.is_ascii_digit()).count();
+    if digits == 0 || line.len() <= digits || line[line.len() - digits - 1] != b'{' {
+        return None;
+    }
+    // More than 19 digits cannot be a size we would accept either.
+    std::str::from_utf8(&line[line.len() - digits..])
+        .ok()?
+        .parse()
+        .ok()
+        .or(Some(u64::MAX))
+}
+
 /// A stream whose reads are counted against a [`ReadBudget`]. Writes pass through.
 #[derive(Debug)]
 pub struct Metered<S> {
     inner: S,
     budget: Arc<ReadBudget>,
+    scanner: LiteralScanner,
 }
 
 impl<S> Metered<S> {
     /// Wraps `inner`.
     #[must_use]
     pub fn new(inner: S, budget: Arc<ReadBudget>) -> Self {
-        Self { inner, budget }
+        Self {
+            inner,
+            budget,
+            scanner: LiteralScanner::default(),
+        }
     }
 }
 
@@ -88,6 +153,14 @@ impl<S: AsyncRead + Unpin> AsyncRead for Metered<S> {
         if polled.is_ready() {
             let read = (buf.filled().len() - before) as u64;
             budget.used.fetch_add(read, Ordering::Relaxed);
+            let limit = budget.limit.load(Ordering::Relaxed);
+            let fresh = &buf.filled()[before..];
+            if !self.scanner.feed(fresh, limit) {
+                // Refuse before the client allocates for the announced literal.
+                buf.set_filled(before);
+                budget.tripped.store(true, Ordering::Relaxed);
+                return Poll::Ready(Err(over_budget()));
+            }
         }
         polled
     }
@@ -152,6 +225,37 @@ mod tests {
             assert_eq!(budget.used(), 60);
         }
         assert!(!budget.tripped());
+    }
+
+    #[test]
+    fn literal_announcements_are_found_across_chunks_and_literal_bytes_are_skipped() {
+        let mut scan = LiteralScanner::default();
+        // A line that looks like `{99999}` inside literal data is data, not an announcement.
+        assert!(scan.feed(b"* 1 FETCH (BODY[] {5}\r\n", 100));
+        assert!(scan.feed(b"{99999}\r\n)\r\n", 100));
+        // An announcement split over chunks is still seen.
+        assert!(scan.feed(b"* 2 FETCH (BODY[] {1", 100));
+        assert!(!scan.feed(b"01}\r\n", 100));
+        assert_eq!(literal_size(b"x {12+}\r"), Some(12));
+        assert_eq!(literal_size(b"x {12}"), Some(12));
+        assert_eq!(literal_size(b"x 12}"), None);
+        assert_eq!(literal_size(b"{}"), None);
+        assert_eq!(literal_size(b"{99999999999999999999999}\r"), Some(u64::MAX));
+    }
+
+    #[tokio::test]
+    async fn a_huge_announced_literal_is_refused_before_any_of_it_is_read_on() {
+        let (client, mut server) = tokio::io::duplex(4096);
+        let budget = ReadBudget::new(1000);
+        let mut metered = Metered::new(client, budget.clone());
+        server
+            .write_all(b"* 1 FETCH (BODY[] {536870912}\r\n")
+            .await
+            .unwrap();
+        let mut buf = [0u8; 64];
+        let error = metered.read(&mut buf).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(budget.tripped());
     }
 
     #[tokio::test]

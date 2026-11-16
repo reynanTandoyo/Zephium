@@ -854,3 +854,18 @@ async fn a_header_fetch_that_never_ends_stops_at_its_cap() {
         MailError::Protocol
     );
 }
+
+#[tokio::test]
+async fn a_huge_announced_literal_is_refused_before_it_is_allocated_or_awaited() {
+    let rig = rig();
+    rig.server.state.lock().unwrap().folders[0].add(&[], &simple("a@example.com", "x", "tiny"));
+    rig.server.state.lock().unwrap().hostile = Hostile::HugeAnnounce;
+    let a = account(false);
+    let started = std::time::Instant::now();
+    assert_eq!(
+        rig.engine.message(&a, "INBOX", 1).await.unwrap_err(),
+        MailError::TooLarge
+    );
+    // Refused on the announcement, not after a timeout waiting for the bytes.
+    assert!(started.elapsed() < Duration::from_secs(10));
+}

@@ -170,7 +170,7 @@ test("the card shows what, when, where, who and the state of your own copy", asy
   await expect.element(page.getByText("Ann", { exact: true })).toBeVisible();
   await expect.element(page.getByText("Declined", { exact: true })).toBeVisible();
   await expect.element(page.getByText("(you)")).toBeVisible();
-  expect(native.parse).toHaveBeenCalledWith("QkVHSU4=", ["me@example.com"]);
+  expect(native.parse).toHaveBeenCalledWith("QkVHSU4=", ["me@example.com"], ["boss@example.com"]);
 });
 
 test("nothing is sent until Accept is pressed; then the calendar is answered and the reply is sent", async () => {
@@ -323,5 +323,5 @@ test("a message with an invitation part shows the card above its body", async ()
   await page.getByRole("button", { name: /Subject 1/u }).click();
   await expect.element(page.getByRole("heading", { name: "Quarterly planning" })).toBeVisible();
   expect(native.bytes).toHaveBeenCalledWith("acc-1", "INBOX", 1, 1);
-  expect(native.parse).toHaveBeenCalledWith("QkVHSU4=", ["me@example.com"]);
+  expect(native.parse).toHaveBeenCalledWith("QkVHSU4=", ["me@example.com"], ["boss@example.com"]);
 });

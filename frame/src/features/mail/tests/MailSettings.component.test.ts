@@ -60,3 +60,14 @@ test("a refused reorder keeps the order and says why", async () => {
   await expect.element(page.getByRole("alert")).toHaveTextContent(/busy/iu);
   expect(emails()).toEqual(["a@example.com", "b@example.com", "c@example.com"]);
 });
+
+test("an account whose sign-in was refused says so, and the others do not", async () => {
+  native.rules.mockResolvedValue(ok([]));
+  const store = new MailStore();
+  store.accounts = [three[0]!, { ...three[1]!, sign_in_failed: true }];
+  render(MailSettings, { store, onadd: vi.fn(), onback: vi.fn() });
+  await expect.element(page.getByText(/Sign-in failed/u)).toBeVisible();
+  expect(document.querySelectorAll(".signin")).toHaveLength(1);
+  // Let the rule lists finish loading before the mocks are reset.
+  await vi.waitFor(() => expect(native.rules).toHaveBeenCalled());
+});

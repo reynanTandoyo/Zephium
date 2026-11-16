@@ -91,6 +91,9 @@
         <span class="dot" style:background={account.colour} aria-hidden="true"></span>
         <span class="who">{account.display_name}</span>
       </h3>
+      {#if account.sign_in_failed}
+        <p class="failed" role="status">{m.mail_sign_in_failed()}</p>
+      {/if}
       {#if store.folderFailures.includes(account.id)}
         <p class="failed" role="status">{m.mail_folders_failed()}</p>
       {/if}
