@@ -225,6 +225,7 @@ test("opening marks unseen mail read only after the body arrived and the server 
       truncated: false,
       attachments: [],
       inline_images: [],
+      invitations: [],
     }),
   );
   host.setFlags.mockReturnValueOnce(ok(null));
@@ -329,6 +330,7 @@ async function openFirst() {
       truncated: false,
       attachments: [],
       inline_images: [],
+      invitations: [],
     }),
   );
   const store = new MailStore();

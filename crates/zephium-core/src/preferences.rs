@@ -74,6 +74,8 @@ pub const KEYS: &[&str] = &[
     "mail.notifications",
     "calendar.reminders",
     "calendar.default_reminder",
+    "calendar.invitation_decline",
+    "calendar.invitation_cancel",
 ];
 
 /// SmartScreen ships on. Only an explicit persisted false disables the
@@ -351,6 +353,8 @@ pub fn value_allowed(key: &str, value: &str) -> bool {
             matches!(value, "true" | "false")
         }
         "calendar.default_reminder" => matches!(value, "none" | "5" | "10" | "15" | "30"),
+        "calendar.invitation_decline" => matches!(value, "keep" | "remove"),
+        "calendar.invitation_cancel" => matches!(value, "mark" | "remove"),
         _ => false,
     }
 }
