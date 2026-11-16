@@ -498,11 +498,29 @@ const INVITATIONS_MAX: usize = 64;
 /// Largest base64 text `calendar_invitation_parse` accepts (about 1 MiB of
 /// bytes).
 const INVITATION_B64_MAX: usize = zephium_calendar::invite::MAX_INVITATION_BYTES / 3 * 4 + 8;
-/// Settings: `calendar.invitation_decline` = `keep` keeps a declined event
-/// (default: delete it); `calendar.invitation_cancel` = `mark` keeps a
-/// cancelled event marked cancelled (default: delete it).
+/// Settings: `calendar.invitation_decline` (`keep` keeps a declined event,
+/// `remove` deletes it) and `calendar.invitation_cancel` (`mark` keeps a
+/// cancelled event marked cancelled, `remove` deletes it). An unset or
+/// unknown value keeps the event, as Settings shows by default: only an
+/// explicit `remove` deletes.
 const DECLINE_SETTING: &str = "calendar.invitation_decline";
 const CANCEL_SETTING: &str = "calendar.invitation_cancel";
+
+fn decline_mode(setting: Option<&str>) -> DeclineMode {
+    if setting == Some("remove") {
+        DeclineMode::Remove
+    } else {
+        DeclineMode::KeepDeclined
+    }
+}
+
+fn cancel_mode(setting: Option<&str>) -> CancelMode {
+    if setting == Some("remove") {
+        CancelMode::Remove
+    } else {
+        CancelMode::MarkCancelled
+    }
+}
 
 struct KnownInvitation {
     id: String,
@@ -610,11 +628,7 @@ pub(crate) async fn calendar_invitation_respond(
                 .suggested_calendar
         }
     };
-    let decline = if app_setting(DECLINE_SETTING).as_deref() == Some("keep") {
-        DeclineMode::KeepDeclined
-    } else {
-        DeclineMode::Remove
-    };
+    let decline = decline_mode(app_setting(DECLINE_SETTING).as_deref());
     let reply = service
         .respond_invitation(&invitation, &own, response, calendar.as_deref(), decline)
         .await?;
@@ -636,11 +650,7 @@ pub(crate) async fn calendar_invitation_apply_cancel(
 ) -> Result<CalendarInvitationActionV1, CalendarError> {
     let service = service(&app, &caller, "calendar_invitation_apply_cancel")?;
     let (invitation, _) = known_invitation(&invitation_id)?;
-    let mode = if app_setting(CANCEL_SETTING).as_deref() == Some("mark") {
-        CancelMode::MarkCancelled
-    } else {
-        CancelMode::Remove
-    };
+    let mode = cancel_mode(app_setting(CANCEL_SETTING).as_deref());
     let action = service.apply_cancel(&invitation, mode).await?;
     if action != CalendarInvitationActionV1::None {
         changed(&app);
@@ -699,6 +709,20 @@ mod invitation_tests {
             known_invitation("inv-unknown").err(),
             Some(CalendarError::NotFound)
         );
+    }
+
+    #[test]
+    fn an_unset_setting_keeps_the_event_and_only_remove_deletes() {
+        // Settings shows `keep` and `mark` until the person chooses otherwise,
+        // and stores nothing for a default.
+        assert_eq!(decline_mode(None), DeclineMode::KeepDeclined);
+        assert_eq!(decline_mode(Some("keep")), DeclineMode::KeepDeclined);
+        assert_eq!(decline_mode(Some("garbage")), DeclineMode::KeepDeclined);
+        assert_eq!(decline_mode(Some("remove")), DeclineMode::Remove);
+        assert_eq!(cancel_mode(None), CancelMode::MarkCancelled);
+        assert_eq!(cancel_mode(Some("mark")), CancelMode::MarkCancelled);
+        assert_eq!(cancel_mode(Some("garbage")), CancelMode::MarkCancelled);
+        assert_eq!(cancel_mode(Some("remove")), CancelMode::Remove);
     }
 
     const _: () =
