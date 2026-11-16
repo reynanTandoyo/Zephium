@@ -6,9 +6,12 @@
 //! a Microsoft work-account record can be longer. A record that fits one chunk
 //! is stored as before (the JSON in the account entry, so older builds and
 //! older records still read). A longer one is split: the account entry holds a
-//! small header (`ZCH1`, chunk count, total length) and the bytes live in
-//! `app.zephium.oauth|<account id>|0` to `|<n-1>`. All of it is written, read
-//! and removed within one vault turn, so a reader never sees half of a write.
+//! small header (`ZCH2`, generation, chunk count, total length) and the bytes live
+//! in `app.zephium.oauth|<account id>|<generation>|0` to `|<n-1>`. A new record
+//! goes to the other generation and the header switches to it with one entry
+//! write, so a failure at any point leaves one whole record (the old or the new).
+//! Everything is written, read and removed within one vault turn. Records of
+//! the first layout (`ZCH1`, chunks at `|<n>`) and single-entry records still read.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -28,8 +31,13 @@ pub const MAX_RECORD_BYTES: usize = 8 * 1024;
 pub const CHUNK_BYTES: usize = 2048;
 /// Most chunk entries a record may use.
 pub const MAX_CHUNKS: usize = MAX_RECORD_BYTES.div_ceil(CHUNK_BYTES);
-const HEADER_MAGIC: &[u8; 4] = b"ZCH1";
-const HEADER_BYTES: usize = 4 + 1 + 4;
+/// Header of the first chunked layout: chunks at `<target>|<i>`.
+const HEADER_V1: &[u8; 4] = b"ZCH1";
+/// Header of the current layout: `ZCH2`, generation (0 or 1), chunk count,
+/// total length; chunks at `<target>|<generation>|<i>`.
+const HEADER_V2: &[u8; 4] = b"ZCH2";
+const HEADER_V1_BYTES: usize = 4 + 1 + 4;
+const HEADER_V2_BYTES: usize = 4 + 1 + 1 + 4;
 
 /// What is kept per account: the refresh token and, for Google desktop
 /// clients that need one, the client secret the person pasted.
@@ -98,29 +106,50 @@ pub(crate) trait Entries {
     fn delete(&self, target: &str) -> Result<()>;
 }
 
-fn chunk_target(account_id: &str, index: usize) -> Option<String> {
+fn chunk_target(account_id: &str, generation: u8, index: usize) -> Option<String> {
+    target(account_id).map(|head| format!("{head}|{generation}|{index}"))
+}
+
+/// Chunk names of the first layout, still read and cleaned up.
+fn chunk_target_v1(account_id: &str, index: usize) -> Option<String> {
     target(account_id).map(|head| format!("{head}|{index}"))
 }
 
+/// The generation the stored record uses, when it is chunked in the current
+/// layout; `None` for a single-entry record, the first layout or no record.
+fn stored_generation(entries: &dyn Entries, account_id: &str) -> Option<u8> {
+    let head = target(account_id)?;
+    let first = entries.read(&head).ok()?;
+    (first.starts_with(HEADER_V2) && first.len() == HEADER_V2_BYTES).then(|| first[4] & 1)
+}
+
 /// Writes `bytes` (an encoded record) under `account_id`: one entry when it
-/// fits, else a header plus chunks. Chunks go first and the header last; stale
-/// chunks of an earlier, longer record are removed afterwards.
+/// fits, else a header plus chunks. A chunked record never overwrites the one
+/// it replaces: the new chunks go to the other generation, then the header
+/// switches to them in one entry write, and only then are the old chunks
+/// removed. A failure before the switch leaves the old record whole; one
+/// after it leaves the new record whole and some stale chunks that the next
+/// write or the sign-out removes.
 pub(crate) fn put_record(entries: &dyn Entries, account_id: &str, bytes: &[u8]) -> Result<()> {
     let head = target(account_id).ok_or(OAuthError::InvalidInput)?;
     if bytes.is_empty() || bytes.len() > MAX_RECORD_BYTES {
         return Err(OAuthError::InvalidInput);
     }
-    let kept = if bytes.len() <= CHUNK_BYTES {
+    let previous = stored_generation(entries, account_id);
+    let keep = if bytes.len() <= CHUNK_BYTES {
         entries.write(&head, bytes)?;
-        0
+        None
     } else {
+        let generation = previous.map_or(0, |old| old ^ 1);
         let chunks: Vec<&[u8]> = bytes.chunks(CHUNK_BYTES).collect();
         for (index, chunk) in chunks.iter().enumerate() {
-            let name = chunk_target(account_id, index).ok_or(OAuthError::InvalidInput)?;
+            let name =
+                chunk_target(account_id, generation, index).ok_or(OAuthError::InvalidInput)?;
             entries.write(&name, chunk)?;
         }
-        let mut header = zeroize::Zeroizing::new(Vec::with_capacity(HEADER_BYTES));
-        header.extend_from_slice(HEADER_MAGIC);
+        let mut header = zeroize::Zeroizing::new(Vec::with_capacity(HEADER_V2_BYTES));
+        header.extend_from_slice(HEADER_V2);
+        header.push(generation);
         header.push(u8::try_from(chunks.len()).map_err(|_| OAuthError::InvalidInput)?);
         header.extend_from_slice(
             &u32::try_from(bytes.len())
@@ -128,12 +157,30 @@ pub(crate) fn put_record(entries: &dyn Entries, account_id: &str, bytes: &[u8]) 
                 .to_be_bytes(),
         );
         entries.write(&head, &header)?;
-        chunks.len()
+        Some(generation)
     };
-    for index in kept..MAX_CHUNKS {
-        let name = chunk_target(account_id, index).ok_or(OAuthError::InvalidInput)?;
-        entries.delete(&name)?;
+    // The switch is done: whatever the new record does not use is stale.
+    let mut result = Ok(());
+    for generation in 0..2_u8 {
+        if keep == Some(generation) {
+            continue;
+        }
+        for index in 0..MAX_CHUNKS {
+            let name =
+                chunk_target(account_id, generation, index).ok_or(OAuthError::InvalidInput)?;
+            if let Err(error) = entries.delete(&name) {
+                result = result.and(Err(error));
+            }
+        }
     }
+    for index in 0..MAX_CHUNKS {
+        let name = chunk_target_v1(account_id, index).ok_or(OAuthError::InvalidInput)?;
+        if let Err(error) = entries.delete(&name) {
+            result = result.and(Err(error));
+        }
+    }
+    // A failed cleanup does not undo a record that was written whole.
+    let _ = result;
     Ok(())
 }
 
@@ -144,20 +191,37 @@ pub(crate) fn get_record(
 ) -> Result<zeroize::Zeroizing<Vec<u8>>> {
     let head = target(account_id).ok_or(OAuthError::InvalidInput)?;
     let first = entries.read(&head)?;
-    if !first.starts_with(HEADER_MAGIC) {
+    let (generation, count, total) = if first.starts_with(HEADER_V2) {
+        if first.len() != HEADER_V2_BYTES || first[4] > 1 {
+            return Err(OAuthError::Credentials);
+        }
+        (
+            Some(first[4]),
+            usize::from(first[5]),
+            u32::from_be_bytes([first[6], first[7], first[8], first[9]]) as usize,
+        )
+    } else if first.starts_with(HEADER_V1) {
+        if first.len() != HEADER_V1_BYTES {
+            return Err(OAuthError::Credentials);
+        }
+        (
+            None,
+            usize::from(first[4]),
+            u32::from_be_bytes([first[5], first[6], first[7], first[8]]) as usize,
+        )
+    } else {
         return Ok(first);
-    }
-    if first.len() != HEADER_BYTES {
-        return Err(OAuthError::Credentials);
-    }
-    let count = usize::from(first[4]);
-    let total = u32::from_be_bytes([first[5], first[6], first[7], first[8]]) as usize;
+    };
     if count == 0 || count > MAX_CHUNKS || total == 0 || total > MAX_RECORD_BYTES {
         return Err(OAuthError::Credentials);
     }
     let mut all = zeroize::Zeroizing::new(Vec::with_capacity(total));
     for index in 0..count {
-        let name = chunk_target(account_id, index).ok_or(OAuthError::InvalidInput)?;
+        let name = match generation {
+            Some(generation) => chunk_target(account_id, generation, index),
+            None => chunk_target_v1(account_id, index),
+        }
+        .ok_or(OAuthError::InvalidInput)?;
         let chunk = entries.read(&name)?;
         if chunk.len() > CHUNK_BYTES || all.len() + chunk.len() > total {
             return Err(OAuthError::Credentials);
@@ -170,20 +234,25 @@ pub(crate) fn get_record(
     Ok(all)
 }
 
-/// Removes the record and every chunk. Tries all entries; reports the first
-/// failure.
+/// Removes the record and every chunk of every layout. Tries all entries;
+/// reports the first failure.
 pub(crate) fn remove_record(entries: &dyn Entries, account_id: &str) -> Result<()> {
     let head = target(account_id).ok_or(OAuthError::InvalidInput)?;
     let mut result = Ok(());
-    for index in 0..MAX_CHUNKS {
-        let name = chunk_target(account_id, index).ok_or(OAuthError::InvalidInput)?;
-        if let Err(error) = entries.delete(&name) {
-            result = result.and(Err(error));
+    let mut delete = |name: Option<String>| match name {
+        Some(name) => {
+            if let Err(error) = entries.delete(&name) {
+                result = result.clone().and(Err(error));
+            }
         }
+        None => result = result.clone().and(Err(OAuthError::InvalidInput)),
+    };
+    for index in 0..MAX_CHUNKS {
+        delete(chunk_target(account_id, 0, index));
+        delete(chunk_target(account_id, 1, index));
+        delete(chunk_target_v1(account_id, index));
     }
-    if let Err(error) = entries.delete(&head) {
-        result = result.and(Err(error));
-    }
+    delete(Some(head));
     result
 }
 
@@ -377,8 +446,8 @@ mod tests {
         {
             let map = entries.0.lock().unwrap();
             assert!(map.contains_key("app.zephium.oauth|acct-1"));
-            assert!(map.contains_key("app.zephium.oauth|acct-1|0"));
-            assert!(map.contains_key("app.zephium.oauth|acct-1|2"));
+            assert!(map.contains_key("app.zephium.oauth|acct-1|0|0"));
+            assert!(map.contains_key("app.zephium.oauth|acct-1|0|2"));
             assert!(map.values().all(|blob| blob.len() <= WINDOWS_BLOB_MAX));
         }
         assert_eq!(
@@ -444,24 +513,27 @@ mod tests {
             .0
             .lock()
             .unwrap()
-            .remove("app.zephium.oauth|acct-1|1");
+            .remove("app.zephium.oauth|acct-1|0|1");
         assert!(get_record(&entries, "acct-1").is_err());
-        // A short chunk (length disagrees with the header).
+        // A short chunk (length disagrees with the header); the second write
+        // went to the other generation.
         put_record(&entries, "acct-1", &bytes).unwrap();
         entries
             .0
             .lock()
             .unwrap()
-            .insert("app.zephium.oauth|acct-1|1".into(), vec![b'x'; 10]);
+            .insert("app.zephium.oauth|acct-1|1|1".into(), vec![b'x'; 10]);
         assert_eq!(
             get_record(&entries, "acct-1").unwrap_err(),
             OAuthError::Credentials
         );
         // Headers that claim too much.
         for header in [
-            b"ZCH1\x00\x00\x00\x00\x10".to_vec(),
-            b"ZCH1\x09\x00\x00\x20\x00".to_vec(),
-            b"ZCH1\x02\x00\x10\x00\x00".to_vec(),
+            b"ZCH2\x00\x00\x00\x00\x00\x10".to_vec(),
+            b"ZCH2\x00\x09\x00\x00\x20\x00".to_vec(),
+            b"ZCH2\x00\x02\x00\x10\x00\x00".to_vec(),
+            b"ZCH2\x05\x02\x00\x00\x10\x00".to_vec(),
+            b"ZCH2\x00\x02".to_vec(),
             b"ZCH1\x02".to_vec(),
         ] {
             entries
@@ -481,6 +553,113 @@ mod tests {
             Err(OAuthError::InvalidInput)
         );
         assert!(fresh.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_record_of_the_first_chunked_layout_still_reads_and_is_replaced_cleanly() {
+        let entries = WindowsSized::default();
+        let secret = secret_with(5000);
+        let bytes = encode(&secret).unwrap();
+        // Write it the way the first layout did: `ZCH1`, chunks at `|<i>`.
+        let mut header = b"ZCH1".to_vec();
+        header.push(u8::try_from(bytes.len().div_ceil(CHUNK_BYTES)).unwrap());
+        header.extend_from_slice(&u32::try_from(bytes.len()).unwrap().to_be_bytes());
+        entries.write("app.zephium.oauth|acct-1", &header).unwrap();
+        for (index, chunk) in bytes.chunks(CHUNK_BYTES).enumerate() {
+            entries
+                .write(&format!("app.zephium.oauth|acct-1|{index}"), chunk)
+                .unwrap();
+        }
+        assert_eq!(
+            decode(&get_record(&entries, "acct-1").unwrap()).unwrap(),
+            secret
+        );
+        let next = secret_with(6000);
+        put_record(&entries, "acct-1", &encode(&next).unwrap()).unwrap();
+        assert_eq!(
+            decode(&get_record(&entries, "acct-1").unwrap()).unwrap(),
+            next
+        );
+        assert!(!entries
+            .0
+            .lock()
+            .unwrap()
+            .contains_key("app.zephium.oauth|acct-1|0"));
+        remove_record(&entries, "acct-1").unwrap();
+        assert!(entries.0.lock().unwrap().is_empty());
+    }
+
+    /// Entries that start failing after `budget` writes or deletes.
+    struct Flaky {
+        inner: WindowsSized,
+        budget: Mutex<usize>,
+    }
+
+    impl Flaky {
+        fn spend(&self) -> Result<()> {
+            let mut budget = self.budget.lock().unwrap();
+            if *budget == 0 {
+                return Err(OAuthError::Credentials);
+            }
+            *budget -= 1;
+            Ok(())
+        }
+    }
+
+    impl Entries for Flaky {
+        fn write(&self, target: &str, bytes: &[u8]) -> Result<()> {
+            self.spend()?;
+            self.inner.write(target, bytes)
+        }
+
+        fn read(&self, target: &str) -> Result<zeroize::Zeroizing<Vec<u8>>> {
+            self.inner.read(target)
+        }
+
+        fn delete(&self, target: &str) -> Result<()> {
+            self.spend()?;
+            self.inner.delete(target)
+        }
+    }
+
+    #[test]
+    fn a_failure_at_any_point_of_a_replacement_leaves_one_whole_record() {
+        let old = secret_with(6000);
+        let new = secret_with(7000);
+        for budget in 0..16 {
+            // Chunked over chunked, and single-entry over chunked.
+            for replacement in [&new, &secret_with(40)] {
+                let flaky = Flaky {
+                    inner: WindowsSized::default(),
+                    budget: Mutex::new(usize::MAX),
+                };
+                put_record(&flaky, "acct-1", &encode(&old).unwrap()).unwrap();
+                *flaky.budget.lock().unwrap() = budget;
+                let _ = put_record(&flaky, "acct-1", &encode(replacement).unwrap());
+                let read = decode(&get_record(&flaky, "acct-1").unwrap())
+                    .unwrap_or_else(|_| panic!("unreadable after a failure at step {budget}"));
+                assert!(
+                    read == old || read == *replacement,
+                    "mixed record at step {budget}"
+                );
+                // A later write with a working vault leaves no stale chunk.
+                *flaky.budget.lock().unwrap() = usize::MAX;
+                put_record(&flaky, "acct-1", &encode(&new).unwrap()).unwrap();
+                assert_eq!(decode(&get_record(&flaky, "acct-1").unwrap()).unwrap(), new);
+                let count = flaky.inner.0.lock().unwrap().len();
+                assert_eq!(
+                    count,
+                    1 + new_chunks(&new),
+                    "stale entries after step {budget}"
+                );
+                remove_record(&flaky, "acct-1").unwrap();
+                assert!(flaky.inner.0.lock().unwrap().is_empty());
+            }
+        }
+    }
+
+    fn new_chunks(secret: &StoredSecret) -> usize {
+        encode(secret).unwrap().len().div_ceil(CHUNK_BYTES)
     }
 
     #[test]
