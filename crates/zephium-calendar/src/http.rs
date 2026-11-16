@@ -251,6 +251,31 @@ pub fn is_private_host(url: &Url) -> bool {
     }
 }
 
+/// The registrable domain of a DNS name: its last two labels, or three under
+/// a common two-level suffix (`co.uk`, `com.au`). `None` for an IP address or
+/// a name without a dot. A small rule, not the public suffix list: it only has
+/// to tell `p12-caldav.icloud.com` from `evil.example.net`.
+#[must_use]
+pub fn registrable_domain(host: &str) -> Option<String> {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host.parse::<std::net::IpAddr>().is_ok() || host.starts_with('[') {
+        return None;
+    }
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 || labels.iter().any(|label| label.is_empty()) {
+        return None;
+    }
+    let tld = labels[labels.len() - 1];
+    let second = labels[labels.len() - 2];
+    let two_level = tld.len() == 2
+        && matches!(
+            second,
+            "co" | "com" | "org" | "net" | "gov" | "edu" | "ac" | "ne" | "or"
+        );
+    let take = if two_level { 3 } else { 2 };
+    (labels.len() >= take).then(|| labels[labels.len() - take..].join("."))
+}
+
 fn same_origin(a: &Url, b: &Url) -> bool {
     a.scheme() == b.scheme()
         && a.host_str() == b.host_str()

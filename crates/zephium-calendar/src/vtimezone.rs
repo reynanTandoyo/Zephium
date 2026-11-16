@@ -123,41 +123,83 @@ fn observance(out: &mut Vec<String>, transition: &Transition, rule: bool) {
     out.push(format!("END:{kind}"));
 }
 
+/// Most years a VTIMEZONE reaches back from the last year in use.
+const MAX_SPAN_YEARS: i32 = 30;
+
+fn same_pattern(a: &[Transition], b: &[Transition]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.daylight == y.daylight
+                && x.from == y.from
+                && x.to == y.to
+                && x.local.time() == y.local.time()
+                && yearly_rule(x.local) == yearly_rule(y.local)
+        })
+}
+
 /// The lines (unfolded, without line ends) of the VTIMEZONE for `zone`,
 /// anchored at `year` (clamped to 1970-2100).
 pub fn component(zone: Tz, year: i32) -> Vec<String> {
-    let year = year.clamp(MIN_YEAR, MAX_YEAR);
+    component_span(zone, year, year)
+}
+
+/// The VTIMEZONE for a zone used from `first` to `last` (the later of the
+/// last year in use and the present; each clamped to 1970-2100, at most 30
+/// years apart). The rule of `last` becomes a yearly rule that starts in the
+/// earliest year it has held without change, so later instances keep the
+/// current rule; years before that, back to `first`, get one dated observance
+/// per transition, so a series that began before a rule change is placed
+/// correctly too.
+pub fn component_span(zone: Tz, first: i32, last: i32) -> Vec<String> {
+    let last = last.clamp(MIN_YEAR, MAX_YEAR);
+    let first = first.clamp(MIN_YEAR, last).max(last - MAX_SPAN_YEARS);
     let mut out = vec![
         "BEGIN:VTIMEZONE".to_owned(),
         format!("TZID:{}", zone.name()),
     ];
-    let transitions = transitions_in(zone, year);
-    match transitions.as_slice() {
-        [] => {
-            let start = NaiveDate::from_ymd_opt(year, 1, 1)
+    let current = transitions_in(zone, last);
+    match current.as_slice() {
+        [a, b] if a.daylight != b.daylight => {
+            let mut stable = last;
+            while stable > first && same_pattern(&transitions_in(zone, stable - 1), &current) {
+                stable -= 1;
+            }
+            for year in first..stable {
+                for transition in transitions_in(zone, year) {
+                    observance(&mut out, &transition, false);
+                }
+            }
+            let anchored = transitions_in(zone, stable);
+            if let [a, b] = anchored.as_slice() {
+                observance(&mut out, a, true);
+                observance(&mut out, b, true);
+            }
+        }
+        _ => {
+            let start = NaiveDate::from_ymd_opt(first, 1, 1)
                 .and_then(|date| date.and_hms_opt(0, 0, 0))
                 .unwrap_or_default();
             let at = start.and_utc();
             let offset = offset_seconds(zone, at);
             let (daylight, abbreviation) = describe(zone, at);
-            observance(
-                &mut out,
-                &Transition {
-                    local: start,
-                    from: offset,
-                    to: offset,
-                    daylight,
-                    abbreviation,
-                },
-                false,
-            );
-        }
-        [a, b] if a.daylight != b.daylight => {
-            observance(&mut out, a, true);
-            observance(&mut out, b, true);
-        }
-        many => {
-            for transition in many {
+            // The offset in force when the span begins; changes follow dated.
+            let dated: Vec<Transition> = (first..=last)
+                .flat_map(|year| transitions_in(zone, year))
+                .collect();
+            if dated.is_empty() || current.is_empty() {
+                observance(
+                    &mut out,
+                    &Transition {
+                        local: start,
+                        from: offset,
+                        to: offset,
+                        daylight,
+                        abbreviation,
+                    },
+                    false,
+                );
+            }
+            for transition in &dated {
                 observance(&mut out, transition, false);
             }
         }

@@ -532,7 +532,14 @@ pub fn event_body(event: &Event, series: bool) -> Value {
         .iter()
         .filter(|alarm| !alarm.from_end && alarm.minutes_before >= 0)
         .take(MAX_REMINDERS)
-        .map(|alarm| json!({"method": "popup", "minutes": alarm.minutes_before}))
+        .map(|alarm| {
+            let method = if alarm.action == "EMAIL" {
+                "email"
+            } else {
+                "popup"
+            };
+            json!({"method": method, "minutes": alarm.minutes_before})
+        })
         .collect();
     let mut body = json!({
         "summary": event.summary,

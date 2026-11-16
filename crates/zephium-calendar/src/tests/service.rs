@@ -22,7 +22,7 @@ pub(super) struct Harness {
     pub(super) service: CalendarService,
 }
 
-fn harness() -> Harness {
+pub(super) fn harness() -> Harness {
     harness_with(Arc::new(MemoryEventCache::default()))
 }
 
@@ -56,7 +56,7 @@ fn work_report(summary: &str, etag: &str) -> String {
     ))
 }
 
-fn draft(summary: &str) -> CalendarEventDraftV1 {
+pub(super) fn draft(summary: &str) -> CalendarEventDraftV1 {
     CalendarEventDraftV1 {
         summary: summary.to_owned(),
         description: String::new(),
@@ -88,7 +88,7 @@ fn series_report(etag: &str) -> String {
     ))
 }
 
-async fn signed_in_on(h: Harness, report: String) -> Harness {
+pub(super) async fn signed_in_on(h: Harness, report: String) -> Harness {
     script_account(&h.fake);
     h.fake.route(
         Method::Propfind,

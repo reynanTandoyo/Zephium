@@ -303,18 +303,29 @@ impl CalendarService {
 
     /// Writes `event` over the stored copy in `calendar_id`, or creates it
     /// under the organizer's UID. `stamp` becomes its DTSTAMP.
+    ///
+    /// An existing copy is patched, so the user's own properties stay. A new
+    /// one is written from `message` (the invitation's text) when given, so
+    /// the organizer's unmodelled properties stay too.
     async fn put_invited(
         &self,
         calendar_id: &str,
         event: &Event,
         stamp: DateTime<Utc>,
+        message: Option<&str>,
     ) -> Result<(CalendarEventRefV1, bool)> {
         let (calendar, account) = self.writable(calendar_id)?;
         if account.kind.is_oauth() {
             return Err(CalendarError::Unsupported);
         }
         let existing = self.locate_any(calendar_id, &event.uid);
-        let ics = ical::serialize_event(event, stamp);
+        let ics = match (&existing, message) {
+            (Some((_, resource)), _) => {
+                ical::serialize_event_over(event, stamp, resource.raw.as_deref())
+            }
+            (None, Some(message)) => ical::serialize_event_from_itip(event, stamp, message),
+            (None, None) => ical::serialize_event(event, stamp),
+        };
         let url = Url::parse(&calendar.url).map_err(|_| CalendarError::InvalidInput)?;
         let client = CaldavClient::new(self.http.as_ref(), self.credentials_for(&account)?);
         let (href, etag) = match &existing {
@@ -397,7 +408,9 @@ impl CalendarService {
             let event =
                 invite::event_to_store(invitation, chosen.map(|item| &item.event), own, response)?;
             let stamp = invitation.dtstamp.unwrap_or_else(|| self.now());
-            let (_, existed) = self.put_invited(target, &event, stamp).await?;
+            let (_, existed) = self
+                .put_invited(target, &event, stamp, Some(&*invitation.source))
+                .await?;
             if existed {
                 CalendarInvitationActionV1::Updated
             } else {
@@ -432,7 +445,8 @@ impl CalendarService {
                 let event =
                     invite::event_to_store(invitation, Some(&item.event), own, Response::Decline)?;
                 let stamp = invitation.dtstamp.unwrap_or_else(|| self.now());
-                self.put_invited(&item.calendar_id, &event, stamp).await?;
+                self.put_invited(&item.calendar_id, &event, stamp, None)
+                    .await?;
                 Ok(CalendarInvitationActionV1::Updated)
             }
         }
@@ -483,7 +497,8 @@ impl CalendarService {
                 CancelPlan::Store(event) => {
                     let event = *event;
                     let stamp = invitation.dtstamp.unwrap_or_else(|| self.now());
-                    self.put_invited(&item.calendar_id, &event, stamp).await?;
+                    self.put_invited(&item.calendar_id, &event, stamp, None)
+                        .await?;
                     result = CalendarInvitationActionV1::Cancelled;
                 }
                 CancelPlan::Nothing => {}
@@ -521,7 +536,7 @@ impl CalendarService {
         for item in stored {
             let mut event = item.event.clone();
             if invite::apply_reply(&mut event, reply) > 0 {
-                self.put_invited(&item.calendar_id, &event, self.now())
+                self.put_invited(&item.calendar_id, &event, self.now(), None)
                     .await?;
                 result = CalendarInvitationActionV1::Updated;
             }

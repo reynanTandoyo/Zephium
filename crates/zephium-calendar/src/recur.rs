@@ -170,9 +170,16 @@ pub fn expand(event: &Event, from: DateTime<Utc>, to: DateTime<Utc>, max: usize)
     if let Some(rule) = &event.rrule {
         if let Ok(set) = build_set(rule, &event.start) {
             let after = from - delta - Duration::days(1);
+            // Floating instances are generated as if UTC; the local zone can
+            // be a day away from it, and `overlaps` decides below.
+            let before = if matches!(event.start.kind, TimeKind::Floating) {
+                to + Duration::days(1)
+            } else {
+                to
+            };
             let set = set
                 .after(after.with_timezone(&Tz::UTC))
-                .before(to.with_timezone(&Tz::UTC));
+                .before(before.with_timezone(&Tz::UTC));
             let limit = u16::try_from(max.saturating_add(1)).unwrap_or(u16::MAX);
             let result = set.all(limit);
             out.truncated |= result.limited;

@@ -5,6 +5,7 @@ mod caldav;
 mod ical;
 mod invite;
 mod oauth;
+mod patch;
 mod persist;
 mod recur;
 mod recurrence;

@@ -47,12 +47,14 @@ impl EventTime {
         self.kind == TimeKind::Date
     }
 
-    /// The instant this value denotes. Dates and floating times are read as
-    /// UTC so they sort consistently; a wall-clock time skipped by a DST jump
-    /// moves forward by the gap.
+    /// The instant this value denotes. A floating time is the viewer's
+    /// local wall-clock time (the machine's zone); a whole day is read as UTC
+    /// midnight so days sort consistently. A wall-clock time skipped by a DST
+    /// jump moves forward by the gap.
     pub fn to_utc(&self) -> DateTime<Utc> {
         match &self.kind {
             TimeKind::Zoned(tz) => resolve_local(*tz, self.local),
+            TimeKind::Floating => resolve_floating(self.local),
             _ => self.local.and_utc(),
         }
     }
@@ -80,12 +82,16 @@ impl EventTime {
 /// Maps a wall-clock value to an instant: a time skipped by a DST jump moves
 /// forward by the gap, a repeated one takes its first occurrence.
 pub fn resolve_local(tz: chrono_tz::Tz, local: NaiveDateTime) -> DateTime<Utc> {
-    match tz.from_local_datetime(&local) {
+    resolve_with(&tz, local)
+}
+
+fn resolve_with<Z: TimeZone>(zone: &Z, local: NaiveDateTime) -> DateTime<Utc> {
+    match zone.from_local_datetime(&local) {
         chrono::LocalResult::Single(value) => value.with_timezone(&Utc),
         chrono::LocalResult::Ambiguous(first, _) => first.with_timezone(&Utc),
         chrono::LocalResult::None => {
             // Inside a spring-forward gap: use the offset in force before it.
-            let offset = match tz.from_local_datetime(&(local - Duration::hours(3))) {
+            let offset = match zone.from_local_datetime(&(local - Duration::hours(3))) {
                 chrono::LocalResult::Single(value) | chrono::LocalResult::Ambiguous(value, _) => {
                     i64::from(value.offset().fix().local_minus_utc())
                 }
@@ -94,6 +100,30 @@ pub fn resolve_local(tz: chrono_tz::Tz, local: NaiveDateTime) -> DateTime<Utc> {
             (local - Duration::seconds(offset)).and_utc()
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FLOATING_ZONE: std::cell::Cell<Option<chrono_tz::Tz>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` with floating times read in `zone` instead of the machine's zone
+/// (this thread only), so tests do not depend on the host.
+#[cfg(test)]
+pub(crate) fn with_floating_zone<R>(zone: chrono_tz::Tz, f: impl FnOnce() -> R) -> R {
+    let before = FLOATING_ZONE.with(|cell| cell.replace(Some(zone)));
+    let result = f();
+    FLOATING_ZONE.with(|cell| cell.set(before));
+    result
+}
+
+/// A floating wall-clock time as an instant, in the machine's local zone.
+fn resolve_floating(local: NaiveDateTime) -> DateTime<Utc> {
+    #[cfg(test)]
+    if let Some(zone) = FLOATING_ZONE.with(std::cell::Cell::get) {
+        return resolve_local(zone, local);
+    }
+    resolve_with(&chrono::Local, local)
 }
 
 use chrono::Offset;

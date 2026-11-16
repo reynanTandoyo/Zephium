@@ -934,7 +934,7 @@ impl CalendarService {
         updated: Event,
     ) -> Result<CalendarEventRefV1> {
         let (calendar, account) = self.writable(calendar_id)?;
-        let ics = ical::serialize_event(&updated, self.now());
+        let ics = ical::serialize_event_over(&updated, self.now(), resource.raw.as_deref());
         let url = Url::parse(&calendar.url).map_err(|_| CalendarError::InvalidInput)?;
         let href_url = Url::parse(href).map_err(|_| CalendarError::InvalidInput)?;
         let client = CaldavClient::new(self.http.as_ref(), self.credentials_for(&account)?);
