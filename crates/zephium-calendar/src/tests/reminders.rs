@@ -406,3 +406,74 @@ fn unreadable_saved_text_starts_an_empty_ledger_and_fired_keys_are_bounded() {
     assert!(reloaded.fired_count() <= MAX_FIRED);
     assert!(reloaded.fired_count() > 0);
 }
+
+/// Events as a hostile feed, server or invitation may write them. The release
+/// build aborts on a panic, so none of these may panic anywhere between
+/// parsing and a reminder: each is parsed, expanded, measured, written back
+/// and asked for its reminder times.
+#[test]
+fn hostile_durations_dates_and_rules_never_panic() {
+    let bodies = [
+        // A duration and triggers far outside the range of dates.
+        "DTSTART:20260105T100000Z\r\nDURATION:P9999999999W\r\n",
+        "DTSTART:20260105T100000Z\r\nDURATION:P9999999999W9999999999W9999999999W\r\n",
+        "DTSTART:20260105T100000Z\r\nDURATION:-P99999999W\r\n",
+        "DTSTART:20260105T100000Z\r\nDURATION:PT9999999999H9999999999M9999999999S\r\n",
+        "DTSTART:20260105T100000Z\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n\
+         TRIGGER:-P9999999999W\r\nEND:VALARM\r\n",
+        "DTSTART:20260105T100000Z\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n\
+         TRIGGER:P9999999999W9999999999W\r\nEND:VALARM\r\n",
+        "DTSTART:20260105T100000Z\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n\
+         TRIGGER;VALUE=DATE-TIME:00010101T000000Z\r\nEND:VALARM\r\n",
+        "DTSTART:20260105T100000Z\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n\
+         TRIGGER;VALUE=DATE-TIME:99991231T235959Z\r\nEND:VALARM\r\n",
+        // The first and last years a date can name, alone and repeating.
+        "DTSTART:00010101T000000Z\r\nDTEND:99991231T235959Z\r\n",
+        "DTSTART;VALUE=DATE:99991231\r\n",
+        "DTSTART;TZID=Europe/Berlin:00010101T000000\r\nRRULE:FREQ=YEARLY\r\n",
+        "DTSTART:99991231T235959Z\r\nDTEND:99991231T235959Z\r\nRRULE:FREQ=DAILY;COUNT=5\r\n",
+        "DTSTART:99991231T235959Z\r\nRRULE:FREQ=YEARLY;UNTIL=99991231T235959Z\r\n",
+        "DTSTART:20260105T100000Z\r\nRRULE:FREQ=YEARLY;INTERVAL=65535;COUNT=65535\r\n",
+        "DTSTART:20260105T100000Z\r\nRRULE:FREQ=DAILY;COUNT=4294967295\r\n",
+        "DTSTART:20260105T100000Z\r\nRRULE:FREQ=MONTHLY;BYMONTHDAY=31;BYSETPOS=-366\r\n",
+        "DTSTART:20260105T100000Z\r\nRDATE:99991231T235959Z,00010101T000000Z\r\n\
+         EXDATE:99991231T235959Z\r\nDURATION:P36500D\r\n",
+        "DTSTART:20260105T100000Z\r\nSEQUENCE:4294967295\r\n",
+        // Signed years with more than four digits, at the edge of what a date holds.
+        "DTSTART;VALUE=DATE:+2621421231\r\n",
+        "DTSTART;VALUE=DATE:-2621430101\r\n",
+        "DTSTART:+2621421231T235959Z\r\nDURATION:PT1H\r\n",
+        "DTSTART:-2621430101T000000Z\r\nDTEND:+2621421231T235959Z\r\nRRULE:FREQ=DAILY\r\n",
+        "DTSTART;TZID=Pacific/Kiritimati:+2621421231T235959\r\nDURATION:PT1H\r\n",
+        "DTSTART;TZID=America/Los_Angeles:-2621430101T000000\r\nRRULE:FREQ=YEARLY;COUNT=2\r\n",
+        "DTSTART:20260105T100000Z\r\nRDATE:+2621421231T235959Z\r\nEXDATE:-2621430101T000000Z\r\n\
+         RECURRENCE-ID:+2621421231T235959Z\r\n",
+        "DTSTART:20260105T100000Z\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n\
+         TRIGGER;VALUE=DATE-TIME:-2621430101T000000Z\r\nEND:VALARM\r\n",
+    ];
+    for body in bodies {
+        let text = format!("BEGIN:VEVENT\r\nUID:hostile@x\r\n{body}END:VEVENT\r\n");
+        let parsed = events(&text);
+        let _ = crate::ical::bounds(&parsed);
+        for event in &parsed {
+            let _ = crate::ical::serialize_event(event, utc("2026-01-05T00:00:00Z"));
+            for (from, to) in [
+                ("2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z"),
+                ("0001-01-02T00:00:00Z", "0001-03-01T00:00:00Z"),
+                ("9999-12-01T00:00:00Z", "9999-12-31T23:59:59Z"),
+            ] {
+                let expansion = expand(event, utc(from), utc(to), 1_000);
+                for occurrence in &expansion.occurrences {
+                    let _ = occurrence_triggers(occurrence, Some(30));
+                }
+            }
+        }
+    }
+    // A duration within the bound is still read.
+    let fine = events(
+        "BEGIN:VEVENT\r\nUID:fine@x\r\nDTSTART:20260105T100000Z\r\nDURATION:P1W2DT3H\r\n\
+         END:VEVENT\r\n",
+    )
+    .remove(0);
+    assert_eq!(fine.end.to_utc(), utc("2026-01-14T13:00:00Z"));
+}
