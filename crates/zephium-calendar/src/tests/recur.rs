@@ -247,3 +247,45 @@ fn unusable_rule_degrades_to_the_first_instance() {
     assert!(validate_rule("FREQ=SOMETIMES", &event.start).is_err());
     assert!(validate_rule("FREQ=WEEKLY;BYDAY=MO", &event.start).is_ok());
 }
+
+#[test]
+fn a_rule_that_repeats_within_the_hour_degrades_to_the_first_instance() {
+    // Reaching a window walks every instance since DTSTART, so a rule from a
+    // feed or an invitation that repeats each minute or second would hold the
+    // calendar for minutes on every query. Such a rule is not expanded.
+    for rule in [
+        "FREQ=MINUTELY",
+        "FREQ=SECONDLY",
+        "freq=secondly;interval=2",
+        "FREQ=DAILY;BYSECOND=0,1,2,3",
+        "FREQ=DAILY;BYHOUR=0,1,2;BYMINUTE=0,1,2,3,4,5,6,7,8,9",
+    ] {
+        let text = format!(
+            "BEGIN:VEVENT\r\nUID:fast@x\r\nDTSTART:20160105T100000Z\r\n\
+             DTEND:20160105T100500Z\r\nRRULE:{rule}\r\nEND:VEVENT\r\n"
+        );
+        let event = events(&text).remove(0);
+        let started = std::time::Instant::now();
+        assert!(
+            starts(&event, "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z").is_empty(),
+            "{rule} took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            starts(&event, "2016-01-01T00:00:00Z", "2016-02-01T00:00:00Z"),
+            vec![utc("2016-01-05T10:00:00Z")],
+            "{rule}"
+        );
+        assert!(validate_rule(rule, &event.start).is_err(), "{rule}");
+    }
+    // Hourly rules, also with a few minutes named, still repeat.
+    let hourly = events(
+        "BEGIN:VEVENT\r\nUID:hour@x\r\nDTSTART:20260105T100000Z\r\nDTEND:20260105T100500Z\r\n\
+         RRULE:FREQ=HOURLY;BYMINUTE=0,30;BYSECOND=0;COUNT=4\r\nEND:VEVENT\r\n",
+    )
+    .remove(0);
+    assert_eq!(
+        starts(&hourly, "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z").len(),
+        4
+    );
+}

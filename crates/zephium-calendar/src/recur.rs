@@ -92,8 +92,30 @@ pub fn validate_rule(rule: &str, start: &EventTime) -> Result<()> {
     build_set(rule, start).map(drop)
 }
 
+/// Most `BYMINUTE` values a rule may name.
+const MAX_BYMINUTE_VALUES: usize = 4;
+
+/// `true` for a rule that repeats more often than a few times an hour.
+/// Reaching a window walks every instance since DTSTART, so such a rule from
+/// a feed, a server or an invitation would hold the calendar for a long time
+/// on every query. `rule` is the output of [`normalize_rule`] (keys in
+/// capitals).
+fn too_frequent(rule: &str) -> bool {
+    rule.split(';')
+        .filter_map(|part| part.split_once('='))
+        .any(|(key, value)| match key {
+            "FREQ" => matches!(value.to_ascii_uppercase().as_str(), "SECONDLY" | "MINUTELY"),
+            "BYSECOND" => value.split(',').count() > 1,
+            "BYMINUTE" => value.split(',').count() > MAX_BYMINUTE_VALUES,
+            _ => false,
+        })
+}
+
 fn build_set(rule: &str, start: &EventTime) -> Result<RRuleSet> {
     let rule = normalize_rule(rule, start).ok_or(CalendarError::InvalidInput)?;
+    if too_frequent(&rule) {
+        return Err(CalendarError::InvalidInput);
+    }
     let dtstart = match &start.kind {
         TimeKind::Zoned(tz) => format!(
             "DTSTART;TZID={}:{}",
