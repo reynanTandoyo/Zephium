@@ -72,6 +72,7 @@ Last ID: T-0046
 
 - [ ] T-0045 · Calendar: meeting invites from Mail · area: crates/zephium-calendar, crates/zephium-mail · owner: - · updated: 2026-11-13
   - Show `.ics` invitations in Mail; answer Accept / Tentative / Decline (iTIP over SMTP); show attendees and their status.
+  - 2026-11-16: calendar side done (`8fbe83362`, `6d1d94f1b`): iTIP parse, attendee match, sequence compare, REPLY builder, apply to CalDAV calendars; IPC `calendar_invitation_parse`/`_respond`/`_apply_cancel`/`_apply_reply`. calendar 126 tests pass, clippy clean (Windows). Nothing auto-sent. Open: mail side (detection, From/organizer check, card, sending the REPLY); Google/Microsoft calendars cannot store invited events.
 - [ ] T-0002 · Launch `pnpm dev` and confirm "Zephium Dev" starts · area: desktop, frame · owner: - · updated: 2026-11-13
   - Must not touch the installed Zephium or its profile.
 - [ ] T-0004 · Decide on fork releases for colleague updates · area: .github, desktop · owner: - · updated: 2026-11-13
