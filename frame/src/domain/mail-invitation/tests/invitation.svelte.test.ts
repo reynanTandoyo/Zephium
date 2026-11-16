@@ -114,11 +114,11 @@ async function loaded(inv = invitation(), from = source()) {
   return card;
 }
 
-test("loading reads the part, parses it with the account's own address and lists only writable CalDAV calendars", async () => {
+test("loading reads the part, parses it with the account's own address and the From and lists only writable CalDAV calendars", async () => {
   calendars([{ id: "ac-g", kind: "google", name: "G", server_url: "", username: null }]);
   const card = await loaded();
   expect(host.bytes).toHaveBeenCalledWith("acc-1", "INBOX", 7, 2);
-  expect(host.parse).toHaveBeenCalledWith("QkVHSU4=", ["me@example.com"]);
+  expect(host.parse).toHaveBeenCalledWith("QkVHSU4=", ["me@example.com"], ["boss@example.com"]);
   expect(card.state).toBe("ready");
   expect(card.calendars.map((c) => c.id)).toEqual(["cal-1"]);
   expect(card.chosen).toBe("cal-1");

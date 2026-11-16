@@ -33,10 +33,15 @@ use zephium_core::ports::store::Store;
 const REFRESH_EVERY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 /// How often the background task checks for shutdown while waiting.
 const SHUTDOWN_POLL: std::time::Duration = std::time::Duration::from_secs(2);
+/// How often the background tasks look for the Calendar switch while it is off.
+const DISABLED_POLL: std::time::Duration = std::time::Duration::from_secs(10);
 /// Settings: `calendar.reminders` ("false" turns reminders off) and
 /// `calendar.default_reminder` (minutes, for timed events without an alarm).
 const REMINDERS_SETTING: &str = "calendar.reminders";
 const DEFAULT_REMINDER_SETTING: &str = "calendar.default_reminder";
+/// The feature switch: Calendar is on unless Settings stored an explicit
+/// `false`, `0` or `off` (an unset key is on, as for mail).
+const ENABLED_SETTING: &str = "calendar.enabled";
 /// The reminder ledger: when the last pass ran and which reminders were shown.
 const LEDGER_SETTING: &str = "calendar.reminder-ledger";
 /// Longest location a reminder toast shows after its start time.
@@ -55,6 +60,20 @@ pub(crate) struct CalendarChanged {
 }
 
 struct CalendarState(Arc<CalendarService>);
+
+fn is_enabled(setting: Option<&str>) -> bool {
+    !matches!(
+        setting.map(str::trim),
+        Some("false" | "0" | "off" | "False" | "FALSE" | "Off" | "OFF")
+    )
+}
+
+/// Calendar is switched on in Settings. Read on every use, so switching it
+/// off stops the background work and the commands at once and switching it on
+/// restarts them without a restart of the app.
+fn enabled() -> bool {
+    is_enabled(app_setting(ENABLED_SETTING).as_deref())
+}
 
 fn changed(app: &tauri::AppHandle) {
     REPLAN.fetch_add(1, Ordering::AcqRel);
@@ -106,6 +125,13 @@ pub(crate) fn install(app: &tauri::AppHandle, data_dir: &std::path::Path) {
             return;
         }
         loop {
+            if !enabled() {
+                // Off: no sync; look again soon so switching it on restarts it.
+                if wait_or_shutdown(&app, DISABLED_POLL).await {
+                    return;
+                }
+                continue;
+            }
             let report = service.sync_due().await;
             if shutdown_started(&app) {
                 return;
@@ -148,7 +174,7 @@ fn spawn_reminders(app: tauri::AppHandle, service: Arc<CalendarService>) {
 /// shows the due ones and saves the ledger when it is due. The result says
 /// what was shown and when to look again.
 fn reminder_pass(service: &CalendarService, ledger: &mut Ledger, now: DateTime<Utc>) -> Plan {
-    let enabled = app_setting(REMINDERS_SETTING).as_deref() != Some("false");
+    let enabled = enabled() && app_setting(REMINDERS_SETTING).as_deref() != Some("false");
     let default = app_setting(DEFAULT_REMINDER_SETTING)
         .and_then(|value| value.parse::<i64>().ok())
         .filter(|minutes| DEFAULT_CHOICES.contains(minutes));
@@ -241,6 +267,9 @@ fn service(
 ) -> Result<Arc<CalendarService>, CalendarError> {
     if !authorize(caller, CallerPolicy::Main, command) {
         return Err(CalendarError::Forbidden);
+    }
+    if !enabled() {
+        return Err(CalendarError::Unsupported);
     }
     app.try_state::<CalendarState>()
         .map(|state| state.0.clone())
@@ -526,6 +555,9 @@ struct KnownInvitation {
     id: String,
     invitation: Invitation,
     own: Vec<String>,
+    /// The message From matched the ORGANIZER (request, cancel) or the
+    /// replying attendee (reply); computed once, when the object was parsed.
+    sender_verified: bool,
 }
 
 fn invitations() -> &'static std::sync::Mutex<std::collections::VecDeque<KnownInvitation>> {
@@ -535,7 +567,7 @@ fn invitations() -> &'static std::sync::Mutex<std::collections::VecDeque<KnownIn
     TABLE.get_or_init(Default::default)
 }
 
-fn remember_invitation(invitation: Invitation, own: Vec<String>) -> String {
+fn remember_invitation(invitation: Invitation, own: Vec<String>, sender_verified: bool) -> String {
     // Unguessable and unique: 128 random bits plus a counter in case the
     // system source fails.
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -559,18 +591,26 @@ fn remember_invitation(invitation: Invitation, own: Vec<String>) -> String {
         id: id.clone(),
         invitation,
         own,
+        sender_verified,
     });
     id
 }
 
+/// The invitation behind `id`. Refuses (`forbidden`) one whose message sender
+/// did not match, so a spoofed From never changes the calendar.
 fn known_invitation(id: &str) -> Result<(Invitation, Vec<String>), CalendarError> {
-    invitations()
+    let (invitation, own, verified) = invitations()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
         .find(|item| item.id == id)
-        .map(|item| (item.invitation.clone(), item.own.clone()))
-        .ok_or(CalendarError::NotFound)
+        .map(|item| (item.invitation.clone(), item.own.clone(), item.sender_verified))
+        .ok_or(CalendarError::NotFound)?;
+    if verified {
+        Ok((invitation, own))
+    } else {
+        Err(CalendarError::Forbidden)
+    }
 }
 
 /// Reads an iTIP object (`text/calendar` part or `.ics` attachment, base64)
@@ -578,6 +618,9 @@ fn known_invitation(id: &str) -> Result<(Invitation, Vec<String>), CalendarError
 /// own entry (matched against `own_addresses`), the stored copy and a
 /// suggested calendar. The result's `id` is the handle for the other
 /// `calendar_invitation_*` commands (kept for the last 64 invitations).
+/// `from_addresses` are the message From address(es): the sender must be the
+/// ORGANIZER (request, cancel) or the replying attendee (reply), otherwise the
+/// other commands refuse this invitation with `forbidden`.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn calendar_invitation_parse(
@@ -585,6 +628,7 @@ pub(crate) async fn calendar_invitation_parse(
     app: tauri::AppHandle,
     bytes_b64: String,
     own_addresses: Vec<String>,
+    from_addresses: Vec<String>,
 ) -> Result<CalendarInvitationV1, CalendarError> {
     use base64::Engine;
     let service = service(&app, &caller, "calendar_invitation_parse")?;
@@ -599,8 +643,9 @@ pub(crate) async fn calendar_invitation_parse(
         .into_iter()
         .take(invite::MAX_OWN_ADDRESSES)
         .collect();
+    let sender_verified = invitation.sender_matches(&from_addresses);
     let mut described = service.describe_invitation(&invitation, &own);
-    described.id = remember_invitation(invitation, own);
+    described.id = remember_invitation(invitation, own, sender_verified);
     Ok(described)
 }
 
@@ -692,15 +737,15 @@ mod invitation_tests {
 
     #[test]
     fn table_is_bounded_and_ids_are_opaque() {
-        let first = remember_invitation(sample("first"), vec!["a@example.com".to_owned()]);
+        let first = remember_invitation(sample("first"), vec!["a@example.com".to_owned()], true);
         for index in 0..INVITATIONS_MAX {
-            remember_invitation(sample(&format!("u{index}")), Vec::new());
+            remember_invitation(sample(&format!("u{index}")), Vec::new(), true);
         }
         assert_eq!(
             known_invitation(&first).err(),
             Some(CalendarError::NotFound)
         );
-        let last = remember_invitation(sample("last"), vec!["a@example.com".to_owned()]);
+        let last = remember_invitation(sample("last"), vec!["a@example.com".to_owned()], true);
         assert!(last.starts_with("inv-"));
         let (invitation, own) = known_invitation(&last).expect("known");
         assert_eq!(invitation.uid, "last");
@@ -723,6 +768,32 @@ mod invitation_tests {
         assert_eq!(cancel_mode(Some("mark")), CancelMode::MarkCancelled);
         assert_eq!(cancel_mode(Some("garbage")), CancelMode::MarkCancelled);
         assert_eq!(cancel_mode(Some("remove")), CancelMode::Remove);
+    }
+
+    #[test]
+    fn the_calendar_switch_is_on_unless_explicitly_off() {
+        assert!(is_enabled(None));
+        assert!(is_enabled(Some("true")));
+        assert!(is_enabled(Some("1")));
+        assert!(is_enabled(Some("")));
+        assert!(!is_enabled(Some("false")));
+        assert!(!is_enabled(Some("0")));
+        assert!(!is_enabled(Some("off")));
+        assert!(!is_enabled(Some(" false ")));
+    }
+
+    #[test]
+    fn a_spoofed_sender_makes_every_follow_up_command_refuse() {
+        // The sample is a REQUEST from o@example.com.
+        let spoofed = sample("spoofed");
+        assert!(!spoofed.sender_matches(&["evil@example.net".to_owned()]));
+        let id = remember_invitation(spoofed, Vec::new(), false);
+        assert_eq!(known_invitation(&id).err(), Some(CalendarError::Forbidden));
+        let genuine = sample("genuine");
+        let verified = genuine.sender_matches(&["O@Example.com".to_owned()]);
+        assert!(verified);
+        let id = remember_invitation(genuine, Vec::new(), verified);
+        assert!(known_invitation(&id).is_ok());
     }
 
     const _: () =

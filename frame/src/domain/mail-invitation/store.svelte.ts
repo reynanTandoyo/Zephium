@@ -96,7 +96,11 @@ export class MailInvitation {
 
   constructor(private readonly source: InvitationSource) {}
 
-  /** The sender check; null until the invitation is read. */
+  /**
+   * The sender check, for display only: the backend runs the same check on the
+   * From addresses given to `calendarInvitationParse` and refuses the other
+   * calls when it fails. Null until the invitation is read.
+   */
   get check(): SenderCheck | null {
     return this.invitation ? checkSender(this.invitation, this.source.from) : null;
   }
@@ -127,7 +131,11 @@ export class MailInvitation {
     if (generation !== this.generation || bytes.ok === "aborted") return;
     if (!bytes.ok) return this.fail();
     const parsed = await callCalendar(
-      () => commands.calendarInvitationParse(bytes.value, [...own]),
+      () => commands.calendarInvitationParse(
+          bytes.value,
+          [...own],
+          this.source.from.map((address) => address.email),
+        ),
       READ_TIMEOUT,
       this.lifetime.signal,
     );

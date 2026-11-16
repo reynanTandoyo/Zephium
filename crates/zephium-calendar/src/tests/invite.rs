@@ -763,3 +763,44 @@ async fn replies_to_an_own_event_update_the_attendee() {
         Some(CalendarError::NotFound)
     );
 }
+
+fn addresses(list: &[&str]) -> Vec<String> {
+    list.iter().map(|item| (*item).to_owned()).collect()
+}
+
+#[test]
+fn a_request_or_cancel_is_believed_only_from_its_organizer() {
+    for method in ["REQUEST", "CANCEL"] {
+        let inv = parsed(&outlook(0, "20260110T080000Z", method));
+        assert!(inv.sender_matches(&addresses(&["bob@corp.example"])));
+        assert!(inv.sender_matches(&addresses(&[" Bob@CORP.example "])));
+        assert!(inv.sender_matches(&addresses(&["mailto:bob@corp.example"])));
+        // Spoofed or look-alike senders, a mixed From list and no sender.
+        assert!(!inv.sender_matches(&addresses(&["evil@example.net"])));
+        assert!(!inv.sender_matches(&addresses(&["bob@corp.example.evil.net"])));
+        assert!(!inv.sender_matches(&addresses(&["bob@corp-example.com"])));
+        assert!(!inv.sender_matches(&addresses(&["bob@corp.example", "evil@example.net"])));
+        assert!(!inv.sender_matches(&[]));
+        assert!(!inv.sender_matches(&addresses(&[""])));
+    }
+}
+
+#[test]
+fn a_reply_is_believed_only_from_the_attendee_it_speaks_for() {
+    let inv = parsed(GOOGLE_REPLY);
+    let attendee = inv.attendees[0].person.email.clone();
+    assert!(inv.sender_matches(&[attendee.to_uppercase()]));
+    assert!(!inv.sender_matches(&addresses(&["someone@example.org"])));
+    assert!(!inv.sender_matches(&[attendee, "someone@example.org".to_owned()]));
+    assert!(!inv.sender_matches(&[]));
+}
+
+#[test]
+fn an_object_without_organizer_or_attendee_is_never_believed() {
+    let mut inv = parsed(&outlook(0, "20260110T080000Z", "REQUEST"));
+    inv.event.organizer = None;
+    assert!(!inv.sender_matches(&addresses(&["bob@corp.example"])));
+    let mut reply = parsed(GOOGLE_REPLY);
+    reply.attendees.clear();
+    assert!(!reply.sender_matches(&addresses(&["dana@gmail.example"])));
+}
