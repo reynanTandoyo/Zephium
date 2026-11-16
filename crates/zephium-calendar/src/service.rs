@@ -26,7 +26,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use url::Url;
 use zephium_oauth::manager::TokenSessions;
 
+mod invite;
 mod oauth;
+
+pub use invite::{
+    CalendarInvitationActionV1, CalendarInvitationAttendeeV1, CalendarInvitationExistingV1,
+    CalendarInvitationV1, CalendarItipReplyV1, StoredInvitedEvent,
+};
 
 /// Most occurrences returned by one query.
 pub const MAX_OCCURRENCES_PER_QUERY: usize = 5_000;

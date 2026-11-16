@@ -15,6 +15,7 @@ pub mod caldav;
 pub mod error;
 pub mod http;
 pub mod ical;
+pub mod invite;
 pub mod model;
 pub mod persist;
 pub mod provider;

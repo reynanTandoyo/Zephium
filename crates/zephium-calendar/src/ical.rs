@@ -129,7 +129,7 @@ fn unescape(value: &str, limit: usize) -> String {
     out
 }
 
-fn escape(value: &str) -> String {
+pub(crate) fn escape(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
         match ch {
@@ -291,7 +291,7 @@ fn parse_alarm(lines: &[Line], start: &EventTime) -> Option<Alarm> {
     })
 }
 
-struct RawEvent {
+pub(crate) struct RawEvent {
     lines: Vec<Line>,
     alarms: Vec<Vec<Line>>,
 }
@@ -386,6 +386,31 @@ fn build_event(raw: &RawEvent) -> Option<Event> {
 /// Parses every VEVENT in `text`; overrides (RECURRENCE-ID) are attached to
 /// their master by UID. Events that cannot be understood are skipped.
 pub fn parse_calendar(text: &str) -> Result<Vec<Event>> {
+    let (_, raws) = read_document(text)?;
+    let mut masters: Vec<Event> = Vec::new();
+    let mut overrides: Vec<Event> = Vec::new();
+    for raw in &raws {
+        if let Some(event) = build_event(raw) {
+            if event.recurrence_id.is_some() {
+                overrides.push(event);
+            } else {
+                masters.push(event);
+            }
+        }
+    }
+    for item in overrides {
+        match masters.iter_mut().find(|master| master.uid == item.uid) {
+            Some(master) if master.overrides.len() < MAX_LIST => master.overrides.push(item),
+            Some(_) => {}
+            // No master in this document: keep it as a plain event.
+            None => masters.push(item),
+        }
+    }
+    Ok(masters)
+}
+
+/// Splits a document into its VCALENDAR `METHOD` and raw VEVENTs.
+fn read_document(text: &str) -> Result<(Option<String>, Vec<RawEvent>)> {
     if text.len() > MAX_ICS_BYTES {
         return Err(CalendarError::TooLarge);
     }
@@ -397,6 +422,7 @@ pub fn parse_calendar(text: &str) -> Result<Vec<Event>> {
         return Err(CalendarError::Parse);
     }
     let mut stack: Vec<String> = Vec::new();
+    let mut method: Option<String> = None;
     let mut raws: Vec<RawEvent> = Vec::new();
     let mut current: Option<RawEvent> = None;
     let mut alarm: Option<Vec<Line>> = None;
@@ -440,6 +466,9 @@ pub fn parse_calendar(text: &str) -> Result<Vec<Event>> {
                     }
                 }
             }
+            "METHOD" if method.is_none() && stack.len() == 1 && stack[0] == "VCALENDAR" => {
+                method = Some(line.value.trim().to_ascii_uppercase());
+            }
             _ => {
                 if let Some(lines) = alarm.as_mut() {
                     lines.push(line);
@@ -453,33 +482,103 @@ pub fn parse_calendar(text: &str) -> Result<Vec<Event>> {
             }
         }
     }
-    let mut masters: Vec<Event> = Vec::new();
-    let mut overrides: Vec<Event> = Vec::new();
-    for raw in &raws {
-        if let Some(event) = build_event(raw) {
-            if event.recurrence_id.is_some() {
-                overrides.push(event);
-            } else {
-                masters.push(event);
-            }
+    Ok((method, raws))
+}
+
+/// One VEVENT of an iTIP message with the attributes the event model drops.
+pub(crate) struct ItipComponent {
+    /// The event; a missing DTSTART (allowed in CANCEL and REPLY) is read as
+    /// the epoch, see `has_start`.
+    pub(crate) event: Event,
+    /// `false` when the component had no DTSTART.
+    pub(crate) has_start: bool,
+    /// DTSTAMP.
+    pub(crate) dtstamp: Option<DateTime<Utc>>,
+    /// ROLE and RSVP of each attendee, parallel to `event.attendees`.
+    pub(crate) attendee_meta: Vec<(AttendeeRole, bool)>,
+}
+
+/// ROLE of an attendee.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AttendeeRole {
+    /// `CHAIR`.
+    Chair,
+    /// `REQ-PARTICIPANT` (the default).
+    Required,
+    /// `OPT-PARTICIPANT`.
+    Optional,
+    /// `NON-PARTICIPANT`.
+    NonParticipant,
+}
+
+impl AttendeeRole {
+    /// Wire name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chair => "chair",
+            Self::Required => "required",
+            Self::Optional => "optional",
+            Self::NonParticipant => "non_participant",
         }
     }
-    for item in overrides {
-        match masters.iter_mut().find(|master| master.uid == item.uid) {
-            Some(master) if master.overrides.len() < MAX_LIST => master.overrides.push(item),
-            Some(_) => {}
-            // No master in this document: keep it as a plain event.
-            None => masters.push(item),
+}
+
+/// Reads an iTIP message: its METHOD and every VEVENT, not grouped.
+pub(crate) fn parse_itip(text: &str) -> Result<(Option<String>, Vec<ItipComponent>)> {
+    let (method, raws) = read_document(text)?;
+    let mut components = Vec::new();
+    for mut raw in raws {
+        let has_start = raw.lines.iter().any(|line| line.name == "DTSTART");
+        if !has_start {
+            raw.lines.push(Line {
+                name: "DTSTART".to_owned(),
+                params: Vec::new(),
+                value: "19700101T000000Z".to_owned(),
+            });
         }
+        let Some(event) = build_event(&raw) else {
+            continue;
+        };
+        let dtstamp = raw
+            .lines
+            .iter()
+            .find(|line| line.name == "DTSTAMP")
+            .and_then(parse_time)
+            .map(|time| time.to_utc());
+        let attendee_meta = raw
+            .lines
+            .iter()
+            .filter(|line| line.name == "ATTENDEE")
+            .filter(|line| parse_person(line).is_some())
+            .take(MAX_ATTENDEES)
+            .map(|line| {
+                let role = match line.param("ROLE").map(str::to_ascii_uppercase).as_deref() {
+                    Some("CHAIR") => AttendeeRole::Chair,
+                    Some("OPT-PARTICIPANT") => AttendeeRole::Optional,
+                    Some("NON-PARTICIPANT") => AttendeeRole::NonParticipant,
+                    _ => AttendeeRole::Required,
+                };
+                let rsvp = line
+                    .param("RSVP")
+                    .is_some_and(|value| value.eq_ignore_ascii_case("TRUE"));
+                (role, rsvp)
+            })
+            .collect();
+        components.push(ItipComponent {
+            event,
+            has_start,
+            dtstamp,
+            attendee_meta,
+        });
     }
-    Ok(masters)
+    Ok((method, components))
 }
 
 // ---------------------------------------------------------------------------
 // Writing
 // ---------------------------------------------------------------------------
 
-fn fold(line: &str, out: &mut String) {
+pub(crate) fn fold(line: &str, out: &mut String) {
     let mut width = 0;
     for ch in line.chars() {
         let size = ch.len_utf8();
@@ -493,7 +592,7 @@ fn fold(line: &str, out: &mut String) {
     out.push_str("\r\n");
 }
 
-fn time_property(name: &str, time: &EventTime) -> String {
+pub(crate) fn time_property(name: &str, time: &EventTime) -> String {
     match &time.kind {
         TimeKind::Date => format!("{name};VALUE=DATE:{}", time.local.format("%Y%m%d")),
         TimeKind::Utc => format!("{name}:{}Z", time.local.format("%Y%m%dT%H%M%S")),
@@ -569,7 +668,7 @@ fn write_event(event: &Event, stamp: DateTime<Utc>, out: &mut String) {
     fold("END:VEVENT", out);
 }
 
-fn person_property(name: &str, person: &Person, with_status: bool) -> String {
+pub(crate) fn person_property(name: &str, person: &Person, with_status: bool) -> String {
     let mut line = name.to_owned();
     if let Some(cn) = &person.name {
         line.push_str(&format!(";CN=\"{}\"", param_value(cn)));

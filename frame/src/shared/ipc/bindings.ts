@@ -155,6 +155,34 @@ export const commands = {
 	calendarDeleteEvent: (calendar: string, uid: string) => typedError<null, CalendarError>(__TAURI_INVOKE("calendar_delete_event", { calendar, uid })),
 	/**  Refreshes every calendar now. */
 	calendarSync: () => typedError<CalendarSyncReportV1, CalendarError>(__TAURI_INVOKE("calendar_sync")),
+	/**
+	 *  Reads an iTIP object (`text/calendar` part or `.ics` attachment, base64)
+	 *  and describes it: the event, the attendees with their status, the user's
+	 *  own entry (matched against `own_addresses`), the stored copy and a
+	 *  suggested calendar. The result's `id` is the handle for the other
+	 *  `calendar_invitation_*` commands (kept for the last 64 invitations).
+	 */
+	calendarInvitationParse: (bytesB64: string, ownAddresses: string[]) => typedError<CalendarInvitationV1, CalendarError>(__TAURI_INVOKE("calendar_invitation_parse", { bytesB64, ownAddresses })),
+	/**
+	 *  Answers a REQUEST: applies the answer to `calendar` (accept and tentative
+	 *  store or update the event, decline removes an earlier copy or keeps it as
+	 *  declined, per `calendar.invitation_decline`) and returns the iTIP REPLY
+	 *  for the mail side to send. Nothing is sent from here. `calendar` defaults
+	 *  to the suggested one; accept and tentative need one.
+	 */
+	calendarInvitationRespond: (invitationId: string, response: Response, calendar: string | null) => typedError<CalendarItipReplyV1, CalendarError>(__TAURI_INVOKE("calendar_invitation_respond", { invitationId, response, calendar })),
+	/**
+	 *  Applies a CANCEL: deletes the stored event (or one instance), or keeps it
+	 *  marked cancelled when `calendar.invitation_cancel` is `mark`. Only copies
+	 *  from the same organizer are touched; `not_found` when there is none.
+	 */
+	calendarInvitationApplyCancel: (invitationId: string) => typedError<CalendarInvitationActionV1, CalendarError>(__TAURI_INVOKE("calendar_invitation_apply_cancel", { invitationId })),
+	/**
+	 *  Applies an attendee's REPLY to the stored event the user organizes: the
+	 *  attendee's status is updated. `not_found` when the user does not organize
+	 *  a stored event with that UID.
+	 */
+	calendarInvitationApplyReply: (invitationId: string) => typedError<CalendarInvitationActionV1, CalendarError>(__TAURI_INVOKE("calendar_invitation_apply_reply", { invitationId })),
 	/**  Looks up server settings for an address. */
 	mailAutoconfig: (email: string) => typedError<MailAutoconfigV1, MailErrorV1>(__TAURI_INVOKE("mail_autoconfig", { email })),
 	/**  Connects to both servers with the typed password, storing nothing. */
@@ -1244,6 +1272,121 @@ export type CalendarEventsV1 = {
 	truncated: boolean,
 };
 
+/**  What an operation did to the calendar. */
+export type CalendarInvitationActionV1 =
+/**  A new event was stored. */
+"created" |
+/**  A stored event was changed. */
+"updated" |
+/**  A stored event or instance was deleted. */
+"removed" |
+/**  A stored event was kept and marked cancelled. */
+"cancelled" |
+/**  Nothing changed. */
+"none";
+
+/**  One attendee of an invitation. */
+export type CalendarInvitationAttendeeV1 = {
+	/**  Address, name and `partstat` as on any event. */
+	person: CalendarPersonV1,
+	/**  `chair`, `required`, `optional` or `non_participant`. */
+	role: string,
+	/**  The organizer asks for an answer. */
+	rsvp: boolean,
+	/**  This entry is the user's. */
+	is_you: boolean,
+};
+
+/**  The stored copy of an invitation's event. */
+export type CalendarInvitationExistingV1 = {
+	/**  Calendar holding the event. */
+	calendar_id: string,
+	/**  That calendar cannot be changed. */
+	read_only: boolean,
+	/**  `none`, `confirmed`, `tentative` or `cancelled`. */
+	status: string,
+	/**  The user's stored status, when the user is an attendee. */
+	partstat: string | null,
+	/**  `newer` (the message updates the stored copy), `same` or `older`. */
+	freshness: Freshness,
+	/**  The stored event names the same organizer as the message. */
+	same_organizer: boolean,
+};
+
+/**
+ *  An invitation as the Mail card shows it.
+ *
+ *  `start`/`end` use the formats of `CalendarOccurrenceV1`.
+ */
+export type CalendarInvitationV1 = {
+	/**
+	 *  Opaque handle for the other `calendar_invitation_*` commands; set by
+	 *  the desktop.
+	 */
+	id: string,
+	/**  `request`, `cancel`, `reply` or `counter`. */
+	method: ItipMethod,
+	/**  Event UID. */
+	uid: string,
+	/**  SEQUENCE. */
+	sequence: number,
+	/**  The instance this message is about, when only one. */
+	recurrence_id: string | null,
+	/**  Title. */
+	summary: string,
+	/**  Notes, at most 4000 characters. */
+	description: string,
+	/**  Place. */
+	location: string,
+	/**  Start. */
+	start: string,
+	/**  End. */
+	end: string,
+	/**  Whole-day event. */
+	all_day: boolean,
+	/**  IANA zone, when the event has one. */
+	tzid: string | null,
+	/**  The event repeats. */
+	recurring: boolean,
+	/**  Organizer. */
+	organizer: CalendarPersonV1 | null,
+	/**  Attendees with their status. */
+	attendees: CalendarInvitationAttendeeV1[],
+	/**  The address the user was invited at, when listed. */
+	own_address: string | null,
+	/**  The user is the organizer (the message is about the user's own event). */
+	is_organizer: boolean,
+	/**  The user can answer: a REQUEST that lists the user and has an organizer. */
+	can_respond: boolean,
+	/**  The stored copy, when one exists. */
+	existing: CalendarInvitationExistingV1 | null,
+	/**
+	 *  A writable calendar to store the event in: the one holding the
+	 *  existing copy, else the first writable CalDAV calendar.
+	 */
+	suggested_calendar: string | null,
+};
+
+/**
+ *  The REPLY for the mail side to send, and what the answer did to the
+ *  calendar. Send `ics` as `content_type`, to `to`; the mail side must not
+ *  send it without the user's action.
+ */
+export type CalendarItipReplyV1 = {
+	/**  The organizer's address. */
+	to: string,
+	/**  `Accepted: <title>`, `Tentative: <title>` or `Declined: <title>`. */
+	subject: string,
+	/**  Plain-text body. */
+	body_text: string,
+	/**  The `METHOD:REPLY` iCalendar text (UTF-8). */
+	ics: string,
+	/**  `text/calendar; method=REPLY; charset=UTF-8`. */
+	content_type: string,
+	/**  What the answer did to the calendar. */
+	calendar_action: CalendarInvitationActionV1,
+};
+
 /**
  *  The OAuth client an account signed in with. Holds no secret: the refresh
  *  token and an optional client secret live in the OS vault.
@@ -1724,6 +1867,15 @@ export type FocusView = {
 	allowed: string[],
 };
 
+/**  How an invitation compares with a stored copy of the same event. */
+export type Freshness =
+/**  The invitation is an update of the stored copy. */
+"newer" |
+/**  Same version. */
+"same" |
+/**  The stored copy is newer; the invitation is outdated. */
+"older";
+
 export type HapticKind = "align" | "level";
 
 /**
@@ -1849,6 +2001,17 @@ export type ItemsState = {
 	active: string | null,
 	split_group: SplitGroupView | null,
 };
+
+/**  The iTIP METHOD of an invitation message. */
+export type ItipMethod =
+/**  An invitation or an update of one. */
+"request" |
+/**  The organizer withdrew the event (or one instance). */
+"cancel" |
+/**  An attendee's answer, read by the organizer. */
+"reply" |
+/**  An attendee proposes another time. Read, never applied. */
+"counter";
 
 /**  The keymap changed; read it again. */
 export type KeymapChanged = {
@@ -3368,6 +3531,15 @@ export type ResourceSummary = {
 	sort_key: string | null,
 	work: string | null,
 };
+
+/**  The user's answer. */
+export type Response =
+/**  Accept. */
+"accept" |
+/**  Tentative. */
+"tentative" |
+/**  Decline. */
+"decline";
 
 export type RuntimeRestartReason =
 /**  A newer browser runtime is installed; only a restart adopts it. */
