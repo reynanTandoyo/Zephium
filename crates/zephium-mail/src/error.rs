@@ -34,6 +34,13 @@ pub enum MailError {
     /// A size bound was exceeded.
     #[error("too large")]
     TooLarge,
+    /// The outgoing server refused a recipient or the sender address.
+    #[error("address rejected")]
+    AddressRejected,
+    /// The account has no Trash folder, so a delete would be permanent and
+    /// needs the person's confirmation.
+    #[error("no trash folder")]
+    NoTrash,
     /// The password is not in the Credential Manager or it refused access.
     #[error("credentials")]
     Credentials,

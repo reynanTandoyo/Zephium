@@ -13,7 +13,7 @@ use tokio::time::timeout;
 use tokio_rustls::TlsConnector;
 
 use crate::error::{MailError, Result};
-use crate::limits::CONNECT_TIMEOUT;
+use crate::limits::{CONNECT_TIMEOUT, MAX_STARTTLS_LINES};
 use crate::model::{Endpoint, Security};
 
 /// A duplex byte stream.
@@ -57,7 +57,33 @@ fn tls_config() -> Result<Arc<rustls::ClientConfig>> {
         .ok_or(MailError::Tls)
 }
 
-async fn read_line(stream: &mut TcpStream) -> Result<Vec<u8>> {
+/// Reads the greeting, asks for `STARTTLS` and waits for its tagged answer.
+/// Bytes are read one at a time so nothing past the answer is consumed before
+/// the TLS handshake. At most [`MAX_STARTTLS_LINES`] untagged lines are read;
+/// the caller bounds the whole exchange in time.
+async fn starttls_exchange<S: AsyncRead + AsyncWrite + Unpin>(stream: &mut S) -> Result<()> {
+    let greeting = read_line(stream).await?;
+    if !greeting.starts_with(b"* OK") && !greeting.starts_with(b"* PREAUTH") {
+        return Err(MailError::Protocol);
+    }
+    stream
+        .write_all(b"zs1 STARTTLS\r\n")
+        .await
+        .map_err(|_| MailError::Offline)?;
+    for _ in 0..MAX_STARTTLS_LINES {
+        let line = read_line(stream).await?;
+        if line.starts_with(b"zs1 ") {
+            return if line.starts_with(b"zs1 OK") {
+                Ok(())
+            } else {
+                Err(MailError::Unsupported)
+            };
+        }
+    }
+    Err(MailError::Protocol)
+}
+
+async fn read_line<S: AsyncRead + Unpin>(stream: &mut S) -> Result<Vec<u8>> {
     let mut line = Vec::with_capacity(128);
     loop {
         let byte = stream.read_u8().await.map_err(|_| MailError::Offline)?;
@@ -89,22 +115,7 @@ impl TlsConnectorImpl {
         .map_err(|_| MailError::Offline)?;
         let _ = tcp.set_nodelay(true);
         if endpoint.security == Security::StartTls {
-            let greeting = timeout(CONNECT_TIMEOUT, read_line(&mut tcp)).await??;
-            if !greeting.starts_with(b"* OK") && !greeting.starts_with(b"* PREAUTH") {
-                return Err(MailError::Protocol);
-            }
-            tcp.write_all(b"zs1 STARTTLS\r\n")
-                .await
-                .map_err(|_| MailError::Offline)?;
-            loop {
-                let line = timeout(CONNECT_TIMEOUT, read_line(&mut tcp)).await??;
-                if line.starts_with(b"zs1 ") {
-                    if !line.starts_with(b"zs1 OK") {
-                        return Err(MailError::Unsupported);
-                    }
-                    break;
-                }
-            }
+            timeout(CONNECT_TIMEOUT, starttls_exchange(&mut tcp)).await??;
         }
         let tls = timeout(
             CONNECT_TIMEOUT,
@@ -119,5 +130,58 @@ impl TlsConnectorImpl {
 impl Connector for TlsConnectorImpl {
     fn connect<'a>(&'a self, endpoint: &'a Endpoint) -> BoxFuture<'a, Result<BoxStream>> {
         Box::pin(Self::open(endpoint))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncReadExt;
+
+    async fn run(script: Vec<u8>) -> (Result<()>, Vec<u8>) {
+        let (mut client, mut server) = tokio::io::duplex(1 << 20);
+        server.write_all(&script).await.unwrap();
+        let result = starttls_exchange(&mut client).await;
+        drop(client);
+        let mut sent = Vec::new();
+        server.read_to_end(&mut sent).await.unwrap();
+        (result, sent)
+    }
+
+    #[tokio::test]
+    async fn an_answer_after_a_few_untagged_lines_upgrades() {
+        let script = b"* OK hi\r\n* CAPABILITY X\r\n* NOTE y\r\nzs1 OK go\r\n".to_vec();
+        let (result, sent) = run(script).await;
+        assert_eq!(result, Ok(()));
+        assert_eq!(sent, b"zs1 STARTTLS\r\n");
+    }
+
+    #[tokio::test]
+    async fn a_refusal_and_a_bad_greeting_are_refused() {
+        let (result, _) = run(b"* OK hi\r\nzs1 NO later\r\n".to_vec()).await;
+        assert_eq!(result, Err(MailError::Unsupported));
+        let (result, sent) = run(b"* BYE go away\r\n".to_vec()).await;
+        assert_eq!(result, Err(MailError::Protocol));
+        assert!(sent.is_empty());
+    }
+
+    #[tokio::test]
+    async fn endless_untagged_lines_end_in_a_protocol_error() {
+        let mut script = b"* OK hi\r\n".to_vec();
+        for _ in 0..(MAX_STARTTLS_LINES * 4) {
+            script.extend_from_slice(b"* NOISE\r\n");
+        }
+        // A tagged answer after the limit is never reached.
+        script.extend_from_slice(b"zs1 OK late\r\n");
+        let (result, _) = run(script).await;
+        assert_eq!(result, Err(MailError::Protocol));
+    }
+
+    #[tokio::test]
+    async fn an_overlong_line_is_a_protocol_error() {
+        let mut script = b"* OK hi\r\n".to_vec();
+        script.extend(std::iter::repeat_n(b'x', 10_000));
+        let (result, _) = run(script).await;
+        assert_eq!(result, Err(MailError::Protocol));
     }
 }

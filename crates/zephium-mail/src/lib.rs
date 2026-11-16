@@ -13,6 +13,7 @@ pub mod error;
 pub mod imap;
 pub mod limits;
 pub mod mailto;
+pub mod metered;
 pub mod mime;
 pub mod model;
 pub mod remote_images;

@@ -204,6 +204,24 @@ pub fn redirect_allowed(followed: usize, next: &Url) -> bool {
 // Which URLs a message references
 // ---------------------------------------------------------------------------
 
+/// `#65` or `#x41` (digits only) as a character; zero, a surrogate and
+/// anything past U+10FFFF become U+FFFD. `None` when `name` is not a number.
+fn numeric_reference(name: &str) -> Option<char> {
+    let (digits, radix) = match name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
+        Some(hex) => (hex, 16),
+        None => (name.strip_prefix('#')?, 10),
+    };
+    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+        return None;
+    }
+    let code = u32::from_str_radix(digits, radix).unwrap_or(u32::MAX);
+    Some(
+        char::from_u32(code)
+            .filter(|c| *c != '\0')
+            .unwrap_or('\u{fffd}'),
+    )
+}
+
 /// Decodes the character references a browser decodes in an attribute value.
 fn decode_entities(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -211,28 +229,26 @@ fn decode_entities(value: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
+        // Same rules as `decodeEntities` in the frame's `sanitize.ts`: a `;` is
+        // required, the body is at most nine characters, names are not case
+        // sensitive and an impossible number becomes U+FFFD. The shared
+        // fixture `image-url-parity.json` keeps the two in step.
         let end = rest.find(';').filter(|end| *end <= 10);
         let decoded = end.and_then(|end| {
             let name = &rest[1..end];
-            let ch = match name {
+            let ch = match name.to_ascii_lowercase().as_str() {
                 "amp" => Some('&'),
                 "lt" => Some('<'),
                 "gt" => Some('>'),
                 "quot" => Some('"'),
                 "apos" => Some('\''),
-                // The few more the frame's sanitiser also decodes.
                 "colon" => Some(':'),
                 "tab" => Some('\t'),
                 "newline" => Some('\n'),
                 "lpar" => Some('('),
                 "rpar" => Some(')'),
                 "nbsp" => Some('\u{a0}'),
-                _ => name
-                    .strip_prefix("#x")
-                    .or_else(|| name.strip_prefix("#X"))
-                    .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-                    .or_else(|| name.strip_prefix('#').and_then(|dec| dec.parse().ok()))
-                    .and_then(char::from_u32),
+                _ => numeric_reference(name),
             };
             ch.map(|ch| (ch, end))
         });
@@ -284,7 +300,8 @@ pub fn referenced_image_urls(html: &str) -> Vec<String> {
             continue;
         };
         at = end;
-        let src = decode_entities(src.trim());
+        // Decode first, then trim, as the frame does.
+        let src = decode_entities(src).trim().to_owned();
         if !src.is_empty() && !urls.contains(&src) {
             urls.push(src);
         }
@@ -416,13 +433,15 @@ async fn fetch_one(fetcher: &dyn ImageFetcher, raw: String) -> Option<RemoteImag
 
 /// Fetches the images the person asked for, as `data:` URLs.
 ///
-/// `html` is the message's own HTML: a URL that it does not reference is a
-/// request error. Images that cannot be fetched safely are left out of the
-/// result; the frame keeps them as blocked placeholders.
+/// `html` is the message's own HTML: a URL that it does not reference is
+/// skipped (the frame's and this scanner's reading of a tag can differ at the
+/// edges), never fetched, and never fails the other images. Images that cannot
+/// be fetched safely are left out of the result; the frame keeps them as
+/// blocked placeholders.
 ///
 /// # Errors
 /// [`MailError::InvalidInput`] when more than [`MAX_REMOTE_IMAGES`] URLs are
-/// asked for, or one is too long or not referenced by `html`.
+/// asked for or one is too long.
 pub async fn fetch_remote_images(
     html: &str,
     requested: &[String],
@@ -434,10 +453,10 @@ pub async fn fetch_remote_images(
     let referenced = referenced_image_urls(html);
     let mut wanted: Vec<String> = Vec::with_capacity(requested.len());
     for url in requested {
-        if url.len() > MAX_REMOTE_URL_BYTES || !referenced.contains(url) {
+        if url.len() > MAX_REMOTE_URL_BYTES {
             return Err(MailError::InvalidInput);
         }
-        if !wanted.contains(url) {
+        if referenced.contains(url) && !wanted.contains(url) {
             wanted.push(url.clone());
         }
     }
@@ -548,15 +567,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_url_the_message_does_not_reference_is_refused_without_a_fetch() {
-        let fake = Fake::with("https://evil.example.com/a.png", None, PNG);
-        let requested = vec!["https://evil.example.com/a.png".to_owned()];
-        let html = html_for(&["https://img.example.com/other.png"]);
+    async fn a_url_the_message_does_not_reference_is_skipped_without_a_fetch() {
+        let mut fake = Fake::with("https://evil.example.com/a.png", None, PNG);
+        fake.add("https://img.example.com/ok.png", None, PNG);
+        let requested = vec![
+            "https://evil.example.com/a.png".to_owned(),
+            "https://img.example.com/ok.png".to_owned(),
+        ];
+        let html = html_for(&["https://img.example.com/ok.png"]);
+        let images = fetch_remote_images(&html, &requested, &fake).await.unwrap();
+        // The unknown URL costs nothing and does not fail the known one.
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].url, "https://img.example.com/ok.png");
+        assert_eq!(fake.calls(), vec!["https://img.example.com/ok.png"]);
+        let only_unknown = vec!["https://evil.example.com/a.png".to_owned()];
         assert_eq!(
-            fetch_remote_images(&html, &requested, &fake).await,
-            Err(MailError::InvalidInput)
+            fetch_remote_images(&html, &only_unknown, &fake).await,
+            Ok(Vec::new())
         );
-        assert!(fake.calls().is_empty());
     }
 
     #[tokio::test]
@@ -777,6 +805,49 @@ mod tests {
                 "https://c.example.com/z.png",
             ]
         );
+    }
+
+    /// The same fixture the frame's `sanitize.test.ts` reads: both scanners
+    /// must find the same `https:` image addresses.
+    #[test]
+    fn the_scanner_agrees_with_the_frames_sanitiser_on_shared_fixtures() {
+        const FIXTURE: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../frame/src/domain/mail/tests/image-url-parity.json"
+        ));
+        let cases: Vec<serde_json::Value> = serde_json::from_str(FIXTURE).unwrap();
+        assert!(cases.len() >= 10);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let html = case["html"].as_str().unwrap();
+            let expected: Vec<&str> = case["https"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|url| url.as_str().unwrap())
+                .collect();
+            let found = referenced_image_urls(html);
+            let found: Vec<&str> = found
+                .iter()
+                .map(String::as_str)
+                .filter(|url| url.starts_with("https://"))
+                .collect();
+            assert_eq!(found, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn numeric_references_need_digits_and_impossible_ones_are_replaced() {
+        assert_eq!(numeric_reference("#65"), Some('A'));
+        assert_eq!(numeric_reference("#x41"), Some('A'));
+        assert_eq!(numeric_reference("#X41"), Some('A'));
+        assert_eq!(numeric_reference("#+65"), None);
+        assert_eq!(numeric_reference("#"), None);
+        assert_eq!(numeric_reference("#x"), None);
+        assert_eq!(numeric_reference("amp"), None);
+        for bad in ["#0", "#xd800", "#1114112", "#99999999999999"] {
+            assert_eq!(numeric_reference(bad), Some('\u{fffd}'), "{bad}");
+        }
     }
 
     #[test]

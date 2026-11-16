@@ -11,6 +11,23 @@ pub const SEND_TIMEOUT: Duration = Duration::from_secs(90);
 /// Longest IDLE before it is renewed (servers drop it near 30 minutes).
 pub const IDLE_RENEW: Duration = Duration::from_secs(25 * 60);
 
+/// Bytes a server may send in answer to one ordinary IMAP command.
+pub const MAX_REPLY_BYTES: u64 = 4 * 1024 * 1024;
+/// Bytes a server may send in answer to one search.
+pub const MAX_SEARCH_REPLY_BYTES: u64 = 16 * 1024 * 1024;
+/// Bytes a server may send for one page of headers (two pages' worth of rows).
+pub const MAX_HEADERS_REPLY_BYTES: u64 = 32 * 1024 * 1024;
+/// Extra bytes beyond [`MAX_MESSAGE_BYTES`] allowed for a fetch's own framing.
+pub const MAX_FETCH_OVERHEAD_BYTES: u64 = 1024 * 1024;
+/// Answers one `LIST` may hold before the server counts as hostile.
+pub const MAX_LIST_ANSWERS: usize = 4 * 512;
+/// Whole time of one `LIST` or one page of headers, however slowly it drips.
+pub const LIST_DEADLINE: Duration = Duration::from_secs(90);
+/// Whole time of one message download.
+pub const FETCH_DEADLINE: Duration = Duration::from_secs(180);
+/// Untagged lines accepted while waiting for the answer to `STARTTLS`.
+pub const MAX_STARTTLS_LINES: usize = 64;
+
 /// Folders kept per account.
 pub const MAX_FOLDERS: usize = 512;
 /// Bytes of one folder name (decoded).
