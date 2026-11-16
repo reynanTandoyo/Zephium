@@ -3,6 +3,7 @@
 
 mod caldav;
 mod ical;
+mod invite;
 mod oauth;
 mod persist;
 mod recur;

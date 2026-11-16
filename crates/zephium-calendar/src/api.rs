@@ -280,7 +280,7 @@ pub struct CalendarSyncReportV1 {
 
 // -- conversions -------------------------------------------------------------
 
-fn format_time(time: &EventTime) -> String {
+pub(crate) fn format_time(time: &EventTime) -> String {
     match &time.kind {
         TimeKind::Date => time.local.format("%Y-%m-%d").to_string(),
         TimeKind::Floating => time.local.format("%Y-%m-%dT%H:%M:%S").to_string(),

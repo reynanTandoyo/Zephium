@@ -15,11 +15,11 @@ BEGIN:VEVENT\r\nUID:h1@x\r\nSUMMARY:Holiday\r\nDTSTART;VALUE=DATE:20260101\r\nEN
 BEGIN:VEVENT\r\nUID:h2@x\r\nSUMMARY:Weekly\r\nDTSTART:20260105T100000Z\r\nDTEND:20260105T110000Z\r\n\
 RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 
-struct Harness {
-    fake: Arc<Fake>,
+pub(super) struct Harness {
+    pub(super) fake: Arc<Fake>,
     storage: Arc<MemoryStorage>,
     secrets: Arc<MemorySecrets>,
-    service: CalendarService,
+    pub(super) service: CalendarService,
 }
 
 fn harness() -> Harness {
@@ -72,7 +72,7 @@ fn draft(summary: &str) -> CalendarEventDraftV1 {
     }
 }
 
-async fn signed_in() -> Harness {
+pub(super) async fn signed_in() -> Harness {
     signed_in_on(harness(), work_report("Planning", "\"e1\"")).await
 }
 
