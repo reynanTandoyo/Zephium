@@ -15,6 +15,8 @@ const MAX_HTML_CHARS = 2_000_000;
 const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_DEPTH = 64;
 const MAX_LINKS = 500;
+/** Same as `MAX_REMOTE_IMAGES` in `zephium-mail`: the most addresses one request may name. */
+const MAX_REMOTE_IMAGES = 24;
 
 const ALLOWED_TAGS = new Set(
   (
@@ -128,15 +130,27 @@ type SanitizedMail = {
   droppedImages: number;
 };
 
-/** Decodes the entities a browser would decode inside an attribute value. */
+/** Longest entity body (between `&` and `;`) that is decoded. */
+const MAX_ENTITY_BODY = 9;
+
+/**
+ * Decodes the entities of an attribute value. The rules are those of
+ * `decode_entities` in `crates/zephium-mail/src/remote_images.rs`, which finds
+ * the same image addresses on the backend: a `;` is required, the body is at
+ * most nine characters, names are not case sensitive, and zero, a surrogate or
+ * a number past U+10FFFF becomes U+FFFD. The fixture
+ * `tests/image-url-parity.json` keeps the two in step.
+ */
 function decodeEntities(value: string): string {
-  return value.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z][a-z0-9]*);?/giu, (whole, body: string) => {
+  return value.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z][a-z0-9]*);/giu, (whole, body: string) => {
+    if (body.length > MAX_ENTITY_BODY) return whole;
     if (body.startsWith("#")) {
       const code =
         body[1] === "x" || body[1] === "X"
           ? parseInt(body.slice(2), 16)
           : parseInt(body.slice(1), 10);
       if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return "\ufffd";
+      if (code >= 0xd800 && code <= 0xdfff) return "\ufffd";
       return String.fromCodePoint(code);
     }
     return NAMED_ENTITIES[body.toLowerCase()] ?? whole;
@@ -185,14 +199,29 @@ function schemeOf(raw: string): string | null {
   return match ? match[1]!.toLowerCase() : null;
 }
 
-/** A link target that can be shown and opened as a tab, or `null`. */
+/** Removes the invisible characters browsers skip in a scheme; a plain space stays. */
+function stripInvisible(value: string): string {
+  let cleaned = "";
+  for (let at = 0; at < value.length; at += 1) {
+    const code = value.charCodeAt(at);
+    if (code === 0x20 || !invisible(code)) cleaned += value[at];
+  }
+  return cleaned;
+}
+
+/**
+ * A link target that can be shown and opened as a tab, or `null`. The result
+ * is the cleaned form that was checked: no zero-width or other invisible
+ * characters remain in it.
+ */
 export function safeLinkTarget(raw: string): string | null {
   const decoded = decodeEntities(raw).trim();
-  const scheme = schemeOf(decoded);
-  if (scheme !== "http" && scheme !== "https" && scheme !== "mailto") return null;
   if (hasControl(decoded)) return null;
-  if (scheme !== "mailto" && /\s/u.test(decoded)) return null;
-  return decoded.length > 2048 ? null : decoded;
+  const cleaned = stripInvisible(decoded);
+  const scheme = schemeOf(cleaned);
+  if (scheme !== "http" && scheme !== "https" && scheme !== "mailto") return null;
+  if (scheme !== "mailto" && /\s/u.test(cleaned)) return null;
+  return cleaned.length > 2048 ? null : cleaned;
 }
 
 /** Decoded size of a base64 payload without decoding it. */
@@ -333,6 +362,7 @@ export function sanitizeMailHtml(input: string, options: SanitizeOptions = {}): 
   const links: string[] = [];
   const open: string[] = [];
   const remoteUrls: string[] = [];
+  const remoteSeen = new Set<string>();
   let remoteImages = 0;
   let remoteLoaded = 0;
   let droppedImages = 0;
@@ -367,7 +397,11 @@ export function sanitizeMailHtml(input: string, options: SanitizeOptions = {}): 
       const target = safeLinkTarget(src);
       // Only an `https:` address can be fetched; the answer is re-checked as a raster `data:` URL.
       if (target !== null && schemeOf(target) === "https") {
-        if (!remoteUrls.includes(target)) remoteUrls.push(target);
+        // At most what the backend accepts; a Set keeps the check constant time.
+        if (!remoteSeen.has(target) && remoteUrls.length < MAX_REMOTE_IMAGES) {
+          remoteSeen.add(target);
+          remoteUrls.push(target);
+        }
         const fetched = options.remoteImages?.get(target);
         shown = fetched === undefined ? null : safeImageDataUrl(fetched);
         if (shown !== null) remoteLoaded += 1;

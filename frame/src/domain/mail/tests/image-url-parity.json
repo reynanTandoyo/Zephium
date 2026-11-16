@@ -1,0 +1,66 @@
+[
+  {
+    "name": "a plain https image",
+    "html": "<p><img src=\"https://a.example.com/x.png\"></p>",
+    "https": ["https://a.example.com/x.png"]
+  },
+  {
+    "name": "named entity in a query",
+    "html": "<IMG SRC='https://a.example.com/x?a=1&amp;b=2'>",
+    "https": ["https://a.example.com/x?a=1&b=2"]
+  },
+  {
+    "name": "hex and decimal references",
+    "html": "<img src=\"https://c.example.com/&#x7a;.png\"><img src=\"https://c.example.com/&#122;2.png\">",
+    "https": ["https://c.example.com/z.png", "https://c.example.com/z2.png"]
+  },
+  {
+    "name": "upper case names decode too",
+    "html": "<img src=\"https://a.example.com/x?a=1&AMP;b=2\">",
+    "https": ["https://a.example.com/x?a=1&b=2"]
+  },
+  {
+    "name": "a reference without a semicolon stays literal",
+    "html": "<img src=\"https://a.example.com/x?a=1&amp=2\"><img src=\"https://a.example.com/&#x7a.png\">",
+    "https": ["https://a.example.com/x?a=1&amp=2", "https://a.example.com/&#x7a.png"]
+  },
+  {
+    "name": "a body over nine characters stays literal",
+    "html": "<img src=\"https://a.example.com/&#x0000007a;.png\"><img src=\"https://a.example.com/&#x00007a;.png\">",
+    "https": ["https://a.example.com/&#x0000007a;.png", "https://a.example.com/z.png"]
+  },
+  {
+    "name": "impossible numbers become U+FFFD",
+    "html": "<img src=\"https://a.example.com/&#0;a.png\"><img src=\"https://a.example.com/&#xd800;b.png\"><img src=\"https://a.example.com/&#1114112;c.png\">",
+    "https": [
+      "https://a.example.com/�a.png",
+      "https://a.example.com/�b.png",
+      "https://a.example.com/�c.png"
+    ]
+  },
+  {
+    "name": "duplicates are listed once, in order",
+    "html": "<img src=\"https://b.example.com/1.png\"><img src=\"https://a.example.com/2.png\"><img src=\"https://b.example.com/1.png\">",
+    "https": ["https://b.example.com/1.png", "https://a.example.com/2.png"]
+  },
+  {
+    "name": "only img tags with a src count",
+    "html": "<a href=\"https://a.example.com/x.png\">x</a><imgx src=\"https://no.example.com/\"><img alt=\"none\"><!-- <img src=\"https://c.example.com/z.png\"> -->",
+    "https": []
+  },
+  {
+    "name": "other schemes are not fetchable",
+    "html": "<img src=\"http://a.example.com/x.png\"><img src=\"data:image/png;base64,AAAA\"><img src=\"cid:logo\">",
+    "https": []
+  },
+  {
+    "name": "unquoted and late src attributes",
+    "html": "<img alt=x width=10 src=https://b.example.com/y.png><img alt='q' src = 'https://b.example.com/y2.png' />",
+    "https": ["https://b.example.com/y.png", "https://b.example.com/y2.png"]
+  },
+  {
+    "name": "a reference decoded into leading space is trimmed",
+    "html": "<img src=\"&#32;https://a.example.com/q.png\"><img src=\" https://a.example.com/r.png \">",
+    "https": ["https://a.example.com/q.png", "https://a.example.com/r.png"]
+  }
+]

@@ -19,6 +19,10 @@ export function reasonText(error: MailFailure | "no_folder"): string {
       return m.mail_error_auth_failed();
     case "server_rejected":
       return m.mail_error_server_rejected();
+    case "address_rejected":
+      return m.mail_error_address_rejected();
+    case "no_trash":
+      return m.mail_error_no_trash();
     case "protocol":
       return m.mail_error_protocol();
     case "too_large":

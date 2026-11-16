@@ -62,6 +62,21 @@
     if (link && store.startComposeFromLink(link)) view = "mail";
   });
 
+  // A question takes focus on its safe answer, never on the destructive one.
+  let keepLink = $state<HTMLButtonElement | undefined>();
+  let keepMessages = $state<HTMLButtonElement | undefined>();
+  $effect(() => {
+    if (store.pendingLink && store.compose) keepLink?.focus();
+  });
+  $effect(() => {
+    if (store.permanentDelete) keepMessages?.focus();
+  });
+
+  // The message that held a waiting link was closed or sent: open the link now.
+  $effect(() => {
+    if (store.pendingLink && !store.compose) void store.acceptPendingLink(false);
+  });
+
   const ready = $derived(store.open?.state === "ready" ? store.open : null);
   const row = $derived(ready?.row ?? null);
   const showSetup = $derived(
@@ -339,6 +354,43 @@
           </div>
         {/if}
 
+        {#if store.pendingLink && store.compose}
+          <div class="confirm" role="alertdialog" aria-labelledby="mail-link-title">
+            <p id="mail-link-title">{m.mail_link_compose_title()}</p>
+            <div class="actions">
+              <Button
+                variant="primary"
+                disabled={store.compose.busy}
+                onclick={() => void store.acceptPendingLink(true)}
+                >{m.mail_link_compose_save()}</Button
+              >
+              <Button
+                variant="danger"
+                disabled={store.compose.busy}
+                onclick={() => void store.acceptPendingLink(false)}
+                >{m.mail_link_compose_discard()}</Button
+              >
+              <Button bind:ref={keepLink} onclick={() => store.dismissPendingLink()}
+                >{m.mail_link_compose_keep()}</Button
+              >
+            </div>
+          </div>
+        {/if}
+
+        {#if store.permanentDelete}
+          <div class="confirm" role="alertdialog" aria-labelledby="mail-delete-title">
+            <p id="mail-delete-title">{m.mail_delete_forever_title()}</p>
+            <div class="actions">
+              <Button variant="danger" onclick={() => void store.confirmPermanentDelete()}
+                >{m.mail_delete_forever_confirm()}</Button
+              >
+              <Button bind:ref={keepMessages} onclick={() => store.cancelPermanentDelete()}
+                >{m.mail_delete_forever_cancel()}</Button
+              >
+            </div>
+          </div>
+        {/if}
+
         {#if store.compose}
           <ComposePane {store} compose={store.compose} onclose={() => store.closeCompose()} />
         {:else}
@@ -504,6 +556,25 @@
     background: var(--color-fill);
     color: var(--color-danger);
     font-size: var(--text-label);
+  }
+
+  .confirm {
+    display: grid;
+    gap: 10px;
+    padding: 10px 16px;
+    border-block-end: 1px solid var(--color-border);
+    background: var(--color-raised);
+  }
+
+  .confirm p {
+    margin: 0;
+    font-weight: 550;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   @container (max-width: 900px) {

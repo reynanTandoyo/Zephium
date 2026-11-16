@@ -149,10 +149,36 @@ test("a refused delete keeps the message and explains", async () => {
   render(MailPage);
   await page.getByRole("button", { name: /Subject 1/u }).click();
   await page.getByRole("button", { name: "Delete (#)" }).click();
-  expect(native.del).toHaveBeenCalledWith("acc-1", "INBOX", [1]);
+  expect(native.del).toHaveBeenCalledWith("acc-1", "INBOX", [1], false);
   await expect.element(page.getByText(/The server refused the request/u)).toBeVisible();
   // The message stays open, and nothing was removed on the server's refusal.
   await expect.element(page.getByRole("heading", { name: "Subject 1" })).toBeVisible();
+});
+
+test("deleting where there is no Trash asks first, and only a yes removes anything", async () => {
+  const first = message(1);
+  withAccount(first);
+  native.message.mockResolvedValue(ok(body(first)));
+  native.del.mockResolvedValueOnce(failed("no_trash"));
+  native.del.mockResolvedValueOnce(failed("no_trash"));
+  native.del.mockResolvedValueOnce(ok(null));
+  render(MailPage);
+  await page.getByRole("button", { name: /Subject 1/u }).click();
+  await page.getByRole("button", { name: "Delete (#)" }).click();
+  expect(native.del).toHaveBeenCalledTimes(1);
+  expect(native.del).toHaveBeenLastCalledWith("acc-1", "INBOX", [1], false);
+  await expect.element(page.getByRole("alertdialog")).toBeVisible();
+  await expect.element(page.getByText(/no Trash folder, so deleting/u)).toBeVisible();
+  // Cancelling sends nothing more and keeps the message.
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+  expect(native.del).toHaveBeenCalledTimes(1);
+  await expect.element(page.getByRole("heading", { name: "Subject 1" })).toBeVisible();
+  // Asking again and confirming sends the permanent delete.
+  await page.getByRole("button", { name: "Delete (#)" }).click();
+  await page.getByRole("button", { name: "Delete permanently" }).click();
+  await vi.waitFor(() => expect(native.del).toHaveBeenCalledTimes(3));
+  expect(native.del).toHaveBeenLastCalledWith("acc-1", "INBOX", [1], true);
 });
 
 test("search runs against the current folder", async () => {

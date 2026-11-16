@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { render } from "vitest-browser-svelte";
 import { page } from "vitest/browser";
 import "$styles/global.css";
+import { mailtoInbox } from "$domain/mail";
 import MailPage from "../components/MailPage.svelte";
 import { account, body, failed, folders, message, ok, pageOf } from "./fixtures";
 
@@ -31,6 +32,7 @@ vi.mock("$shared/ipc/bindings", async () => {
 
 afterEach(() => {
   for (const mock of Object.values(native)) mock.mockReset();
+  mailtoInbox.take();
 });
 
 function start(signature = "") {
@@ -145,4 +147,57 @@ test("closing a message that has text asks before discarding it", async () => {
   await expect
     .element(page.getByRole("textbox", { name: "Message", exact: true }))
     .toHaveValue("draft text");
+});
+
+const link = {
+  to: ["ann@example.org"],
+  cc: [],
+  bcc: [],
+  subject: "From a page",
+  body: "",
+};
+
+test("a clicked mailto link waits while a message with text is open and never replaces it", async () => {
+  start();
+  render(MailPage);
+  await page.getByRole("button", { name: /New message/u }).click();
+  await page.getByLabelText("Subject").fill("My own words");
+  mailtoInbox.receive(link);
+  await expect.element(page.getByRole("alertdialog")).toBeVisible();
+  await expect
+    .element(page.getByText("A link wants to start a new message", { exact: false }))
+    .toBeVisible();
+  // The message being written is untouched while the question is open.
+  await expect.element(page.getByLabelText("Subject")).toHaveValue("My own words");
+  await page.getByRole("button", { name: "Keep writing" }).click();
+  await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+  await expect.element(page.getByLabelText("Subject")).toHaveValue("My own words");
+  expect(native.saveDraft).not.toHaveBeenCalled();
+});
+
+test("the waiting link opens after the open message was saved as a draft", async () => {
+  start();
+  native.saveDraft.mockResolvedValue(ok(null));
+  render(MailPage);
+  await page.getByRole("button", { name: /New message/u }).click();
+  await page.getByLabelText("Subject").fill("My own words");
+  mailtoInbox.receive(link);
+  await page.getByRole("button", { name: "Save draft and open link" }).click();
+  await vi.waitFor(() => expect(native.saveDraft).toHaveBeenCalledTimes(1));
+  expect(native.saveDraft.mock.calls[0]![1]).toMatchObject({ subject: "My own words" });
+  await expect.element(page.getByLabelText("Subject")).toHaveValue("From a page");
+  await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+});
+
+test("a link that arrives while the draft cannot be saved leaves the message where it is", async () => {
+  start();
+  native.saveDraft.mockResolvedValue(failed("offline"));
+  render(MailPage);
+  await page.getByRole("button", { name: /New message/u }).click();
+  await page.getByLabelText("Subject").fill("My own words");
+  mailtoInbox.receive(link);
+  await page.getByRole("button", { name: "Save draft and open link" }).click();
+  await vi.waitFor(() => expect(native.saveDraft).toHaveBeenCalledTimes(1));
+  await expect.element(page.getByLabelText("Subject")).toHaveValue("My own words");
+  await expect.element(page.getByRole("alertdialog")).toBeVisible();
 });
