@@ -5,7 +5,9 @@
 //! to `calendar.json.migrated`. Passwords live only in the OS credential vault
 //! (`app.zephium.calendar|<account id>`) and never cross IPC outward. All
 //! domain logic is in `zephium-calendar`. Reminders (T-0044) are shown from a
-//! background scheduler here; their ledger is one app setting.
+//! background scheduler here; their ledger is one app setting. Meeting
+//! invitations (T-0045, calendar side) are parsed and answered here; the mail
+//! side sends the REPLY.
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -15,8 +17,12 @@ use zephium_calendar::api::{
 };
 use zephium_calendar::chrono::{DateTime, Utc};
 use zephium_calendar::http::{ReqwestClient, Secret};
+use zephium_calendar::invite::{self, CancelMode, DeclineMode, Invitation, Response};
 use zephium_calendar::persist::StoreCalendar;
 use zephium_calendar::reminders::{self, Ledger, Plan, Reminder, DEFAULT_CHOICES};
+use zephium_calendar::service::{
+    CalendarInvitationActionV1, CalendarInvitationV1, CalendarItipReplyV1,
+};
 use zephium_calendar::store::VaultSecrets;
 use zephium_calendar::{CalendarError, CalendarService};
 use zephium_core::ports::store::Store;
@@ -483,4 +489,218 @@ pub(crate) async fn calendar_sync(
     let report = service(&app, &caller, "calendar_sync")?.sync_all().await;
     changed(&app);
     Ok(report)
+}
+
+// -- meeting invitations (T-0045) ------------------------------------------------
+
+/// Parsed invitations kept for the follow-up commands, newest last.
+const INVITATIONS_MAX: usize = 64;
+/// Largest base64 text `calendar_invitation_parse` accepts (about 1 MiB of
+/// bytes).
+const INVITATION_B64_MAX: usize = zephium_calendar::invite::MAX_INVITATION_BYTES / 3 * 4 + 8;
+/// Settings: `calendar.invitation_decline` = `keep` keeps a declined event
+/// (default: delete it); `calendar.invitation_cancel` = `mark` keeps a
+/// cancelled event marked cancelled (default: delete it).
+const DECLINE_SETTING: &str = "calendar.invitation_decline";
+const CANCEL_SETTING: &str = "calendar.invitation_cancel";
+
+struct KnownInvitation {
+    id: String,
+    invitation: Invitation,
+    own: Vec<String>,
+}
+
+fn invitations() -> &'static std::sync::Mutex<std::collections::VecDeque<KnownInvitation>> {
+    static TABLE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::VecDeque<KnownInvitation>>,
+    > = std::sync::OnceLock::new();
+    TABLE.get_or_init(Default::default)
+}
+
+fn remember_invitation(invitation: Invitation, own: Vec<String>) -> String {
+    // Unguessable and unique: 128 random bits plus a counter in case the
+    // system source fails.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let mut bytes = [0_u8; 16];
+    let _ = getrandom::fill(&mut bytes);
+    let id = format!(
+        "inv-{}-{}",
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let mut table = invitations()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    while table.len() >= INVITATIONS_MAX {
+        table.pop_front();
+    }
+    table.push_back(KnownInvitation {
+        id: id.clone(),
+        invitation,
+        own,
+    });
+    id
+}
+
+fn known_invitation(id: &str) -> Result<(Invitation, Vec<String>), CalendarError> {
+    invitations()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .find(|item| item.id == id)
+        .map(|item| (item.invitation.clone(), item.own.clone()))
+        .ok_or(CalendarError::NotFound)
+}
+
+/// Reads an iTIP object (`text/calendar` part or `.ics` attachment, base64)
+/// and describes it: the event, the attendees with their status, the user's
+/// own entry (matched against `own_addresses`), the stored copy and a
+/// suggested calendar. The result's `id` is the handle for the other
+/// `calendar_invitation_*` commands (kept for the last 64 invitations).
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn calendar_invitation_parse(
+    caller: WebviewWindow,
+    app: tauri::AppHandle,
+    bytes_b64: String,
+    own_addresses: Vec<String>,
+) -> Result<CalendarInvitationV1, CalendarError> {
+    use base64::Engine;
+    let service = service(&app, &caller, "calendar_invitation_parse")?;
+    if bytes_b64.len() > INVITATION_B64_MAX {
+        return Err(CalendarError::TooLarge);
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(bytes_b64.trim())
+        .map_err(|_| CalendarError::InvalidInput)?;
+    let invitation = invite::parse(&bytes)?;
+    let own: Vec<String> = own_addresses
+        .into_iter()
+        .take(invite::MAX_OWN_ADDRESSES)
+        .collect();
+    let mut described = service.describe_invitation(&invitation, &own);
+    described.id = remember_invitation(invitation, own);
+    Ok(described)
+}
+
+/// Answers a REQUEST: applies the answer to `calendar` (accept and tentative
+/// store or update the event, decline removes an earlier copy or keeps it as
+/// declined, per `calendar.invitation_decline`) and returns the iTIP REPLY
+/// for the mail side to send. Nothing is sent from here. `calendar` defaults
+/// to the suggested one; accept and tentative need one.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn calendar_invitation_respond(
+    caller: WebviewWindow,
+    app: tauri::AppHandle,
+    invitation_id: String,
+    response: Response,
+    calendar: Option<String>,
+) -> Result<CalendarItipReplyV1, CalendarError> {
+    let service = service(&app, &caller, "calendar_invitation_respond")?;
+    let (invitation, own) = known_invitation(&invitation_id)?;
+    let calendar = match calendar {
+        Some(id) => Some(id),
+        None => {
+            service
+                .describe_invitation(&invitation, &own)
+                .suggested_calendar
+        }
+    };
+    let decline = if app_setting(DECLINE_SETTING).as_deref() == Some("keep") {
+        DeclineMode::KeepDeclined
+    } else {
+        DeclineMode::Remove
+    };
+    let reply = service
+        .respond_invitation(&invitation, &own, response, calendar.as_deref(), decline)
+        .await?;
+    if reply.calendar_action != CalendarInvitationActionV1::None {
+        changed(&app);
+    }
+    Ok(reply)
+}
+
+/// Applies a CANCEL: deletes the stored event (or one instance), or keeps it
+/// marked cancelled when `calendar.invitation_cancel` is `mark`. Only copies
+/// from the same organizer are touched; `not_found` when there is none.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn calendar_invitation_apply_cancel(
+    caller: WebviewWindow,
+    app: tauri::AppHandle,
+    invitation_id: String,
+) -> Result<CalendarInvitationActionV1, CalendarError> {
+    let service = service(&app, &caller, "calendar_invitation_apply_cancel")?;
+    let (invitation, _) = known_invitation(&invitation_id)?;
+    let mode = if app_setting(CANCEL_SETTING).as_deref() == Some("mark") {
+        CancelMode::MarkCancelled
+    } else {
+        CancelMode::Remove
+    };
+    let action = service.apply_cancel(&invitation, mode).await?;
+    if action != CalendarInvitationActionV1::None {
+        changed(&app);
+    }
+    Ok(action)
+}
+
+/// Applies an attendee's REPLY to the stored event the user organizes: the
+/// attendee's status is updated. `not_found` when the user does not organize
+/// a stored event with that UID.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn calendar_invitation_apply_reply(
+    caller: WebviewWindow,
+    app: tauri::AppHandle,
+    invitation_id: String,
+) -> Result<CalendarInvitationActionV1, CalendarError> {
+    let service = service(&app, &caller, "calendar_invitation_apply_reply")?;
+    let (invitation, own) = known_invitation(&invitation_id)?;
+    let action = service.apply_reply(&invitation, &own).await?;
+    if action != CalendarInvitationActionV1::None {
+        changed(&app);
+    }
+    Ok(action)
+}
+
+#[cfg(test)]
+mod invitation_tests {
+    use super::*;
+
+    fn sample(uid: &str) -> Invitation {
+        let text = format!(
+            "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:{uid}\r\n\
+             DTSTART:20260121T090000Z\r\nORGANIZER:mailto:o@example.com\r\n\
+             ATTENDEE:mailto:a@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+        invite::parse(text.as_bytes()).expect("parses")
+    }
+
+    #[test]
+    fn table_is_bounded_and_ids_are_opaque() {
+        let first = remember_invitation(sample("first"), vec!["a@example.com".to_owned()]);
+        for index in 0..INVITATIONS_MAX {
+            remember_invitation(sample(&format!("u{index}")), Vec::new());
+        }
+        assert_eq!(
+            known_invitation(&first).err(),
+            Some(CalendarError::NotFound)
+        );
+        let last = remember_invitation(sample("last"), vec!["a@example.com".to_owned()]);
+        assert!(last.starts_with("inv-"));
+        let (invitation, own) = known_invitation(&last).expect("known");
+        assert_eq!(invitation.uid, "last");
+        assert_eq!(own, ["a@example.com"]);
+        assert_eq!(
+            known_invitation("inv-unknown").err(),
+            Some(CalendarError::NotFound)
+        );
+    }
+
+    const _: () =
+        assert!(INVITATION_B64_MAX >= zephium_calendar::invite::MAX_INVITATION_BYTES * 4 / 3);
 }
