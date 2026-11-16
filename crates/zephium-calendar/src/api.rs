@@ -460,14 +460,26 @@ pub fn apply_draft(uid: &str, draft: &CalendarEventDraftV1, base: Option<&Event>
         .as_ref()
         .map(|url| url.trim().to_owned())
         .filter(|url| !url.is_empty());
+    // The draft lists the reminders before the start. One that the event
+    // already has (of any kind, EMAIL included) stays as it is; a new one is a
+    // DISPLAY alarm. Alarms the editor does not show (relative to the end)
+    // are not touched.
+    let before = event.alarms.clone();
     event.alarms = draft
         .reminders
         .iter()
-        .map(|minutes| Alarm {
-            minutes_before: i64::from(*minutes),
-            from_end: false,
-            action: "DISPLAY".to_owned(),
+        .map(|minutes| {
+            before
+                .iter()
+                .find(|alarm| !alarm.from_end && alarm.minutes_before == i64::from(*minutes))
+                .cloned()
+                .unwrap_or(Alarm {
+                    minutes_before: i64::from(*minutes),
+                    from_end: false,
+                    action: "DISPLAY".to_owned(),
+                })
         })
+        .chain(before.iter().filter(|alarm| alarm.from_end).cloned())
         .collect();
     if base.is_some() {
         event.sequence = event.sequence.saturating_add(1);

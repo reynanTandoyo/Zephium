@@ -6,6 +6,8 @@ use crate::model::{Alarm, Event, EventStatus, EventTime, PartStat, Person, TimeK
 use crate::tz;
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Utc};
 
+mod patch;
+
 /// Largest iCalendar document accepted (a subscription feed).
 pub const MAX_ICS_BYTES: usize = 8 * 1024 * 1024;
 /// Most VEVENT components kept per document.
@@ -697,31 +699,51 @@ pub(crate) fn person_property(name: &str, person: &Person, with_status: bool) ->
     line
 }
 
-/// Zones used by `event` and its overrides, each with the earliest year it is
-/// used in, ordered by name.
-fn zones_used(event: &Event) -> Vec<(chrono_tz::Tz, i32)> {
+/// Time zones named by written times: IANA name to the zone with the first
+/// and last year it is used in.
+pub(crate) type Zones = std::collections::BTreeMap<&'static str, (chrono_tz::Tz, i32, i32)>;
+
+/// Records the zone of `time`, if it has one.
+pub(crate) fn zones_in(zones: &mut Zones, time: &EventTime) {
     use chrono::Datelike;
-    let mut zones: std::collections::BTreeMap<&'static str, (chrono_tz::Tz, i32)> =
-        std::collections::BTreeMap::new();
-    let mut visit = |time: &EventTime| {
-        if let TimeKind::Zoned(zone) = &time.kind {
-            let year = time.local.year();
-            zones
-                .entry(zone.name())
-                .and_modify(|(_, first)| *first = (*first).min(year))
-                .or_insert((*zone, year));
-        }
-    };
+    if let TimeKind::Zoned(zone) = &time.kind {
+        let year = time.local.year();
+        zones
+            .entry(zone.name())
+            .and_modify(|(_, first, last)| {
+                *first = (*first).min(year);
+                *last = (*last).max(year);
+            })
+            .or_insert((*zone, year, year));
+    }
+}
+
+/// The VTIMEZONE lines for a zone used from `first` to `last`, written at
+/// `stamp`: the observances cover the years in use and reach the present.
+pub(crate) fn zone_component(
+    zone: chrono_tz::Tz,
+    first: i32,
+    last: i32,
+    stamp: DateTime<Utc>,
+) -> Vec<String> {
+    use chrono::Datelike;
+    crate::vtimezone::component_span(zone, first, last.max(stamp.year()))
+}
+
+/// Zones used by `event` and its overrides.
+fn zones_used(event: &Event) -> Zones {
+    let mut zones = Zones::new();
     for item in std::iter::once(event).chain(event.overrides.iter()) {
-        visit(&item.start);
-        visit(&item.end);
-        item.rdates.iter().for_each(&mut visit);
-        item.exdates.iter().for_each(&mut visit);
-        if let Some(id) = &item.recurrence_id {
-            visit(id);
+        for time in [&item.start, &item.end]
+            .into_iter()
+            .chain(item.rdates.iter())
+            .chain(item.exdates.iter())
+            .chain(item.recurrence_id.iter())
+        {
+            zones_in(&mut zones, time);
         }
     }
-    zones.into_values().collect()
+    zones
 }
 
 /// Serializes one event with its overrides as a complete VCALENDAR. Every
@@ -732,8 +754,8 @@ pub fn serialize_event(event: &Event, stamp: DateTime<Utc>) -> String {
     fold("BEGIN:VCALENDAR", &mut out);
     fold("VERSION:2.0", &mut out);
     fold("PRODID:-//Zephium//Calendar//EN", &mut out);
-    for (zone, year) in zones_used(event) {
-        for line in crate::vtimezone::component(zone, year) {
+    for (zone, first, last) in zones_used(event).into_values() {
+        for line in zone_component(zone, first, last, stamp) {
             fold(&line, &mut out);
         }
     }
@@ -743,6 +765,24 @@ pub fn serialize_event(event: &Event, stamp: DateTime<Utc>) -> String {
     }
     fold("END:VCALENDAR", &mut out);
     out
+}
+
+/// Writes `event` over `original`, the stored text of the same resource,
+/// changing only the properties the model owns and that differ; every other
+/// line (categories, transparency, class, attachments, `X-` properties,
+/// attendee parameters, other alarms, other components, the document's own
+/// time zones) stays. Without a readable `original` the model alone is
+/// written, as [`serialize_event`] does.
+pub fn serialize_event_over(event: &Event, stamp: DateTime<Utc>, original: Option<&str>) -> String {
+    original
+        .and_then(|text| patch::patch(text, event, stamp, false))
+        .unwrap_or_else(|| serialize_event(event, stamp))
+}
+
+/// Like [`serialize_event_over`] for an iTIP message (an invitation): its
+/// `METHOD` and events of other UIDs are dropped, the rest is kept.
+pub fn serialize_event_from_itip(event: &Event, stamp: DateTime<Utc>, message: &str) -> String {
+    patch::patch(message, event, stamp, true).unwrap_or_else(|| serialize_event(event, stamp))
 }
 
 /// Earliest start and latest end of everything in `events` (instants), for

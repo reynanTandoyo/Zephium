@@ -350,3 +350,59 @@ fn bounds_cover_the_whole_series_or_none_when_it_never_ends() {
     assert_eq!(bounds(&open), Some((utc("2026-01-05T09:00:00Z"), None)));
     assert_eq!(bounds(&[]), None);
 }
+
+#[test]
+fn a_zone_description_covers_the_years_in_use_and_reaches_the_present() {
+    use crate::vtimezone::component_span;
+    let text = |zone: chrono_tz::Tz, first, last| component_span(zone, first, last).join("\n");
+    // US rules changed in 2007: the earlier years are dated, the yearly rule
+    // starts in 2007 and so covers every later instance.
+    let york = text(chrono_tz::America::New_York, 2005, 2026);
+    assert!(york.contains("DTSTART:20050403T020000"), "{york}");
+    assert!(york.contains("DTSTART:20061029T020000"), "{york}");
+    assert!(york.contains("DTSTART:20070311T020000"), "{york}");
+    assert!(
+        york.contains("RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU"),
+        "{york}"
+    );
+    assert!(
+        york.contains("RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU"),
+        "{york}"
+    );
+    assert_eq!(york.matches("RRULE").count(), 2);
+    // Berlin has not changed since 1996: one pair of rules from the first year.
+    let berlin = text(chrono_tz::Europe::Berlin, 2010, 2026);
+    assert!(berlin.contains("DTSTART:20100328T020000"), "{berlin}");
+    assert_eq!(berlin.matches("BEGIN:DAYLIGHT").count(), 1);
+    assert_eq!(berlin.matches("BEGIN:STANDARD").count(), 1);
+    // A single year is described as before; a start after `last` is clamped.
+    assert_eq!(
+        text(chrono_tz::Europe::Berlin, 2026, 2026),
+        text(chrono_tz::Europe::Berlin, 2030, 2026)
+    );
+    // A zone without daylight saving is one fixed observance.
+    let tokyo = text(chrono_tz::Asia::Tokyo, 2020, 2026);
+    assert_eq!(tokyo.matches("BEGIN:STANDARD").count(), 1, "{tokyo}");
+    assert!(!tokyo.contains("RRULE"));
+    // The span is bounded.
+    let long = text(chrono_tz::America::Sao_Paulo, 1970, 2026);
+    assert!(long.matches("BEGIN:").count() < 200);
+}
+
+#[test]
+fn a_series_that_began_before_a_rule_change_gets_a_zone_that_reaches_today() {
+    use chrono::TimeZone;
+    let ics = wrap(
+        "BEGIN:VEVENT\r\nUID:old@x\r\nSUMMARY:Old series\r\n\
+         DTSTART;TZID=America/New_York:20050110T090000\r\nDTEND;TZID=America/New_York:20050110T100000\r\n\
+         RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\n",
+    );
+    let event = parse_calendar(&ics).expect("parse").remove(0);
+    let stamp = chrono::Utc.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap();
+    let text = serialize_event(&event, stamp);
+    assert!(text.contains("DTSTART:20070311T020000"), "{text}");
+    assert!(
+        text.contains("RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU"),
+        "{text}"
+    );
+}

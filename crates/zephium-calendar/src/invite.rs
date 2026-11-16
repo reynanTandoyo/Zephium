@@ -80,6 +80,9 @@ pub struct Invitation {
     pub has_start: bool,
     /// Attendees of the main component.
     pub attendees: Vec<Attendee>,
+    /// The message text, so an accepted invitation is stored with every line
+    /// the organizer sent, not only the modelled ones.
+    pub source: std::sync::Arc<str>,
 }
 
 /// Lower-cases an address and strips `mailto:`.
@@ -167,6 +170,7 @@ pub fn parse(bytes: &[u8]) -> Result<Invitation> {
         has_start: main.has_start,
         event,
         attendees,
+        source: std::sync::Arc::from(&*text),
     })
 }
 
