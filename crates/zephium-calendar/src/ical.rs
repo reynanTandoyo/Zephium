@@ -188,7 +188,13 @@ fn parse_time_list(line: &Line) -> Vec<EventTime> {
         .collect()
 }
 
-/// Parses an RFC 5545 DURATION into seconds.
+/// Longest DURATION or relative TRIGGER read, in seconds (about 100 years).
+/// A longer one is malformed or hostile; adding it to a date would leave the
+/// range dates can hold.
+const MAX_DURATION_SECONDS: i64 = 100 * 366 * 86_400;
+
+/// Parses an RFC 5545 DURATION into seconds. `None` for a malformed value or
+/// one longer than [`MAX_DURATION_SECONDS`].
 fn parse_duration(value: &str) -> Option<i64> {
     let value = value.trim();
     let (sign, rest) = match value.as_bytes().first()? {
@@ -212,14 +218,18 @@ fn parse_duration(value: &str) -> Option<i64> {
             unit => {
                 let n: i64 = number.parse().ok()?;
                 number.clear();
-                total += n * match (unit, in_time) {
+                let seconds = n.checked_mul(match (unit, in_time) {
                     ('W', false) => 7 * 86_400,
                     ('D', false) => 86_400,
                     ('H', true) => 3_600,
                     ('M', true) => 60,
                     ('S', true) => 1,
                     _ => return None,
-                };
+                })?;
+                total = total.checked_add(seconds)?;
+                if total > MAX_DURATION_SECONDS {
+                    return None;
+                }
             }
         }
     }

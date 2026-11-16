@@ -91,18 +91,22 @@ pub fn occurrence_triggers(
         .alarms
         .iter()
         .filter(|alarm| matches!(alarm.action.as_str(), "DISPLAY" | "AUDIO"))
-        .map(|alarm| {
+        .filter_map(|alarm| {
             let base = if alarm.from_end {
                 anchor(&occurrence.end)
             } else {
                 anchor(&occurrence.start)
             };
-            base - Duration::minutes(alarm.minutes_before)
+            // An offset that leaves the range of dates makes no reminder.
+            base.checked_sub_signed(Duration::try_minutes(alarm.minutes_before)?)
         })
         .collect();
     if out.is_empty() && !occurrence.start.is_date() {
-        if let Some(minutes) = default_minutes {
-            out.push(anchor(&occurrence.start) - Duration::minutes(minutes));
+        if let Some(trigger) = default_minutes
+            .and_then(Duration::try_minutes)
+            .and_then(|before| anchor(&occurrence.start).checked_sub_signed(before))
+        {
+            out.push(trigger);
         }
     }
     out.sort();
