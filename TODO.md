@@ -82,6 +82,7 @@ Last ID: T-0046
   - Scope today: 158 macOS-named `.rs` files (about 83k lines), `zephium-webext-macos` (11k) and `zephium-terra-macos-probe` (23k), 1,895 `target_os = "macos"` sites in 188 files, 29 frame files, Swift, plist and macOS CI jobs.
   - Decide the scope first: whole files and crates only, or also the `cfg` blocks. The `cfg` edits in shared files cause conflicts on every upstream merge.
   - Acceptance: Windows `cargo clippy --workspace --all-targets --locked -- -D warnings`, the Windows nextest set and `pnpm --dir frame run check` pass, and `pnpm build:custom` works.
+  - 2026-11-16: skipped by user (keep the macOS code; avoids conflicts when merging upstream).
 - [ ] T-0047 · Fix the AI apps mock in settings component tests · area: frame/src/features/settings/tests, frame/src/domain/ai · owner: - · updated: 2026-11-14
   - `FeaturesLook.component.test.ts` passes but logs an unhandled rejection: `AiApps.scan` reads `response.value.apps` from a null mock (`apps.svelte.ts:47`). Comes from T-0008, not this batch.
 
