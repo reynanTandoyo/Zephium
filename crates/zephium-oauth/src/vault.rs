@@ -242,10 +242,10 @@ pub(crate) fn remove_record(entries: &dyn Entries, account_id: &str) -> Result<(
     let mut delete = |name: Option<String>| match name {
         Some(name) => {
             if let Err(error) = entries.delete(&name) {
-                result = result.clone().and(Err(error));
+                result = result.and(Err(error));
             }
         }
-        None => result = result.clone().and(Err(OAuthError::InvalidInput)),
+        None => result = result.and(Err(OAuthError::InvalidInput)),
     };
     for index in 0..MAX_CHUNKS {
         delete(chunk_target(account_id, 0, index));

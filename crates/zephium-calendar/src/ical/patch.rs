@@ -106,11 +106,7 @@ fn read(text: &str) -> Option<Vec<Piece>> {
                 }
                 stack.push(value);
             }
-            "END" => {
-                if stack.pop().as_deref() != Some(value.as_str()) {
-                    return None;
-                }
-            }
+            "END" if stack.pop().as_deref() != Some(value.as_str()) => return None,
             _ => {}
         }
         pieces.push(Piece::Raw(raw));
