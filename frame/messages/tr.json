@@ -3864,6 +3864,7 @@
   "mail_error_no_folder": "Bu hesapta bunun için bir klasör yok.",
   "mail_error_address_rejected": "Sunucu bir alıcıyı veya gönderen adresini reddetti.",
   "mail_error_no_trash": "Bu hesapta Çöp Kutusu klasörü yok.",
+  "mail_sign_in_failed": "Oturum açma başarısız. Parolayı denetleyin veya yeniden oturum açın, sonra yenileyin.",
   "mail_delete_forever_title": "Bu hesapta Çöp Kutusu klasörü olmadığından silmek iletiyi kalıcı olarak kaldırır. Kalıcı olarak silinsin mi?",
   "mail_delete_forever_confirm": "Kalıcı olarak sil",
   "mail_delete_forever_cancel": "İptal",

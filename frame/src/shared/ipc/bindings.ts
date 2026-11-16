@@ -2114,6 +2114,11 @@ export type MailAccountV1 = {
 	 *  password accounts.
 	 */
 	oauth?: MailOAuthV1 | null,
+	/**
+	 *  The server refused the sign-in while watching the inbox: the password
+	 *  or token needs attention. Cleared by updating the account or refreshing.
+	 */
+	sign_in_failed?: boolean,
 };
 
 export type MailAddressV1 = {

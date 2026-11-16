@@ -67,6 +67,8 @@ pub enum Hostile {
     EndlessRows,
     /// `RFC822.SIZE` says 100 bytes, then `BODY[]` is a literal of 64 MiB.
     LyingSize,
+    /// `BODY[]` announces a literal of 512 MiB and never sends it.
+    HugeAnnounce,
 }
 
 #[derive(Default)]
@@ -341,8 +343,17 @@ async fn serve(
                     let hostile = hostile_now(&state);
                     (hostile == Hostile::EndlessRows && rest.contains("BODY.PEEK[HEADER]"))
                         || (hostile == Hostile::LyingSize && rest.contains("BODY.PEEK[]"))
+                        || (hostile == Hostile::HugeAnnounce && rest.contains("BODY.PEEK[]"))
                 } =>
             {
+                if hostile_now(&state) == Hostile::HugeAnnounce {
+                    // Announces 512 MiB and then sends nothing at all.
+                    let _ = w
+                        .write_all(b"* 1 FETCH (UID 1 BODY[] {536870912}\r\n")
+                        .await;
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    return;
+                }
                 if hostile_now(&state) == Hostile::EndlessRows {
                     let mut n = 0u64;
                     loop {

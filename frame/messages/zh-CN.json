@@ -3864,6 +3864,7 @@
   "mail_error_no_folder": "此账户没有对应的文件夹。",
   "mail_error_address_rejected": "服务器拒绝了某个收件人或发件人地址。",
   "mail_error_no_trash": "此账户没有废纸篓文件夹。",
+  "mail_sign_in_failed": "登录失败。请检查密码或重新登录，然后刷新。",
   "mail_delete_forever_title": "此账户没有废纸篓文件夹，删除后邮件将被永久移除。要永久删除吗？",
   "mail_delete_forever_confirm": "永久删除",
   "mail_delete_forever_cancel": "取消",

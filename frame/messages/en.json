@@ -3943,6 +3943,7 @@
   "mail_error_no_folder": "This account has no folder for that.",
   "mail_error_address_rejected": "The server refused a recipient or the sender address.",
   "mail_error_no_trash": "This account has no Trash folder.",
+  "mail_sign_in_failed": "Sign-in failed. Check the password or sign in again, then refresh.",
   "mail_delete_forever_title": "This account has no Trash folder, so deleting removes the message for good. Delete it permanently?",
   "mail_delete_forever_confirm": "Delete permanently",
   "mail_delete_forever_cancel": "Cancel",

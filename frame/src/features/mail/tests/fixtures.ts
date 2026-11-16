@@ -10,6 +10,7 @@ export const account: MailAccountV1 = {
   colour: "#3b6fd4",
   signature: "",
   save_sent_copy: true,
+  sign_in_failed: false,
 };
 
 const folder = (path: string, role: MailFolderV1["role"], unread = 0): MailFolderV1 => ({
