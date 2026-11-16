@@ -1,4 +1,4 @@
-﻿//! Forward-only, versioned migrations tracked by `PRAGMA user_version`.
+//! Forward-only, versioned migrations tracked by `PRAGMA user_version`.
 //! Never edit a shipped migration; append a new one.
 
 use std::collections::HashMap;
