@@ -161,8 +161,11 @@ export const commands = {
 	 *  own entry (matched against `own_addresses`), the stored copy and a
 	 *  suggested calendar. The result's `id` is the handle for the other
 	 *  `calendar_invitation_*` commands (kept for the last 64 invitations).
+	 *  `from_addresses` are the message From address(es): the sender must be the
+	 *  ORGANIZER (request, cancel) or the replying attendee (reply), otherwise the
+	 *  other commands refuse this invitation with `forbidden`.
 	 */
-	calendarInvitationParse: (bytesB64: string, ownAddresses: string[]) => typedError<CalendarInvitationV1, CalendarError>(__TAURI_INVOKE("calendar_invitation_parse", { bytesB64, ownAddresses })),
+	calendarInvitationParse: (bytesB64: string, ownAddresses: string[], fromAddresses: string[]) => typedError<CalendarInvitationV1, CalendarError>(__TAURI_INVOKE("calendar_invitation_parse", { bytesB64, ownAddresses, fromAddresses })),
 	/**
 	 *  Answers a REQUEST: applies the answer to `calendar` (accept and tentative
 	 *  store or update the event, decline removes an earlier copy or keeps it as

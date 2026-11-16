@@ -430,12 +430,12 @@ mod tests {
                 config: &cfg,
                 client_secret: Some("GOCSPX-x"),
                 purposes: &[Purpose::Mail],
-                wait: Duration::from_secs(10),
+                wait: Duration::from_millis(500),
             },
             &Notify::new(),
         )
         .await;
-        assert_eq!(result.unwrap_err(), OAuthError::StateMismatch);
+        assert_eq!(result.unwrap_err(), OAuthError::Timeout);
         assert!(http.posts.lock().unwrap().is_empty());
     }
 

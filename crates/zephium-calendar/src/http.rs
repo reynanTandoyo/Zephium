@@ -209,6 +209,48 @@ pub fn parse_address(text: &str) -> Result<Url> {
     Ok(url)
 }
 
+/// Whether `url` names a host that is not on the public internet: a literal
+/// loopback, private, link-local, unique-local, CGNAT or unspecified address
+/// (IPv4-mapped IPv6 judged as IPv4), `localhost` or a `.localhost`, `.local`,
+/// `.internal`, `.lan` or `.home.arpa` name, or a name without a dot (an
+/// intranet short name). Names are not resolved here, so a public name that
+/// points at a private address is not caught.
+#[must_use]
+pub fn is_private_host(url: &Url) -> bool {
+    fn v4(address: std::net::Ipv4Addr) -> bool {
+        let [a, b, ..] = address.octets();
+        address.is_loopback()
+            || address.is_private()
+            || address.is_link_local()
+            || address.is_unspecified()
+            || address.is_broadcast()
+            || (a == 100 && (64..=127).contains(&b))
+            || a == 0
+    }
+    match url.host() {
+        Some(url::Host::Ipv4(address)) => v4(address),
+        Some(url::Host::Ipv6(address)) => {
+            if let Some(mapped) = address.to_ipv4_mapped() {
+                return v4(mapped);
+            }
+            let first = address.segments()[0];
+            address.is_loopback()
+                || address.is_unspecified()
+                || (first & 0xfe00) == 0xfc00
+                || (first & 0xffc0) == 0xfe80
+        }
+        Some(url::Host::Domain(name)) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            !name.contains('.')
+                || name == "localhost"
+                || [".localhost", ".local", ".internal", ".lan", ".home.arpa"]
+                    .iter()
+                    .any(|suffix| name.ends_with(suffix))
+        }
+        None => true,
+    }
+}
+
 fn same_origin(a: &Url, b: &Url) -> bool {
     a.scheme() == b.scheme()
         && a.host_str() == b.host_str()
@@ -217,7 +259,11 @@ fn same_origin(a: &Url, b: &Url) -> bool {
 
 /// Sends `request`, following up to [`MAX_REDIRECTS`] redirects. Credentials
 /// are dropped when a redirect leaves the origin; a downgrade to plain HTTP
-/// is refused.
+/// is refused. A redirect from a public host to a private, loopback or
+/// link-local one is refused ([`is_private_host`]): the address the person
+/// typed may be internal, but a server on the internet cannot send the client
+/// into the local network. A request that already targets a private host may
+/// be redirected to another private host.
 pub async fn send(client: &dyn HttpClient, mut request: HttpRequest) -> Result<HttpResponse> {
     for _ in 0..=MAX_REDIRECTS {
         check_url(&request.url)?;
@@ -235,6 +281,9 @@ pub async fn send(client: &dyn HttpClient, mut request: HttpRequest) -> Result<H
             .join(location)
             .map_err(|_| CalendarError::Server)?;
         check_url(&next)?;
+        if is_private_host(&next) && !is_private_host(&request.url) {
+            return Err(CalendarError::Forbidden);
+        }
         if !same_origin(&request.url, &next) {
             request.credentials = None;
             request.bearer = None;

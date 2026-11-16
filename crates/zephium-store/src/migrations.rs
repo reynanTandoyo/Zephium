@@ -1839,6 +1839,11 @@ pub static META: &[Migration] = &[
         version: 31,
         up: |tx| tx.execute_batch(include_str!("calendar_oauth_v31.sql")),
     },
+    // Fork (review N4): v31 dropped the two calendar event indexes of v30.
+    Migration {
+        version: 32,
+        up: |tx| tx.execute_batch(include_str!("calendar_indexes_v32.sql")),
+    },
 ];
 
 fn record_media(tx: &Transaction) -> rusqlite::Result<()> {
@@ -2860,6 +2865,7 @@ mod tests {
         (29, 0xa0b8957836963987),
         (30, 0x0156_c991_8a12_eed3),
         (31, 0xe8fcfdcd10c7be72),
+        (32, 0xdfd07dcc1b5333b1),
     ];
     const PROFILE_SCHEMA_FINGERPRINTS: &[(i64, u64)] = &[
         (1, 0x10b8_b7a3_094f_23d7),
@@ -3722,6 +3728,31 @@ mod tests {
     }
 
     #[test]
+    fn calendar_index_migration_restores_the_event_indexes_on_a_v31_database() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        apply(&mut conn, &META[..31]).unwrap();
+        let indexes = |conn: &Connection| -> Vec<String> {
+            conn.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'calendar_events'
+                   AND name LIKE 'idx_calendar_events_%' ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+        assert!(indexes(&conn).is_empty(), "v31 drops both indexes");
+        apply(&mut conn, META).unwrap();
+        apply(&mut conn, META).unwrap();
+        assert_eq!(validate_current(&conn, META).unwrap(), 32);
+        assert_eq!(
+            indexes(&conn),
+            ["idx_calendar_events_range", "idx_calendar_events_uid"]
+        );
+    }
+
+    #[test]
     fn calendar_oauth_migration_upgrades_a_v30_meta_database_without_losing_data() {
         let mut conn = Connection::open_in_memory().unwrap();
         // Foreign keys on, as in production: the rebuild must not cascade.
@@ -3742,7 +3773,7 @@ mod tests {
         .unwrap();
         apply(&mut conn, META).unwrap();
         apply(&mut conn, META).unwrap();
-        assert_eq!(validate_current(&conn, META).unwrap(), 31);
+        assert_eq!(validate_current(&conn, META).unwrap(), 32);
         let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
         assert_eq!(count("SELECT count(*) FROM calendar_accounts"), 1);
         assert_eq!(count("SELECT count(*) FROM calendars"), 1);

@@ -453,6 +453,93 @@ async fn redirects_never_carry_credentials_to_another_origin() {
     assert_eq!(result.err(), Some(CalendarError::Insecure));
 }
 
+#[tokio::test]
+async fn a_redirect_from_a_public_host_never_enters_the_local_network() {
+    for target in [
+        "https://127.0.0.1/x",
+        "https://localhost/x",
+        "https://192.168.1.10/x",
+        "https://10.0.0.5/x",
+        "https://169.254.169.254/latest",
+        "https://[::1]/x",
+        "https://[fd00::1]/x",
+        "https://[fe80::1]/x",
+        "https://[::ffff:10.0.0.1]/x",
+        "https://nas.local/x",
+        "https://intranet/x",
+    ] {
+        let fake = Fake::default();
+        fake.route(
+            Method::Get,
+            "/a",
+            "",
+            response(302, &[("location", target)], ""),
+        );
+        let url = Url::parse("https://cal.example.com/a").expect("url");
+        let result = send(&fake, HttpRequest::new(Method::Get, url)).await;
+        assert_eq!(result.err(), Some(CalendarError::Forbidden), "{target}");
+        assert_eq!(fake.requests().len(), 1, "{target} was never requested");
+    }
+
+    // A public redirect still works.
+    let fake = Fake::default();
+    fake.route(
+        Method::Get,
+        "/a",
+        "",
+        response(302, &[("location", "https://203.0.113.7/b")], ""),
+    );
+    fake.route(Method::Get, "/b", "", response(200, &[], "ok"));
+    let url = Url::parse("https://cal.example.com/a").expect("url");
+    let reply = send(&fake, HttpRequest::new(Method::Get, url))
+        .await
+        .expect("sent");
+    assert_eq!(reply.status, 200);
+}
+
+#[tokio::test]
+async fn a_private_server_the_person_typed_may_redirect_within_the_local_network() {
+    let fake = Fake::default();
+    fake.route(
+        Method::Get,
+        "/a",
+        "",
+        response(302, &[("location", "https://192.168.1.11/b")], ""),
+    );
+    fake.route(Method::Get, "/b", "", response(200, &[], "ok"));
+    let url = Url::parse("https://192.168.1.10/a").expect("url");
+    let reply = send(&fake, HttpRequest::new(Method::Get, url))
+        .await
+        .expect("sent");
+    assert_eq!(reply.status, 200);
+
+    let named = Fake::default();
+    named.route(
+        Method::Get,
+        "/a",
+        "",
+        response(301, &[("location", "https://dav.corp.internal/b")], ""),
+    );
+    named.route(Method::Get, "/b", "", response(200, &[], "ok"));
+    let url = Url::parse("https://cal/a").expect("url");
+    assert!(send(&named, HttpRequest::new(Method::Get, url))
+        .await
+        .is_ok());
+}
+
+#[test]
+fn public_and_private_hosts_are_told_apart() {
+    let private = |text: &str| crate::http::is_private_host(&Url::parse(text).expect("url"));
+    assert!(private("https://100.64.0.1/"));
+    assert!(private("https://0.0.0.0/"));
+    assert!(private("https://printer.home.arpa/"));
+    assert!(private("https://localhost./"));
+    assert!(!private("https://8.8.8.8/"));
+    assert!(!private("https://[2001:db8::1]/"));
+    assert!(!private("https://calendar.example.com/"));
+    assert!(!private("https://localhost.example.com/"));
+}
+
 #[test]
 fn secrets_do_not_appear_in_debug_output() {
     let text = format!("{:?}", credentials());

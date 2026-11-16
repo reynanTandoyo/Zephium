@@ -180,6 +180,37 @@ impl Invitation {
             .position(|item| own.contains(&normalize_address(&item.person.email)))
     }
 
+    /// Whether the message that carried this object may be believed: its From
+    /// address(es) `from` must all be the ORGANIZER (REQUEST, CANCEL) or the
+    /// attendee that answers (REPLY, COUNTER). A mail header is no proof, but a
+    /// message whose sender is not who the object speaks for is certainly not
+    /// what it claims. No sender, no organizer or no attendee never matches.
+    pub fn sender_matches(&self, from: &[String]) -> bool {
+        let senders: Vec<String> = from
+            .iter()
+            .take(MAX_OWN_ADDRESSES)
+            .map(|address| normalize_address(address))
+            .collect();
+        if senders.is_empty() || senders.iter().any(String::is_empty) {
+            return false;
+        }
+        let all_are = |wanted: &str| senders.iter().all(|sender| sender == wanted);
+        match self.method {
+            ItipMethod::Request | ItipMethod::Cancel => self
+                .event
+                .organizer
+                .as_ref()
+                .is_some_and(|organizer| all_are(&normalize_address(&organizer.email))),
+            ItipMethod::Reply | ItipMethod::Counter => {
+                !self.attendees.is_empty()
+                    && self
+                        .attendees
+                        .iter()
+                        .all(|item| all_are(&normalize_address(&item.person.email)))
+            }
+        }
+    }
+
     /// `true` when the organizer is one of `own`.
     pub fn is_organizer(&self, own: &[String]) -> bool {
         organizer_is(&self.event, &own_set(own))

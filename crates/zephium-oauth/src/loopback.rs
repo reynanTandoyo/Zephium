@@ -241,9 +241,11 @@ impl Loopback {
     /// Waits for the redirect and returns its code. Gives up after `wait`
     /// ([`OAuthError::Timeout`]), on `cancel` ([`OAuthError::Cancelled`]),
     /// after [`MAX_CONNECTIONS`] connections without a redirect
-    /// ([`OAuthError::Protocol`]), or at a redirect for another sign-in
-    /// ([`OAuthError::StateMismatch`]). Consumes the listener: the port
-    /// closes when this returns.
+    /// ([`OAuthError::Protocol`]). A redirect with another `state` (a stray
+    /// request, another sign-in) is answered 400 and does not end this one: it
+    /// counts against the connection limit and the overall wait, so a local
+    /// process that finds the port cannot cancel the sign-in. Consumes the
+    /// listener: the port closes when this returns.
     pub async fn receive(
         self,
         expected_state: &str,
@@ -271,7 +273,7 @@ impl Loopback {
                 Parsed::Callback(callback) => {
                     if !same(&callback.state, expected_state) {
                         respond(&mut stream, 400).await;
-                        return Err(OAuthError::StateMismatch);
+                        continue;
                     }
                     respond(&mut stream, 200).await;
                     return match callback.outcome {
@@ -403,16 +405,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refuses_a_state_mismatch() {
+    async fn a_wrong_state_is_answered_400_and_the_sign_in_keeps_waiting() {
         let loopback = Loopback::bind().await.unwrap();
         let port = loopback.port();
         let cancel = Notify::new();
+        let host = format!("127.0.0.1:{port}");
+        let attack = async {
+            let forged = send(port, &get("/?code=evil&state=forged", &host)).await;
+            let denied = send(port, &get("/?error=access_denied&state=forged", &host)).await;
+            let real = send(port, &get("/?code=thecode&state=expected", &host)).await;
+            (forged, denied, real)
+        };
+        let (result, (forged, denied, real)) = tokio::join!(
+            loopback.receive("expected", Duration::from_secs(10), &cancel),
+            attack
+        );
+        assert!(forged.starts_with("HTTP/1.1 400"));
+        assert!(denied.starts_with("HTTP/1.1 400"));
+        assert!(real.starts_with("HTTP/1.1 200"));
+        assert_eq!(&*result.unwrap(), "thecode");
+    }
+
+    #[tokio::test]
+    async fn wrong_states_count_against_the_connection_limit_and_the_wait() {
+        let loopback = Loopback::bind().await.unwrap();
+        let port = loopback.port();
+        let cancel = Notify::new();
+        let host = format!("127.0.0.1:{port}");
+        let flood = async {
+            for _ in 0..MAX_CONNECTIONS {
+                send(port, &get("/?code=c&state=forged", &host)).await;
+            }
+        };
+        let (result, ()) = tokio::join!(
+            loopback.receive("expected", Duration::from_secs(10), &cancel),
+            flood
+        );
+        assert_eq!(result.unwrap_err(), OAuthError::Protocol);
+
+        // A lone forged request does not end the wait early: the sign-in times out.
+        let loopback = Loopback::bind().await.unwrap();
+        let port = loopback.port();
         let request = get("/?code=c&state=forged", &format!("127.0.0.1:{port}"));
         let (result, reply) = tokio::join!(
-            loopback.receive("expected", Duration::from_secs(10), &cancel),
+            loopback.receive("expected", Duration::from_millis(400), &cancel),
             send(port, &request)
         );
-        assert_eq!(result.unwrap_err(), OAuthError::StateMismatch);
+        assert_eq!(result.unwrap_err(), OAuthError::Timeout);
         assert!(reply.starts_with("HTTP/1.1 400"));
     }
 
