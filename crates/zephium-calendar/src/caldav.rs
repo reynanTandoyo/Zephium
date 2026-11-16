@@ -150,6 +150,35 @@ fn resolve_href(base: &Url, href: &str) -> Result<Url> {
     Ok(url)
 }
 
+/// Resolves the address a server names for a principal or a calendar home.
+/// Providers such as iCloud keep the home on another host of their own
+/// (`pNN-caldav.icloud.com`), so unlike [`resolve_href`] this accepts an
+/// absolute address on a different host, but only: over `https` (or loopback
+/// `http` when the server itself is plain loopback), without credentials in
+/// the address, on a host of the same registrable domain as `server`, and not
+/// from a public server into the local network.
+fn resolve_discovered(server: &Url, href: &str) -> Result<Url> {
+    let url = server.join(href).map_err(|_| CalendarError::Server)?;
+    if let Ok(url) = resolve_href(server, href) {
+        return Ok(url);
+    }
+    check_url(&url).map_err(|_| CalendarError::Server)?;
+    let related = match (
+        url.host_str().and_then(crate::http::registrable_domain),
+        server.host_str().and_then(crate::http::registrable_domain),
+    ) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    };
+    if url.scheme() != "https"
+        || !related
+        || (crate::http::is_private_host(&url) && !crate::http::is_private_host(server))
+    {
+        return Err(CalendarError::Server);
+    }
+    Ok(url)
+}
+
 fn normalize_color(value: &str) -> Option<String> {
     let hex = value.trim().strip_prefix('#')?;
     if !hex.chars().all(|ch| ch.is_ascii_hexdigit()) || !matches!(hex.len(), 6 | 8) {
@@ -227,7 +256,7 @@ impl<'a> CaldavClient<'a> {
                 .and_then(|node| node.child_text("href"))
                 .map(str::to_owned);
             if let Some(principal) = principal {
-                let principal = resolve_href(server, &principal)?;
+                let principal = resolve_discovered(server, &principal)?;
                 let (responses, _) = self
                     .multistatus(
                         Method::Propfind,
@@ -242,7 +271,7 @@ impl<'a> CaldavClient<'a> {
             }
         }
         let home = match home {
-            Some(href) => resolve_href(server, &href)?,
+            Some(href) => resolve_discovered(server, &href)?,
             // The address may already be a calendar home or one calendar.
             None => server.clone(),
         };

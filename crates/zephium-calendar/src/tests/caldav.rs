@@ -545,3 +545,93 @@ fn secrets_do_not_appear_in_debug_output() {
     let text = format!("{:?}", credentials());
     assert!(!text.contains("hunter2"));
 }
+
+fn home_on(host_href: &str) -> String {
+    multistatus(&format!(
+        "<d:response><d:href>/dav/</d:href><d:propstat><d:prop>\
+         <c:calendar-home-set><d:href>{host_href}</d:href></c:calendar-home-set>\
+         </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+    ))
+}
+
+#[tokio::test]
+async fn a_calendar_home_on_another_host_of_the_same_provider_is_followed() {
+    // iCloud style: the typed server names a home on a sibling host.
+    let fake = Fake::default();
+    fake.route(
+        Method::Propfind,
+        "/dav/",
+        "",
+        response(
+            207,
+            &[],
+            &home_on("https://p12-caldav.example.com:443/1234/calendars/"),
+        ),
+    );
+    fake.route(
+        Method::Propfind,
+        "/1234/calendars/",
+        "",
+        response(
+            207,
+            &[],
+            &multistatus(&HOME.replace("/dav/calendars/ann/", "/1234/calendars/")),
+        ),
+    );
+    let client = CaldavClient::new(&fake, credentials());
+    let server = Url::parse("https://caldav.example.com/dav/").expect("url");
+    let (home, calendars) = client.connect(&server).await.expect("connect");
+    assert_eq!(home.host_str(), Some("p12-caldav.example.com"));
+    assert_eq!(calendars.len(), 2);
+    assert_eq!(calendars[0].url.host_str(), Some("p12-caldav.example.com"));
+    assert!(calendars[0].url.path().starts_with("/1234/calendars/"));
+}
+
+#[tokio::test]
+async fn a_home_on_an_unrelated_private_or_insecure_host_is_refused() {
+    let server = Url::parse("https://caldav.example.com/dav/").expect("url");
+    for href in [
+        "https://evil.example.net/calendars/",
+        "https://example.com.evil.net/calendars/",
+        "http://p12.example.com/calendars/",
+        "https://192.168.0.5/calendars/",
+        "https://user:pw@p12.example.com/calendars/",
+    ] {
+        let fake = Fake::default();
+        fake.route(
+            Method::Propfind,
+            "/dav/",
+            "",
+            response(207, &[], &home_on(href)),
+        );
+        fake.route(
+            Method::Propfind,
+            "/calendars/",
+            "",
+            response(207, &[], &multistatus(HOME)),
+        );
+        let client = CaldavClient::new(&fake, credentials());
+        let result = client.connect(&server).await;
+        assert_eq!(result.err(), Some(CalendarError::Server), "{href}");
+        assert_eq!(fake.requests().len(), 1, "{href} was never contacted");
+    }
+}
+
+#[test]
+fn registrable_domains_tell_siblings_from_strangers() {
+    use crate::http::registrable_domain as domain;
+    assert_eq!(
+        domain("p12-caldav.icloud.com").as_deref(),
+        Some("icloud.com")
+    );
+    assert_eq!(domain("caldav.icloud.com").as_deref(), Some("icloud.com"));
+    assert_eq!(
+        domain("cal.example.co.uk").as_deref(),
+        Some("example.co.uk")
+    );
+    assert_eq!(domain("example.co.uk").as_deref(), Some("example.co.uk"));
+    assert_eq!(domain("localhost"), None);
+    assert_eq!(domain("10.0.0.1"), None);
+    assert_eq!(domain("example..com"), None);
+    assert_ne!(domain("evil.example.net"), domain("example.com"));
+}
