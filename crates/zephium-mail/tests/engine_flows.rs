@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use fake_imap::{simple, standard_folders, FakeConnector, PASSWORD, TOKEN};
+use fake_imap::{simple, standard_folders, FakeConnector, Hostile, PASSWORD, TOKEN};
 use futures::future::BoxFuture;
 use tokio::sync::Notify;
 use zephium_mail::auth::{AuthKind, Credential};
@@ -337,14 +337,14 @@ async fn moves_with_the_move_extension_and_deletes_into_trash_then_for_good() {
         .log()
         .iter()
         .any(|l| l == "UID MOVE 1 \"Archive\""));
-    rig.engine.delete(&a, "INBOX", &[2]).await.unwrap();
+    rig.engine.delete(&a, "INBOX", &[2], false).await.unwrap();
     {
         let state = rig.server.state.lock().unwrap();
         assert_eq!(state.folders[4].msgs.len(), 1, "archive");
         assert_eq!(state.folders[3].msgs.len(), 1, "trash");
         assert_eq!(state.folders[0].msgs.len(), 1);
     }
-    rig.engine.delete(&a, "Trash", &[1]).await.unwrap();
+    rig.engine.delete(&a, "Trash", &[1], false).await.unwrap();
     {
         let state = rig.server.state.lock().unwrap();
         assert!(state.folders[3].msgs.is_empty(), "deleted for good");
@@ -732,5 +732,125 @@ async fn rules_mark_flag_and_move_only_new_inbox_mail_of_the_account() {
     assert_eq!(
         rig.engine.apply_rules(&a, "INBOX", &bad, 1, &folders).await,
         Err(MailError::InvalidInput)
+    );
+}
+
+// Delete without a Trash folder ------------------------------------------------
+
+/// The standard folders without the Trash one.
+fn rig_without_trash() -> Rig {
+    let rig = rig();
+    rig.server
+        .state
+        .lock()
+        .unwrap()
+        .folders
+        .retain(|folder| folder.name != "Trash");
+    rig
+}
+
+#[tokio::test]
+async fn deleting_without_a_trash_folder_removes_nothing_until_confirmed() {
+    let rig = rig_without_trash();
+    fill_inbox(&rig, 2);
+    let a = account(false);
+    assert_eq!(
+        rig.engine.delete(&a, "INBOX", &[1], false).await,
+        Err(MailError::NoTrash)
+    );
+    {
+        let state = rig.server.state.lock().unwrap();
+        assert_eq!(state.folders[0].msgs.len(), 2, "nothing was removed");
+        assert!(
+            !state
+                .log
+                .iter()
+                .any(|line| line.contains("STORE") || line.contains("EXPUNGE")),
+            "no flag change and no expunge was sent"
+        );
+    }
+    rig.engine.delete(&a, "INBOX", &[1], true).await.unwrap();
+    let state = rig.server.state.lock().unwrap();
+    assert_eq!(state.folders[0].msgs.len(), 1, "removed after confirmation");
+    assert!(state.log.iter().any(|line| line == "UID EXPUNGE 1"));
+}
+
+#[tokio::test]
+async fn a_trash_folder_with_a_local_name_is_found_without_special_use() {
+    let rig = rig();
+    fill_inbox(&rig, 1);
+    {
+        let mut state = rig.server.state.lock().unwrap();
+        // Same folder, German name, no SPECIAL-USE attribute.
+        let trash = state
+            .folders
+            .iter_mut()
+            .find(|folder| folder.name == "Trash")
+            .unwrap();
+        trash.name = "Papierkorb";
+        trash.wire = "Papierkorb";
+        trash.attrs = r"\HasNoChildren";
+    }
+    let a = account(false);
+    rig.engine.delete(&a, "INBOX", &[1], false).await.unwrap();
+    let state = rig.server.state.lock().unwrap();
+    assert_eq!(state.folders[3].msgs.len(), 1, "moved into Papierkorb");
+}
+
+// A hostile server -------------------------------------------------------------
+
+#[tokio::test]
+async fn a_literal_larger_than_promised_is_cut_off_and_the_connection_dropped() {
+    let rig = rig();
+    rig.server.state.lock().unwrap().folders[0].add(&[], &simple("a@example.com", "x", "tiny"));
+    rig.server.state.lock().unwrap().hostile = Hostile::LyingSize;
+    let a = account(false);
+    assert_eq!(
+        rig.engine.message(&a, "INBOX", 1).await.unwrap_err(),
+        MailError::TooLarge
+    );
+    // The poisoned connection was not reused: the next call connects afresh.
+    rig.server.state.lock().unwrap().hostile = Hostile::None;
+    let before = rig.server.connects.load(Ordering::SeqCst);
+    let body = rig.engine.message(&a, "INBOX", 1).await.unwrap();
+    assert!(body.text.unwrap_or_default().contains("tiny"));
+    assert_eq!(rig.server.connects.load(Ordering::SeqCst), before + 1);
+}
+
+#[tokio::test]
+async fn a_folder_list_that_never_ends_stops_at_its_cap() {
+    let rig = rig();
+    rig.server.state.lock().unwrap().hostile = Hostile::EndlessList;
+    let a = account(false);
+    let started = std::time::Instant::now();
+    assert_eq!(
+        rig.engine.folders(&a).await.unwrap_err(),
+        MailError::Protocol
+    );
+    assert!(started.elapsed() < Duration::from_secs(20));
+}
+
+#[tokio::test]
+async fn one_endless_line_stops_at_the_byte_budget() {
+    let rig = rig();
+    rig.server.state.lock().unwrap().hostile = Hostile::EndlessLine;
+    let a = account(false);
+    let started = std::time::Instant::now();
+    // The client library reports the refused read as a dead or broken
+    // connection; either way the call ends, quickly, with a connection error.
+    let error = rig.engine.folders(&a).await.unwrap_err();
+    assert!(error.is_connection(), "{error:?}");
+    assert!(started.elapsed() < Duration::from_secs(20));
+}
+
+#[tokio::test]
+async fn a_header_fetch_that_never_ends_stops_at_its_cap() {
+    let rig = rig();
+    fill_inbox(&rig, 2);
+    rig.server.state.lock().unwrap().hostile = Hostile::EndlessRows;
+    let a = account(false);
+    assert_eq!(
+        rig.engine.headers(&a, "INBOX", None, 50).await.unwrap_err(),
+        MailError::Protocol
     );
 }

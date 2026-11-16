@@ -110,6 +110,14 @@ export class MailStore {
   open = $state<OpenMessage | null>(null);
   compose = $state<ComposeSession | null>(null);
   notice = $state<MailNotice | null>(null);
+  /**
+   * Messages the person asked to delete in an account that has no Trash
+   * folder. Nothing was removed; they wait for an explicit yes before the
+   * delete is sent again as a permanent one.
+   */
+  permanentDelete = $state.raw<readonly MailRow[] | null>(null);
+  /** A clicked `mailto:` link waiting while an unsent message is open. */
+  pendingLink = $state.raw<MailtoV1 | null>(null);
   /** Rows with an action in flight; they render as pending, unchanged. */
   pending = $state.raw<readonly string[]>([]);
 
@@ -157,6 +165,8 @@ export class MailStore {
     this.stop = null;
     this.lifetime.abort();
     this.lifetime = new AbortController();
+    this.permanentDelete = null;
+    this.pendingLink = null;
     this.compose?.dispose();
     this.compose = null;
     this.rows = [];
@@ -663,11 +673,17 @@ export class MailStore {
     return ok;
   }
 
-  /** Into Trash, or for good when the messages are already in Trash. */
-  async remove(rows: readonly MailRow[]) {
+  /**
+   * Into Trash, or for good when the messages are already in Trash. An
+   * account with no Trash folder removes nothing and answers `no_trash`;
+   * those messages go to {@link permanentDelete} to be confirmed, and only
+   * {@link confirmPermanentDelete} sends `permanent`.
+   */
+  async remove(rows: readonly MailRow[], permanent = false) {
     if (!rows.length) return true;
     this.markPending(rows, true);
     let allOk = true;
+    const unconfirmed: MailRow[] = [];
     for (const group of this.grouped(rows)) {
       const outcome = await callMail(
         () =>
@@ -675,6 +691,7 @@ export class MailStore {
             group.account,
             group.folder,
             group.rows.map((r) => r.message.uid),
+            permanent,
           ),
         WRITE_TIMEOUT,
         this.lifetime.signal,
@@ -682,13 +699,28 @@ export class MailStore {
       if (outcome.ok === "aborted") return false;
       if (!outcome.ok) {
         allOk = false;
-        this.failedAction("delete", outcome.error);
+        if (outcome.error === "no_trash" && !permanent) unconfirmed.push(...group.rows);
+        else this.failedAction("delete", outcome.error);
         continue;
       }
       this.patchRows(group.rows, () => null);
     }
     this.markPending(rows, false);
+    if (unconfirmed.length) this.permanentDelete = unconfirmed;
     return allOk;
+  }
+
+  /** The person said yes: delete the waiting messages for good. */
+  async confirmPermanentDelete() {
+    const rows = this.permanentDelete;
+    if (!rows) return false;
+    this.permanentDelete = null;
+    return this.remove(rows, true);
+  }
+
+  /** The person said no: nothing was removed and nothing will be. */
+  cancelPermanentDelete() {
+    this.permanentDelete = null;
   }
 
   /** An action that needs the server failed; say so, and note a lost connection. */
@@ -794,6 +826,42 @@ export class MailStore {
    * goes below the body as in any new message.
    */
   startComposeFromLink(link: MailtoV1): boolean {
+    if (this.accounts.length === 0) return false;
+    // A link never replaces a message that has text in it: it waits for the
+    // person to choose (save it as a draft, discard it, or keep writing).
+    if (this.compose?.dirty) {
+      this.pendingLink = link;
+      return true;
+    }
+    return this.openLink(link);
+  }
+
+  /**
+   * Answers the waiting link: with `saveDraft` the open message is stored in
+   * Drafts first and the link opens only when that worked; without it the open
+   * message is discarded.
+   */
+  async acceptPendingLink(saveDraft: boolean): Promise<boolean> {
+    const link = this.pendingLink;
+    if (!link) return false;
+    const current = this.compose;
+    if (current?.busy) return false;
+    if (saveDraft && current && !(await current.saveDraft())) {
+      this.notice = { action: "open", error: current.failure ?? "unavailable" };
+      return false;
+    }
+    // Another link may have replaced this one while the draft was saving.
+    if (this.pendingLink !== link) return false;
+    this.pendingLink = null;
+    return this.openLink(link);
+  }
+
+  /** Keeps the open message and forgets the waiting link. */
+  dismissPendingLink() {
+    this.pendingLink = null;
+  }
+
+  private openLink(link: MailtoV1): boolean {
     const accountId =
       this.selection.account !== ALL_INBOXES
         ? this.selection.account

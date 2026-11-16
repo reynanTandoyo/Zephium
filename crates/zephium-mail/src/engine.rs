@@ -76,7 +76,13 @@ macro_rules! with_session {
                 *guard = Some($engine.connect($account).await?);
             }
             let $session = guard.as_mut().ok_or(MailError::Internal)?;
-            match $operation.await {
+            let outcome = $operation.await;
+            // A server that sent more than a command allows leaves the stream
+            // out of step: never reuse that connection, whatever the outcome.
+            if guard.as_ref().is_some_and(ImapSession::is_poisoned) {
+                *guard = None;
+            }
+            match outcome {
                 Ok(value) => break Ok(value),
                 Err(error) if error.is_connection() => {
                     *guard = None;
@@ -270,16 +276,29 @@ impl MailEngine {
             .move_messages(folder, uids, dest))
     }
 
-    /// Deletes messages: into Trash, or for good when already in Trash or
-    /// when the account has none.
-    pub async fn delete(&self, account: &Account, folder: &str, uids: &[u32]) -> Result<()> {
+    /// Deletes messages: into Trash, or for good when already in Trash.
+    ///
+    /// When the account has no recognised Trash folder nothing is removed and
+    /// [`MailError::NoTrash`] comes back, unless `permanent` says the person
+    /// confirmed a permanent delete.
+    pub async fn delete(
+        &self,
+        account: &Account,
+        folder: &str,
+        uids: &[u32],
+        permanent: bool,
+    ) -> Result<()> {
         let trash = self.role_path(account, FolderRole::Trash).await?;
         match trash {
             Some(trash) if trash != folder => {
                 with_session!(self, account, |session| session
                     .move_messages(folder, uids, &trash))
             }
-            _ => with_session!(self, account, |session| session.expunge_uids(folder, uids)),
+            Some(_) => with_session!(self, account, |session| session.expunge_uids(folder, uids)),
+            None if permanent => {
+                with_session!(self, account, |session| session.expunge_uids(folder, uids))
+            }
+            None => Err(MailError::NoTrash),
         }
     }
 

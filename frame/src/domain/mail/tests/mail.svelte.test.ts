@@ -182,7 +182,7 @@ test("move and delete drop rows only after success, one command per folder", asy
   expect(store.rows.map((r) => r.account)).toEqual(["a2"]);
   host.del.mockReturnValueOnce(ok(null));
   await store.remove(store.rows);
-  expect(host.del).toHaveBeenCalledWith("a2", "INBOX", [7]);
+  expect(host.del).toHaveBeenCalledWith("a2", "INBOX", [7], false);
   expect(store.rows).toEqual([]);
   store.dispose();
 });
@@ -516,8 +516,117 @@ test("a mailto link starts a message from the selected account with only its own
     bcc: "",
     subject: "Hello",
   });
+  store.closeCompose();
   expect(store.startComposeFromLink(link)).toBe(true);
   expect(store.compose?.text).toBe("Line one\n");
+  store.dispose();
+});
+
+test("a mailto link never replaces a message that has text; the person chooses", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  store.startCompose("new");
+  const mine = store.compose!;
+  mine.text = "Dear Ann, I am still writing this";
+  mine.edited();
+  expect(store.startComposeFromLink(link)).toBe(true);
+  // Nothing was replaced; the link waits.
+  expect(store.compose).toBe(mine);
+  expect(store.compose?.text).toBe("Dear Ann, I am still writing this");
+  expect(store.pendingLink).toEqual(link);
+  // Keep writing: the link is dropped, the message stays.
+  store.dismissPendingLink();
+  expect(store.pendingLink).toBeNull();
+  expect(store.compose).toBe(mine);
+  store.dispose();
+});
+
+test("a waiting link opens after the open message was saved as a draft, and only if that worked", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  store.startCompose("new");
+  const mine = store.compose!;
+  mine.to = "ann@example.org";
+  mine.text = "Unsent words";
+  mine.edited();
+  store.startComposeFromLink(link);
+  const saveDraft = vi.spyOn(mine, "saveDraft");
+  saveDraft.mockImplementationOnce(async () => {
+    mine.failure = "offline";
+    return false;
+  });
+  expect(await store.acceptPendingLink(true)).toBe(false);
+  // The draft was not stored, so the message is still there and the link still waits.
+  expect(store.compose).toBe(mine);
+  expect(store.pendingLink).toEqual(link);
+  expect(store.notice).toEqual({ action: "open", error: "offline" });
+  saveDraft.mockImplementationOnce(async () => true);
+  expect(await store.acceptPendingLink(true)).toBe(true);
+  expect(store.pendingLink).toBeNull();
+  expect(store.compose).not.toBe(mine);
+  expect(store.compose?.subject).toBe("Hello");
+  store.dispose();
+});
+
+test("discarding opens a waiting link at once, and an untouched message lets it through", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  store.startCompose("new");
+  store.compose!.text = "something";
+  store.compose!.edited();
+  store.startComposeFromLink(link);
+  expect(await store.acceptPendingLink(false)).toBe(true);
+  expect(store.compose?.subject).toBe("Hello");
+  expect(store.pendingLink).toBeNull();
+  // An untouched message has nothing to lose: the link opens straight away.
+  store.startCompose("new");
+  expect(store.startComposeFromLink(link)).toBe(true);
+  expect(store.pendingLink).toBeNull();
+  store.dispose();
+});
+
+test("deleting where there is no Trash removes nothing until the person confirms", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  const rows = store.rows.filter((r) => r.account === "a1");
+  host.del.mockReturnValueOnce(err("no_trash"));
+  expect(await store.remove(rows)).toBe(false);
+  // No failure notice and no row removed: a question is waiting instead.
+  expect(store.notice).toBeNull();
+  expect(store.rows.filter((r) => r.account === "a1")).toHaveLength(2);
+  expect(store.permanentDelete?.map((r) => r.message.uid)).toEqual([2, 1]);
+  expect(host.del).toHaveBeenLastCalledWith("a1", "INBOX", [2, 1], false);
+  expect(store.pending).toEqual([]);
+  // No: the question goes away and nothing else is sent.
+  store.cancelPermanentDelete();
+  expect(store.permanentDelete).toBeNull();
+  expect(host.del).toHaveBeenCalledTimes(1);
+  // Yes: only now is the permanent flag sent.
+  host.del.mockReturnValueOnce(err("no_trash"));
+  await store.remove(rows);
+  host.del.mockReturnValueOnce(ok(null));
+  expect(await store.confirmPermanentDelete()).toBe(true);
+  expect(host.del).toHaveBeenLastCalledWith("a1", "INBOX", [2, 1], true);
+  expect(store.permanentDelete).toBeNull();
+  expect(store.rows.filter((r) => r.account === "a1")).toEqual([]);
+  store.dispose();
+});
+
+test("a refusal of the confirmed delete is a plain failure and never asks again", async () => {
+  twoAccounts();
+  const store = new MailStore();
+  await store.start();
+  const rows = store.rows.filter((r) => r.account === "a1");
+  host.del.mockReturnValueOnce(err("no_trash"));
+  await store.remove(rows);
+  host.del.mockReturnValueOnce(err("no_trash"));
+  expect(await store.confirmPermanentDelete()).toBe(false);
+  expect(store.permanentDelete).toBeNull();
+  expect(store.notice).toEqual({ action: "delete", error: "no_trash" });
   store.dispose();
 });
 

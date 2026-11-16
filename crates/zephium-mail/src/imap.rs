@@ -4,6 +4,7 @@
 //! every failure maps to [`MailError`] without server text.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use async_imap::imap_proto::types::NameAttribute;
 use async_imap::types::Flag;
@@ -15,9 +16,12 @@ use tokio::time::timeout;
 use crate::auth::{Credential, XOauth2};
 use crate::error::{MailError, Result};
 use crate::limits::{
-    COMMAND_TIMEOUT, CONNECT_TIMEOUT, IDLE_RENEW, MAX_FOLDERS, MAX_FOLDER_NAME_BYTES,
-    MAX_MESSAGE_BYTES, MAX_PAGE, MAX_QUERY_BYTES, MAX_SEARCH_HITS,
+    COMMAND_TIMEOUT, CONNECT_TIMEOUT, FETCH_DEADLINE, IDLE_RENEW, LIST_DEADLINE,
+    MAX_FETCH_OVERHEAD_BYTES, MAX_FOLDERS, MAX_FOLDER_NAME_BYTES, MAX_HEADERS_REPLY_BYTES,
+    MAX_LIST_ANSWERS, MAX_MESSAGE_BYTES, MAX_PAGE, MAX_QUERY_BYTES, MAX_REPLY_BYTES,
+    MAX_SEARCH_HITS, MAX_SEARCH_REPLY_BYTES,
 };
+use crate::metered::{Metered, ReadBudget};
 use crate::mime;
 use crate::model::{
     Endpoint, FlagKind, Flags, Folder, FolderRole, HeaderPage, MessageBody, MessageHeader,
@@ -47,6 +51,8 @@ pub struct ImapSession {
     session: Session<BoxStream>,
     caps: Capabilities,
     selected: Option<(String, bool)>,
+    /// What this connection's server may still send for the current command.
+    budget: Arc<ReadBudget>,
 }
 
 impl std::fmt::Debug for ImapSession {
@@ -122,27 +128,206 @@ pub fn search_command(query: &str) -> Result<String> {
     ))
 }
 
+// Folder names servers without SPECIAL-USE use for each role, lower case, in
+// the 13 languages of the app (en, de, es, fr, it, ja, ko, pt-BR, ru, tr, uk,
+// zh-CN, zh-TW). The last path segment is compared.
+const SENT_NAMES: &[&str] = &[
+    "sent",
+    "sent items",
+    "sent mail",
+    "sent messages",
+    "gesendet",
+    "gesendete elemente",
+    "gesendete objekte",
+    "enviados",
+    "enviado",
+    "elementos enviados",
+    "mensajes enviados",
+    "envoyés",
+    "envoyes",
+    "éléments envoyés",
+    "messages envoyés",
+    "posta inviata",
+    "inviati",
+    "inviata",
+    "elementi inviati",
+    "送信済み",
+    "送信済みアイテム",
+    "送信済みメッセージ",
+    "보낸 편지함",
+    "보낸편지함",
+    "보낸 메일함",
+    "itens enviados",
+    "mensagens enviadas",
+    "enviadas",
+    "отправленные",
+    "отправленные элементы",
+    "gönderilmiş öğeler",
+    "gönderilen öğeler",
+    "gönderilenler",
+    "gönderilmiş",
+    "надіслані",
+    "відправлені",
+    "已发送",
+    "已发送邮件",
+    "寄件備份",
+    "已傳送",
+    "已傳送郵件",
+];
+const DRAFT_NAMES: &[&str] = &[
+    "drafts",
+    "draft",
+    "entwürfe",
+    "entwurf",
+    "borradores",
+    "borrador",
+    "brouillons",
+    "brouillon",
+    "bozze",
+    "bozza",
+    "下書き",
+    "임시 보관함",
+    "임시보관함",
+    "임시 저장",
+    "rascunhos",
+    "rascunho",
+    "черновики",
+    "taslaklar",
+    "taslak",
+    "чернетки",
+    "草稿",
+    "草稿箱",
+    "草稿匣",
+];
+const TRASH_NAMES: &[&str] = &[
+    "trash",
+    "deleted items",
+    "deleted messages",
+    "bin",
+    "papierkorb",
+    "gelöschte elemente",
+    "gelöschte objekte",
+    "gelöscht",
+    "papelera",
+    "elementos eliminados",
+    "eliminados",
+    "mensajes eliminados",
+    "corbeille",
+    "éléments supprimés",
+    "supprimés",
+    "messages supprimés",
+    "cestino",
+    "posta eliminata",
+    "elementi eliminati",
+    "ごみ箱",
+    "削除済みアイテム",
+    "削除済み",
+    "휴지통",
+    "지운 편지함",
+    "삭제된 항목",
+    "lixeira",
+    "itens excluídos",
+    "itens eliminados",
+    "excluídos",
+    "lixo",
+    "корзина",
+    "удалённые",
+    "удаленные",
+    "удалённые элементы",
+    "çöp kutusu",
+    "silinmiş öğeler",
+    "silinen öğeler",
+    "çöp",
+    "кошик",
+    "видалені",
+    "已删除",
+    "已删除邮件",
+    "已删除项目",
+    "废纸篓",
+    "回收站",
+    "垃圾桶",
+    "已刪除",
+    "已刪除郵件",
+    "刪除的郵件",
+    "資源回收筒",
+];
+const ARCHIVE_NAMES: &[&str] = &[
+    "archive",
+    "archives",
+    "archiv",
+    "archivo",
+    "archivados",
+    "archivés",
+    "archivio",
+    "アーカイブ",
+    "보관함",
+    "보관 메일함",
+    "arquivo",
+    "arquivados",
+    "arquivo morto",
+    "архив",
+    "arşiv",
+    "архів",
+    "归档",
+    "存档",
+    "封存",
+    "封存郵件",
+    "歸檔",
+];
+const JUNK_NAMES: &[&str] = &[
+    "junk",
+    "spam",
+    "junk e-mail",
+    "junk-e-mail",
+    "bulk mail",
+    "correo no deseado",
+    "no deseado",
+    "courrier indésirable",
+    "indésirables",
+    "pourriel",
+    "posta indesiderata",
+    "indesiderata",
+    "迷惑メール",
+    "スパム",
+    "스팸",
+    "스팸 메일함",
+    "정크 메일",
+    "lixo eletrônico",
+    "lixo eletronico",
+    "нежелательная почта",
+    "спам",
+    "gereksiz",
+    "gereksiz e-posta",
+    "önemsiz",
+    "небажана пошта",
+    "垃圾邮件",
+    "垃圾箱",
+    "垃圾郵件",
+    "垃圾信件",
+];
+
 fn role_from_name(path: &str) -> FolderRole {
     let last = path
-        .rsplit(['/', '.'])
+        .rsplit(['/', '.', '\\'])
         .next()
         .unwrap_or(path)
+        .trim()
         .to_lowercase();
-    match last.as_str() {
-        "inbox" => FolderRole::Inbox,
-        "sent" | "sent items" | "sent mail" | "sent messages" | "gesendet"
-        | "gesendete elemente" | "gesendete objekte" => FolderRole::Sent,
-        "drafts" | "draft" | "entwürfe" | "entwurf" => FolderRole::Drafts,
-        "trash"
-        | "deleted items"
-        | "deleted messages"
-        | "bin"
-        | "papierkorb"
-        | "gelöschte elemente"
-        | "gelöschte objekte" => FolderRole::Trash,
-        "archive" | "archives" | "archiv" => FolderRole::Archive,
-        "junk" | "spam" | "junk e-mail" | "junk-e-mail" | "bulk mail" => FolderRole::Junk,
-        _ => FolderRole::Other,
+    let last = last.as_str();
+    if last == "inbox" {
+        FolderRole::Inbox
+    } else if SENT_NAMES.contains(&last) {
+        FolderRole::Sent
+    } else if DRAFT_NAMES.contains(&last) {
+        FolderRole::Drafts
+    } else if TRASH_NAMES.contains(&last) {
+        FolderRole::Trash
+    } else if ARCHIVE_NAMES.contains(&last) {
+        FolderRole::Archive
+    } else if JUNK_NAMES.contains(&last) {
+        FolderRole::Junk
+    } else {
+        FolderRole::Other
     }
 }
 
@@ -182,6 +367,9 @@ impl ImapSession {
         credential: &Credential,
     ) -> Result<Self> {
         let stream = timeout(CONNECT_TIMEOUT * 2, connector.connect(endpoint)).await??;
+        // Every byte the server sends is counted; see `metered`.
+        let budget = ReadBudget::new(MAX_REPLY_BYTES);
+        let stream: BoxStream = Box::new(Metered::new(stream, budget.clone()));
         let mut client = Client::new(stream);
         if endpoint.security == Security::Tls {
             // STARTTLS connectors consumed the greeting before upgrading.
@@ -210,7 +398,9 @@ impl ImapSession {
             session,
             caps: Capabilities::default(),
             selected: None,
+            budget,
         };
+        session.arm(MAX_REPLY_BYTES);
         let caps = bounded(session.session.capabilities()).await?;
         session.caps = Capabilities {
             idle: caps.has_str("IDLE"),
@@ -227,12 +417,25 @@ impl ImapSession {
         self.caps
     }
 
+    /// Starts a command: the server may send `limit` more bytes for it.
+    fn arm(&self, limit: u64) {
+        self.budget.arm(limit);
+    }
+
+    /// True once the server sent more than a command allows. The stream is
+    /// then out of step with the client, so the connection must be dropped.
+    #[must_use]
+    pub fn is_poisoned(&self) -> bool {
+        self.budget.tripped()
+    }
+
     fn drain_unsolicited(&mut self) {
         while self.session.unsolicited_responses.try_recv().is_ok() {}
     }
 
     /// Keeps the connection alive and surfaces a dropped one.
     pub async fn noop(&mut self) -> Result<()> {
+        self.arm(MAX_REPLY_BYTES);
         let result = bounded(self.session.noop()).await;
         self.drain_unsolicited();
         result
@@ -245,6 +448,7 @@ impl ImapSession {
 
     async fn select(&mut self, path: &str, write: bool) -> Result<async_imap::types::Mailbox> {
         let wire = wire_name(path)?;
+        self.arm(MAX_REPLY_BYTES);
         let result = if write {
             bounded(self.session.select(&wire)).await
         } else {
@@ -278,15 +482,23 @@ impl ImapSession {
     pub async fn list_folders(&mut self, with_status: bool) -> Result<Vec<Folder>> {
         let mut folders: Vec<Folder> = Vec::new();
         let mut seen = HashSet::new();
-        {
+        self.arm(MAX_REPLY_BYTES);
+        let listing = async {
             let names = timeout(COMMAND_TIMEOUT, self.session.list(Some(""), Some("*")))
                 .await?
                 .map_err(MailError::from)?;
             futures::pin_mut!(names);
+            let mut answers = 0usize;
             while let Some(name) = timeout(COMMAND_TIMEOUT, names.try_next())
                 .await?
                 .map_err(MailError::from)?
             {
+                // Past the cap the rest is read and dropped, but only so far:
+                // a list that never ends is a broken or hostile server.
+                answers += 1;
+                if answers > MAX_LIST_ANSWERS {
+                    return Err(MailError::Protocol);
+                }
                 if folders.len() >= MAX_FOLDERS {
                     continue;
                 }
@@ -323,7 +535,9 @@ impl ImapSession {
                     selectable,
                 });
             }
-        }
+            Ok::<(), MailError>(())
+        };
+        timeout(LIST_DEADLINE, listing).await??;
         self.drain_unsolicited();
         // A second folder claiming a unique role loses it, so each role has one owner.
         let mut claimed = HashSet::new();
@@ -340,6 +554,7 @@ impl ImapSession {
             };
             for folder in folders.iter_mut().filter(|folder| folder.selectable) {
                 let wire = wire_name(&folder.path)?;
+                self.arm(MAX_REPLY_BYTES);
                 if let Ok(status) = bounded(self.session.status(&wire, items)).await {
                     folder.unread = status.unseen.unwrap_or(0);
                     folder.total = status.exists;
@@ -362,15 +577,23 @@ impl ImapSession {
         let query =
             "(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.1024>)";
         let mut rows: Vec<MessageHeader> = Vec::new();
-        {
+        self.arm(MAX_HEADERS_REPLY_BYTES);
+        let fetching = async {
             let stream = timeout(COMMAND_TIMEOUT, self.session.uid_fetch(set, query))
                 .await?
                 .map_err(MailError::from)?;
             futures::pin_mut!(stream);
+            let mut answers = 0usize;
             while let Some(fetch) = timeout(COMMAND_TIMEOUT, stream.try_next())
                 .await?
                 .map_err(MailError::from)?
             {
+                // The range names at most one page; far more rows than that
+                // (or an unbounded number of them) means a hostile server.
+                answers += 1;
+                if answers > MAX_PAGE as usize * 4 {
+                    return Err(MailError::Protocol);
+                }
                 let Some(uid) = fetch.uid else { continue };
                 if uid < low || uid > high || rows.len() >= MAX_PAGE as usize * 2 {
                     continue;
@@ -389,7 +612,9 @@ impl ImapSession {
                 }
                 rows.push(parsed);
             }
-        }
+            Ok::<(), MailError>(())
+        };
+        timeout(LIST_DEADLINE, fetching).await??;
         self.drain_unsolicited();
         rows.sort_by_key(|row| std::cmp::Reverse(row.uid));
         rows.dedup_by_key(|row| row.uid);
@@ -431,13 +656,15 @@ impl ImapSession {
     }
 
     /// The raw bytes of one message. Refuses before downloading when the
-    /// server reports a size over [`MAX_MESSAGE_BYTES`].
+    /// server reports a size over [`MAX_MESSAGE_BYTES`], and does not trust
+    /// that report: the download itself is cut off past the same bound.
     pub async fn fetch_raw(&mut self, folder: &str, uid: u32) -> Result<Vec<u8>> {
         if uid == 0 {
             return Err(MailError::InvalidInput);
         }
         self.select(folder, false).await?;
         let mut size = None;
+        self.arm(MAX_REPLY_BYTES);
         {
             let stream = timeout(
                 COMMAND_TIMEOUT,
@@ -460,7 +687,8 @@ impl ImapSession {
             return Err(MailError::TooLarge);
         }
         let mut raw = None;
-        {
+        self.arm(MAX_MESSAGE_BYTES as u64 + MAX_FETCH_OVERHEAD_BYTES);
+        let downloading = async {
             let stream = timeout(
                 COMMAND_TIMEOUT * 4,
                 self.session.uid_fetch(uid.to_string(), "(UID BODY.PEEK[])"),
@@ -476,7 +704,15 @@ impl ImapSession {
                     raw = fetch.body().map(<[u8]>::to_vec);
                 }
             }
+            Ok::<(), MailError>(())
+        };
+        let downloaded = timeout(FETCH_DEADLINE, downloading).await;
+        // A server that sent more than it promised: too large, not a
+        // protocol error. The connection is dropped through `is_poisoned`.
+        if self.is_poisoned() {
+            return Err(MailError::TooLarge);
         }
+        downloaded??;
         self.drain_unsolicited();
         let raw = raw.ok_or(MailError::NotFound)?;
         if raw.len() > MAX_MESSAGE_BYTES {
@@ -516,6 +752,7 @@ impl ImapSession {
     ) -> Result<()> {
         let set = uid_set(uids)?;
         self.select(folder, true).await?;
+        self.arm(MAX_REPLY_BYTES);
         let sign = if on { '+' } else { '-' };
         let query = format!("{sign}FLAGS.SILENT ({})", flag.wire());
         let stream = timeout(COMMAND_TIMEOUT, self.session.uid_store(&set, &query))
@@ -531,6 +768,7 @@ impl ImapSession {
         let set = uid_set(uids)?;
         let dest = wire_name(dest)?;
         self.select(folder, true).await?;
+        self.arm(MAX_REPLY_BYTES);
         bounded(self.session.uid_copy(&set, &dest)).await?;
         self.drain_unsolicited();
         Ok(())
@@ -546,6 +784,7 @@ impl ImapSession {
         if self.caps.move_ext {
             let dest = wire_name(dest)?;
             self.select(folder, true).await?;
+            self.arm(MAX_REPLY_BYTES);
             bounded(self.session.uid_mv(&set, &dest)).await?;
             self.drain_unsolicited();
             return Ok(());
@@ -562,6 +801,7 @@ impl ImapSession {
         let set = uid_set(uids)?;
         self.set_flag(folder, uids, FlagKind::Deleted, true).await?;
         if self.caps.uidplus {
+            self.arm(MAX_REPLY_BYTES);
             let stream = timeout(COMMAND_TIMEOUT, self.session.uid_expunge(&set))
                 .await?
                 .map_err(MailError::from)?;
@@ -575,6 +815,7 @@ impl ImapSession {
     pub async fn search(&mut self, folder: &str, query: &str) -> Result<Vec<MessageHeader>> {
         let command = search_command(query)?;
         self.select(folder, false).await?;
+        self.arm(MAX_SEARCH_REPLY_BYTES);
         let found = bounded(self.session.uid_search(&command)).await?;
         self.drain_unsolicited();
         let mut uids: Vec<u32> = found.into_iter().filter(|uid| *uid != 0).collect();
@@ -609,6 +850,7 @@ impl ImapSession {
         } else {
             return Err(MailError::InvalidInput);
         };
+        self.arm(MAX_REPLY_BYTES);
         bounded(self.session.append(&wire, flags.as_deref(), None, raw)).await?;
         self.drain_unsolicited();
         Ok(())
@@ -621,6 +863,7 @@ impl ImapSession {
             return Err(MailError::Unsupported);
         }
         self.select(folder, false).await?;
+        self.arm(MAX_REPLY_BYTES);
         let mut idle = self.session.idle();
         timeout(COMMAND_TIMEOUT, idle.init())
             .await?
@@ -688,6 +931,36 @@ mod tests {
         assert_eq!(role_from_name("Entwürfe"), FolderRole::Drafts);
         assert_eq!(role_from_name("Papierkorb"), FolderRole::Trash);
         assert_eq!(role_from_name("Projects/Alpha"), FolderRole::Other);
+        // The app's other locales, with a namespace prefix or a different delimiter.
+        for (name, role) in [
+            ("Papelera", FolderRole::Trash),
+            ("INBOX.Corbeille", FolderRole::Trash),
+            ("Cestino", FolderRole::Trash),
+            ("ごみ箱", FolderRole::Trash),
+            ("휴지통", FolderRole::Trash),
+            ("Lixeira", FolderRole::Trash),
+            ("Корзина", FolderRole::Trash),
+            ("Çöp Kutusu", FolderRole::Trash),
+            ("Кошик", FolderRole::Trash),
+            ("已删除邮件", FolderRole::Trash),
+            ("垃圾桶", FolderRole::Trash),
+            ("Éléments envoyés", FolderRole::Sent),
+            ("Posta inviata", FolderRole::Sent),
+            ("已发送", FolderRole::Sent),
+            ("寄件備份", FolderRole::Sent),
+            ("Borradores", FolderRole::Drafts),
+            ("Rascunhos", FolderRole::Drafts),
+            ("Черновики", FolderRole::Drafts),
+            ("草稿", FolderRole::Drafts),
+            ("Archivo", FolderRole::Archive),
+            ("Архив", FolderRole::Archive),
+            ("封存", FolderRole::Archive),
+            ("Courrier indésirable", FolderRole::Junk),
+            ("Спам", FolderRole::Junk),
+            ("垃圾邮件", FolderRole::Junk),
+        ] {
+            assert_eq!(role_from_name(name), role, "{name}");
+        }
         assert_eq!(
             role_from_attributes(&[NameAttribute::Junk]),
             Some(FolderRole::Junk)

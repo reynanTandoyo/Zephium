@@ -54,8 +54,24 @@ impl FolderData {
     }
 }
 
+/// How the fake misbehaves on purpose.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Hostile {
+    #[default]
+    None,
+    /// `LIST` never ends: an endless run of folder lines.
+    EndlessList,
+    /// `LIST` sends one line that never ends.
+    EndlessLine,
+    /// `UID FETCH` of headers never ends: an endless run of rows.
+    EndlessRows,
+    /// `RFC822.SIZE` says 100 bytes, then `BODY[]` is a literal of 64 MiB.
+    LyingSize,
+}
+
 #[derive(Default)]
 pub struct State {
+    pub hostile: Hostile,
     pub folders: Vec<FolderData>,
     pub log: Vec<String>,
     /// A command verb the server never answers.
@@ -126,6 +142,10 @@ impl Connector for FakeConnector {
             Ok(Box::new(client) as BoxStream)
         })
     }
+}
+
+fn hostile_now(state: &Mutex<State>) -> Hostile {
+    state.lock().unwrap().hostile
 }
 
 fn uids_of(set: &str) -> Vec<u32> {
@@ -247,6 +267,24 @@ async fn serve(
                 let _ = w.write_all(&out).await;
                 return;
             }
+            "LIST" if hostile_now(&state) == Hostile::EndlessList => {
+                let mut n = 0u64;
+                loop {
+                    let line = format!("* LIST (\\HasNoChildren) \"/\" \"F{n}\"\r\n");
+                    if w.write_all(line.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    n += 1;
+                }
+            }
+            "LIST" if hostile_now(&state) == Hostile::EndlessLine => {
+                if w.write_all(b"* LIST (").await.is_err() {
+                    return;
+                }
+                let chunk = [b'x'; 8192];
+                while w.write_all(&chunk).await.is_ok() {}
+                return;
+            }
             "LIST" => {
                 let s = state.lock().unwrap();
                 for f in &s.folders {
@@ -297,6 +335,38 @@ async fn serve(
                 } else {
                     out.extend_from_slice(format!("{tag} NO no such mailbox\r\n").as_bytes());
                 }
+            }
+            "UID"
+                if rest.to_ascii_uppercase().contains("FETCH") && {
+                    let hostile = hostile_now(&state);
+                    (hostile == Hostile::EndlessRows && rest.contains("BODY.PEEK[HEADER]"))
+                        || (hostile == Hostile::LyingSize && rest.contains("BODY.PEEK[]"))
+                } =>
+            {
+                if hostile_now(&state) == Hostile::EndlessRows {
+                    let mut n = 0u64;
+                    loop {
+                        n += 1;
+                        let row = format!("* {n} FETCH (UID {n} FLAGS (\\Seen))\r\n");
+                        if w.write_all(row.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+                // LyingSize: a literal of 64 MiB for a message "of 100 bytes".
+                let total = 64usize << 20;
+                let head = format!("* 1 FETCH (UID 1 BODY[] {{{total}}}\r\n");
+                if w.write_all(head.as_bytes()).await.is_err() {
+                    return;
+                }
+                let chunk = [b'a'; 65536];
+                for _ in 0..(total / chunk.len()) {
+                    if w.write_all(&chunk).await.is_err() {
+                        return;
+                    }
+                }
+                let _ = w.write_all(b")\r\n").await;
+                continue;
             }
             "UID" => {
                 let mut parts = rest.splitn(4, ' ');

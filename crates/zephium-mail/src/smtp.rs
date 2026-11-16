@@ -235,13 +235,24 @@ fn transport(
     .build())
 }
 
+/// What a permanent (5xx) SMTP reply means, by its code alone: the text is
+/// never read. Only the authentication codes read as a login failure.
+fn permanent_reply(code: Option<u16>) -> MailError {
+    match code {
+        // 530 authentication required, 534 mechanism too weak, 535 bad
+        // credentials, 538 encryption required for the mechanism.
+        Some(530 | 534 | 535 | 538) => MailError::AuthFailed,
+        // 550 mailbox unavailable, 551 user not local, 553 name not allowed.
+        Some(550 | 551 | 553) => MailError::AddressRejected,
+        // 552 exceeded storage allocation or message size.
+        Some(552) => MailError::TooLarge,
+        _ => MailError::ServerRejected,
+    }
+}
+
 fn map_smtp(error: &lettre::transport::smtp::Error) -> MailError {
     if error.is_permanent() {
-        // 535 and friends arrive as permanent failures during AUTH.
-        if error.is_response() {
-            return MailError::AuthFailed;
-        }
-        return MailError::ServerRejected;
+        return permanent_reply(error.status().map(u16::from));
     }
     if error.is_timeout() {
         MailError::Timeout
@@ -303,6 +314,28 @@ impl SmtpSender for LettreSender {
 mod tests {
     use super::*;
     use crate::model::{OutgoingAttachment, Security};
+
+    #[test]
+    fn a_permanent_reply_is_an_auth_failure_only_for_the_auth_codes() {
+        for code in [530, 534, 535, 538] {
+            assert_eq!(permanent_reply(Some(code)), MailError::AuthFailed, "{code}");
+        }
+        for code in [550, 551, 553] {
+            assert_eq!(
+                permanent_reply(Some(code)),
+                MailError::AddressRejected,
+                "{code}"
+            );
+        }
+        assert_eq!(permanent_reply(Some(552)), MailError::TooLarge);
+        for other in [Some(554), Some(500), Some(501), Some(503), Some(521), None] {
+            assert_eq!(
+                permanent_reply(other),
+                MailError::ServerRejected,
+                "{other:?}"
+            );
+        }
+    }
 
     fn account() -> Account {
         let endpoint = |port| Endpoint {

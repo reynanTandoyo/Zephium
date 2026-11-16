@@ -228,8 +228,12 @@ export const commands = {
 	mailSetFlags: (account: string, folder: string, uids: number[], flag: MailFlagV1, on: boolean) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_set_flags", { account, folder, uids, flag, on })),
 	/**  Moves messages to another folder. */
 	mailMove: (account: string, folder: string, uids: number[], destination: string) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_move", { account, folder, uids, destination })),
-	/**  Deletes messages: into Trash, or for good from Trash. */
-	mailDelete: (account: string, folder: string, uids: number[]) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_delete", { account, folder, uids })),
+	/**
+	 *  Deletes messages: into Trash, or for good from Trash. An account with no
+	 *  Trash folder answers `no_trash` and removes nothing, unless `permanent` is
+	 *  true, which the frame sets only after the person confirmed.
+	 */
+	mailDelete: (account: string, folder: string, uids: number[], permanent: boolean) => typedError<null, MailErrorV1>(__TAURI_INVOKE("mail_delete", { account, folder, uids, permanent })),
 	/**  Sends a message, then files a copy in Sent when the account asks for it. */
 	mailSend: (account: string, draft: MailDraftV1) => typedError<MailSendOutcomeV1, MailErrorV1>(__TAURI_INVOKE("mail_send", { account, draft })),
 	/**  Stores a draft in the Drafts folder. */
@@ -2223,6 +2227,10 @@ export type MailEndpointV1 = {
 
 /**  Why a mail command failed. A closed set: no server text. */
 export type MailErrorV1 = "invalid_input" | "not_found" | "offline" | "timeout" | "tls" | "auth_failed" | "server_rejected" | "protocol" | "too_large" | "credentials" | "unsupported" | "busy" | "internal" |
+/**  The outgoing server refused a recipient or the sender address. */
+"address_rejected" |
+/**  No Trash folder: a delete needs a confirmed `permanent` flag. */
+"no_trash" |
 /**  Mail is switched off in Settings. */
 "disabled";
 

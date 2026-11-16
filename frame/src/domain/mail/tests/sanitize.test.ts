@@ -8,6 +8,7 @@ import {
   sanitizeMailHtml,
   sanitizeStyle,
 } from "../sanitize";
+import parity from "./image-url-parity.json";
 
 const clean = (html: string, options = {}) => sanitizeMailHtml(html, options);
 
@@ -223,6 +224,36 @@ test("link targets are validated", () => {
   expect(safeLinkTarget(`https://example.com/${"a".repeat(3000)}`)).toBeNull();
   expect(safeLinkTarget("  https://example.com/ ")).toBe("https://example.com/");
 });
+
+test("a link target is returned in the cleaned form that was checked", () => {
+  expect(safeLinkTarget("https://exa​mple.com/⁠a﻿")).toBe("https://example.com/⁠a");
+  expect(safeLinkTarget("htt​ps://example.com/")).toBe("https://example.com/");
+  expect(safeLinkTarget("https://example.com/\u0085x")).toBe("https://example.com/x");
+  expect(safeLinkTarget("mailto:a@example.com?subject=a b")).toBe(
+    "mailto:a@example.com?subject=a b",
+  );
+  expect(safeLinkTarget("java​script:alert(1)")).toBeNull();
+});
+
+test("remote image addresses are listed once and capped at what the backend accepts", () => {
+  const many = Array.from({ length: 40 }, (_, n) => `<img src="https://a.example.com/${n}.png">`);
+  const out = clean(many.join("") + many.join(""));
+  expect(out.remoteUrls).toHaveLength(24);
+  expect(out.remoteUrls[0]).toBe("https://a.example.com/0.png");
+  expect(new Set(out.remoteUrls).size).toBe(24);
+  // The rest still count and stay blocked placeholders.
+  expect(out.remoteImages).toBe(80);
+  expect(out.html.match(/data-zephium-blocked/gu)).toHaveLength(80);
+});
+
+type ParityCase = { name: string; html: string; https: string[] };
+
+test.each(parity as ParityCase[])(
+  "the https image addresses match the backend scanner: $name",
+  ({ html, https }) => {
+    expect(clean(html).remoteUrls).toEqual(https);
+  },
+);
 
 test("the frame document carries a CSP that allows no network or script", () => {
   const document = mailFrameDocument("<p>x</p>");
