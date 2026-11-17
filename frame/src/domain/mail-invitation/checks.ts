@@ -1,4 +1,4 @@
-import type { CalendarInvitationV1, MailAddressV1, Response } from "$shared/ipc/bindings";
+import type { CalendarInvitationV1, MailAddressV1 } from "$shared/ipc/bindings";
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -59,9 +59,6 @@ const CONTROL = /[\u0000-\u001f\u007f]+/gu;
 /** Subject and text lines of a reply stay one short line each. */
 export const oneLine = (text: string, max: number) =>
   text.replace(CONTROL, " ").trim().slice(0, max);
-
-export const responseStatus = (response: Response) =>
-  response === "accept" ? "accepted" : response === "decline" ? "declined" : "tentative";
 
 const parts = (value: string) =>
   /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(Z)?)?$/u.exec(value);
