@@ -27,15 +27,17 @@ Rule precedence, highest first:
 
 ## 2. Task list: `TODO.md`
 
-- Follow the **editing protocol in TODO.md exactly**. Every edit needs the
-  `.todo.lock` directory lock. Re-read the file after acquiring the lock,
-  release the lock right after saving, and never run long commands while you
-  hold it.
+- `TODO.md` is managed by the `todo` command (format and rules block at the
+  top of the file). **Never edit it by hand**; use `todo summary`, `todo next`,
+  `todo claim`, `todo note`, `todo done`, `todo add` with `--agent <name>`.
+  `todo` locks the file, checks it and keeps snapshots.
+- In a git worktree `todo` resolves to the main checkout's `TODO.md`. To use
+  the copy of your own branch, pass `--file TODO.md` or set `TODO_FILE`.
 - Claim a task before working on it, and never work on a task owned by
   someone else.
-- When you finish, record what changed and how it was verified. Add new tasks
-  for follow-ups you find but do not fix.
-- Never commit `.todo.lock/`.
+- When you finish, record what changed and how it was verified
+  (`todo done <id> --note "..." --commit HEAD`). Add new tasks for follow-ups
+  you find but do not fix.
 
 ## 3. Running several agents at once
 
@@ -45,7 +47,7 @@ Rule precedence, highest first:
   branch. Never edit a file in another agent's worktree.
 - Shared files (`TODO.md`, root `package.json`, `Cargo.toml`, `Cargo.lock`,
   `pnpm-lock.yaml`, `.gitignore`) are edited by one agent at a time, as small
-  edits. `TODO.md` always uses its lock.
+  edits. `TODO.md` is changed only through `todo`.
 - Do not run `pnpm install`, `cargo update` or other lockfile-changing
   commands unless the task requires it.
 
@@ -71,7 +73,7 @@ Rule precedence, highest first:
 | File | Purpose |
 | --- | --- |
 | `CLAUDE.md` | these rules |
-| `TODO.md` | shared task list with lock protocol |
+| `TODO.md` | shared task list in the `todo` tool format (edited only through `todo`; IDs up to `T-0048` keep their 4-digit form, new ones continue as `T-049`…) |
 | `PROJECT_STRUCTURE.md` | repository map and summary |
 | `desktop/tauri.custom.conf.json` | "Zephium Custom" identity (`app.zephium.custom`), updater pointed at this fork, NSIS-only bundle |
 | `NativeApplication::Custom` (`zephium-private-fs` native_storage.rs) and its mapping in `zephium-store` `windows_work_storage.rs` | Windows storage only admits listed identities. Without this entry "Zephium Custom" fails at startup with "private filesystem path or node is unsafe". A new identity must be added here too |
