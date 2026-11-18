@@ -43,6 +43,221 @@ file, checks it and keeps snapshots. Run `todo help` for the commands.
 - priority: P3 · area: frame/src/features/settings/tests, frame/src/domain/ai
 - note (2026-11-14, migrated): `FeaturesLook.component.test.ts` passes but logs an unhandled rejection: `AiApps.scan` reads `response.value.apps` from a null mock (`apps.svelte.ts:47`). Comes from T-0008, not this batch.
 
+### T-049 · Review the round 2 review fixes before the release build
+- status: open
+- owner: —
+- priority: P1 · type: chore · area: crates/zephium-calendar, crates/zephium-oauth, crates/zephium-mail, desktop, frame/src/features/calendar
+- files: crates/zephium-calendar/src/ical/patch.rs, ical.rs, tz.rs, caldav.rs, vtimezone.rs, crates/zephium-oauth/src/vault.rs, crates/zephium-mail/src/metered.rs, desktop/src/mail.rs, frame/src/features/calendar/lib/keys.ts
+- problem: Review round 2 (C:\Project\zephium-orca\review\review-2-report.md) found R2-B2 (CalDAV edits dropped unmodelled properties) plus smaller items; the fixes (c9d2c245b..74942cd53 calendar/oauth, 567803f4b mail) were merged during the pause without a reviewer looking at them.
+- fix: One focused review (claude-fable-5-2 or similar) of `git diff 955d496fd..3e466b0ca` limited to those commits: raw-line patching in ical/patch.rs (master, overrides, invitation respond), floating/unknown TZID handling, sibling-host CalDAV discovery and its redirect guard, VTIMEZONE span, OAuth vault generations (ZCH2 header, failure at each step), IMAP literal-announcement cap and watcher backoff/sign_in_failed. Fix small bugs directly, file new tasks for the rest.
+- accept: Written review report with no blocking finding left; any fix commits pass cargo fmt, cargo clippy -p <crates> --all-targets --locked -D warnings and the crates' tests on Windows.
+- note (2026-11-17, coordinator): added
+
+### T-050 · Build the Zephium Custom installer and check that the release app starts
+- status: open
+- owner: —
+- priority: P1 · type: chore · area: desktop, frame
+- depends: T-049
+- problem: The whole mail/calendar batch (main 3e466b0ca) has only been compiled and unit-tested. No release build was made and the app was never launched, so packaging, the new store migrations (META v29 to v32) on a real profile and the start-up of the mail/calendar background tasks are unverified.
+- fix: With CARGO_TARGET_DIR=C:\Project\Zephium\target run `pnpm build:custom` in the background (never plain `pnpm build`). Launch target\release\zephium-desktop.exe briefly, read %APPDATA%\app.zephium.custom\zephium.log, confirm the window is shown and no migration or mail/calendar error is logged, then close only that process (path under C:\Project\Zephium). Never touch the installed Zephium in %LOCALAPPDATA%\Zephium.
+- accept: target\release\bundle\nsis\Zephium Custom_<version>_x64-setup.exe exists; the log shows the window and META v32 applied; the exact commands and results are noted on this task.
+- note (2026-11-17, coordinator): added
+
+### T-051 · Test mail, calendar and invitations with the real company account
+- status: open
+- owner: —
+- priority: P1 · type: chore · area: (user) mail, calendar
+- depends: T-050
+- problem: All mail/calendar code was tested only against fakes (fake IMAP server, fixture HTTP). Real server behaviour (IMAP of bub-agema.de, SMTP STARTTLS/SSL, CalDAV discovery, Windows Credential Manager, toasts) is unknown.
+- fix: In the installed Zephium Custom: add the IMAP account via automatic lookup (check servers shown), read, search, move, flag, delete (Trash), send and reply, save a draft, load images in an HTML mail, click a mailto: link on a web page; add the work calendar (CalDAV or ICS link), create/edit/move/delete an event incl. one occurrence of a repeating event, check a reminder toast, open a Teams link with Join, accept an invitation e-mail and confirm the organizer receives the reply; restart the app and check new-mail toast and unread badge still work. Note every failure as a new task.
+- accept: Each step above is noted as working or filed as a bug task with the exact message/behaviour.
+- note (2026-11-17, coordinator): added
+
+### T-052 · Confirm the mail reading pane renders HTML in the native WebView2 window
+- status: open
+- owner: —
+- priority: P1 · type: chore · area: frame/src/features/mail, desktop (CSP)
+- depends: T-050
+- files: frame/src/features/mail/components/ReadingPane.svelte, desktop/tauri*.conf.json (CSP)
+- problem: HTML mail is shown in a sandbox="" srcdoc iframe. The app CSP sets frame-src/child-src 'none'; by spec about:srcdoc is not governed by frame-src, but this was only reasoned, never seen in WebView2.
+- fix: In the release build open an HTML mail and check the body renders, no script runs, remote images stay blocked until 'Load images', and links are listed below the message. If WebView2 blocks the iframe, fix it with the narrowest change that keeps raw-page/privileged-frame separation (no general CSP loosening).
+- accept: Screenshot or log evidence that an HTML mail renders in the native window with the CSP unchanged (or a reviewed minimal change).
+- note (2026-11-17, coordinator): added
+
+### T-053 · Check the licences of the batch's new dependencies with cargo-deny
+- status: open
+- owner: —
+- priority: P1 · type: chore · area: Cargo.toml, Cargo.lock, deny.toml
+- problem: cargo-deny was not installed on this machine, so the new crates (async-imap, mail-parser, mail-builder, lettre, rrule, chrono-tz, phf and their dependencies) were checked by hand only. One licence problem was already found that way (quoted_printable, 0BSD, avoided by not enabling lettre's builder).
+- fix: Install cargo-deny for the pinned toolchain (ask the user first: it is a global tool) and run `cargo deny --locked check` as CI does; resolve any licence, source or advisory finding without weakening deny.toml.
+- accept: `cargo deny --locked check` passes on main, or each finding has its own task.
+- note (2026-11-17, coordinator): added
+
+### T-054 · Plan the fork's META migration numbers before the next upstream merge
+- status: open
+- owner: —
+- priority: P2 · type: chore · area: crates/zephium-store/src/migrations.rs
+- problem: The fork added META v29 (mail cache), v30 (calendar cache), v31 (calendar OAuth kind) and v32 (calendar indexes) in the upstream-owned migrations.rs. When upstream adds its own v29 the numbers collide, and existing fork databases already recorded v29 to v32 with fork fingerprints (review round 1, N11, C:\Project\zephium-orca\review\review-1-report.md).
+- fix: Before merging upstream/main: decide on a scheme, e.g. move the fork tables into a separate fork-owned migration track or database with its own version counter, or renumber with an explicit one-time upgrade that recognises the fork fingerprints. Write the decision into CLAUDE.md and test an upgrade from a profile at fork v32.
+- accept: Documented scheme plus a test that upgrades a v32 fork database after an upstream migration was added.
+- note (2026-11-17, coordinator): added
+
+### T-055 · Protect cached mail: encryption at rest and no sharing with private windows
+- status: open
+- owner: —
+- priority: P2 · type: feature · area: crates/zephium-store (mail cache), desktop/src/mail.rs
+- problem: Mail headers and bodies (up to 256 MiB) are cached unencrypted in the app-wide meta database, shared by every profile including incognito windows (review round 1, N12, C:\Project\zephium-orca\review\review-1-report.md).
+- fix: Decide the policy (e.g. no Mail in incognito windows, or a per-profile cache) and encrypt cached bodies with a key kept in the OS vault; bound and allow clearing the cache from Mail settings.
+- accept: Incognito windows cannot read cached mail; bodies on disk are not readable as plain text; tests cover both.
+- note (2026-11-17, coordinator): added
+
+### T-056 · Make expanding very long repeating events cheap
+- status: open
+- owner: —
+- priority: P2 · type: bug · area: crates/zephium-calendar/src/recur.rs
+- problem: Expansion walks every instance from DTSTART up to the query window while the service lock is held. A rule like FREQ=DAILY;COUNT=4294967295 or a series from 1900, queried far ahead, takes seconds per event (review round 2 item 3 and round 1 B2 leftover, C:\Project\zephium-orca\review\review-2-report.md). Sub-hourly rules are already refused.
+- fix: Skip ahead arithmetically for simple FREQ/INTERVAL rules without BY* parts, cache expansions per resource and ETag, and/or expand outside the service lock with a time budget.
+- accept: A test with a 1900 DAILY series and COUNT=4294967295 queried in 2030 finishes in well under 100 ms in a debug build.
+- note (2026-11-17, coordinator): added
+
+### T-057 · Bound years in Google and Microsoft calendar dates
+- status: open
+- owner: —
+- priority: P2 · type: bug · area: crates/zephium-calendar/src/provider
+- files: crates/zephium-calendar/src/provider/graph.rs:160,405, crates/zephium-calendar/src/provider/google.rs:88
+- problem: Dates from Google Calendar and Microsoft Graph are parsed without a year bound and then shifted; an absurd year would panic, and the release profile uses panic=abort, so the whole browser would close (review round 2 item 6, C:\Project\zephium-orca\review\review-2-report.md).
+- fix: Reject or clamp years outside 1..=9999 like the ICS parser does in effect; use checked date arithmetic.
+- accept: Tests feeding year 0, 10000 and i32::MAX from both providers return an error instead of panicking.
+- note (2026-11-17, coordinator): added
+
+### T-058 · Clicking a mail or reminder notification should open Zephium on it
+- status: open
+- owner: —
+- priority: P2 · type: feature · area: desktop/src/focus_alerts.rs, frame/src/domain/mail, frame/src/domain/calendar
+- problem: New-mail and calendar-reminder toasts appear, but clicking them does nothing: focus_alerts has no activation handler (T-0033, T-0044).
+- fix: Add toast activation (Windows notification activation arguments) that focuses the Zephium window and opens Mail (inbox) or Calendar (on the event); keep the toast text free of sender/subject/body.
+- accept: Clicking a new-mail toast opens Mail; clicking a reminder opens the event; tested natively on Windows.
+- note (2026-11-17, coordinator): added
+
+### T-059 · Keep the mail 'Sign-in failed' state across restarts
+- status: open
+- owner: —
+- priority: P3 · type: bug · area: desktop/src/mail.rs
+- problem: After a refused sign-in the watcher stops and the account shows 'Sign-in failed', but the flag is in memory only. After a restart the watcher tries once more against the server and flags it again, which can count towards server lockouts.
+- fix: Persist the flag per account (app setting or mail cache, no migration needed if possible) and clear it on account update or manual refresh.
+- accept: Restart with a wrong password does not contact the server until the account is updated or refreshed; test.
+- note (2026-11-17, coordinator): added
+
+### T-060 · Refuse redirects to private addresses by DNS, not only by literal IP
+- status: open
+- owner: —
+- priority: P2 · type: bug · area: crates/zephium-calendar/src/http.rs
+- problem: ICS subscription and CalDAV redirects from a public host to a private one are refused only when the target is a literal private IP or a local-looking name; a public host name that resolves to a private address is not caught (fix-calendar note, review round 1 N12).
+- fix: Reuse the public-address-only resolver from the mail image fetcher (desktop/src/mail.rs) for redirect targets after a public origin, while still allowing a private server the person typed.
+- accept: Test: a redirect to a name resolving to 10.x/127.x/fe80:: is refused; a typed internal CalDAV URL still works.
+- note (2026-11-17, coordinator): added
+
+### T-061 · Let Google and Microsoft calendars store accepted invitations
+- status: open
+- owner: —
+- priority: P3 · type: feature · area: crates/zephium-calendar/src/service/invite.rs, provider/
+- problem: Accepting an invitation only works into CalDAV calendars; Google Calendar and Microsoft Graph answer 'unsupported' because they keep their own event IDs (T-0045).
+- fix: Use the providers' import/respond APIs (Google events.import with iCalUID, Graph event accept/tentativelyAccept/decline) or create the event with the original UID where supported.
+- accept: Accepting an invitation into a Google or Microsoft calendar creates the event and sends the reply; tested with fakes.
+- note (2026-11-17, coordinator): added
+
+### T-062 · Edit single occurrences and keep all reminders on Microsoft calendars
+- status: open
+- owner: —
+- priority: P3 · type: feature · area: crates/zephium-calendar/src/provider/graph.rs
+- problem: On Microsoft Graph accounts editing one occurrence of a repeating event and some repeat-rule edits are refused (the UI says so), and Graph keeps only one reminder per event.
+- fix: Map occurrence edits to Graph instance PATCH (seriesMaster/instances) and document the single-reminder limit in the UI.
+- accept: Editing 'This event' on a Microsoft account works; tests with Graph fixtures.
+- note (2026-11-17, coordinator): added
+
+### T-063 · Invitations: alias addresses and several events in one mail
+- status: open
+- owner: —
+- priority: P3 · type: feature · area: crates/zephium-mail, frame/src/domain/mail-invitation
+- problem: The own address for invitations is only the account address (accounts have no alias field), and a message with several calendar parts for different events shows only the first.
+- fix: Add optional alias addresses to the mail account settings and pass them as own addresses; show one card per distinct UID.
+- accept: An invitation addressed to an alias can be answered; a mail with two events shows two cards; tests.
+- note (2026-11-17, coordinator): added
+
+### T-064 · Keep unmodelled lines when an instance-only invitation updates a stored series
+- status: open
+- owner: —
+- priority: P3 · type: bug · area: crates/zephium-calendar/src/invite.rs, ical/patch.rs
+- problem: When an invitation REQUEST for a single instance (RECURRENCE-ID) is merged into a stored series, the new override is written from the reduced model, so its unmodelled properties are lost. A DESCRIPTION longer than 100,000 characters is truncated when edited.
+- fix: Write the override from the iTIP text through the raw-line patcher like other edits; raise or remove the description cap on write-back if safe.
+- accept: Round-trip test of an Outlook instance-only update keeps every line of the override.
+- note (2026-11-17, coordinator): added
+
+### T-065 · Calendar UI: refresh 'today' after midnight and edit monthly/yearly days
+- status: open
+- owner: —
+- priority: P3 · type: bug · area: frame/src/features/calendar
+- files: frame/src/features/calendar/components/MonthGrid.svelte:52, RecurrenceFields.svelte
+- problem: MonthGrid computes `now` once, so the today mark is stale after midnight (TimeGrid refreshes every minute). Monthly and yearly day selectors of a repeat rule are shown read-only; only weekly weekdays are editable.
+- fix: Refresh `now` on a minute timer like TimeGrid; add editable by-month-day / by-month fields for monthly and yearly rules.
+- accept: Component tests for the midnight change and for editing a monthly rule.
+- note (2026-11-17, coordinator): added
+
+### T-066 · Time panel and tasks from calendar events: small gaps
+- status: open
+- owner: —
+- priority: P3 · type: bug · area: frame/src/features/time, frame/src/features/tasks, frame/src/domain/calendar-link
+- problem: Today's events in the Time panel are hidden when time tracking is off and in private windows; after a reload a second task can be created for the same event (T-0046).
+- fix: Show the upcoming-events list independently of time tracking (still not in private windows if that is the privacy rule); detect an existing task for the event via its calendar link before creating another.
+- accept: Component tests for both cases.
+- note (2026-11-17, coordinator): added
+
+### T-067 · Fix the pre-existing failing frame component tests
+- status: open
+- owner: —
+- priority: P2 · type: bug · area: frame/src/app/browser/tests, frame/src/features/tasks/tests
+- files: NewTabLook.component.test.ts, NewTabCustomization.component.test.ts, Tasks.component.test.ts
+- problem: NewTabLook and NewTabCustomization component tests fail because captionReplay is not mocked; Tasks.component 'typing in a task says nothing about saving' fails on MutationObserver. They failed on the branch before the mail/calendar batch touched those files.
+- fix: Add the missing mocks / fix the observer setup; confirm on Windows Chromium (and note that hosted component CI runs on macOS WebKit).
+- accept: `pnpm --dir frame exec vitest run --project component` passes for these files.
+- note (2026-11-17, coordinator): added
+
+### T-068 · Stop frame unit tests timing out when the machine is busy
+- status: open
+- owner: —
+- priority: P3 · type: bug · area: frame (vitest config, architecture.config.test.ts)
+- problem: Under load (parallel cargo builds) the full `pnpm --dir frame run check` fails with 5 s timeouts in architecture.config.test.ts (cold ESLint load) and sometimes settings-model, operations, close, theme or frame-thumbs tests; each passes when run alone.
+- fix: Give the ESLint-backed architecture test an explicit longer timeout or warm the linter once in beforeAll; look for real slowness in the others before touching timeouts (do not raise timeouts globally).
+- accept: Full frame check passes while a cargo build runs in parallel.
+- note (2026-11-17, coordinator): added
+
+### T-069 · Fix the zephium-store clippy warning without the work-execution feature
+- status: open
+- owner: —
+- priority: P3 · type: bug · area: crates/zephium-store/src/hub/work_document.rs
+- problem: `cargo clippy -p zephium-calendar --all-targets --locked -- -D warnings` alone fails on an unused `media` variable at work_document.rs:235 when zephium-store is built without the `work-execution` feature. The workspace clippy passes because another crate enables the feature. Baseline upstream code.
+- fix: Gate the variable with the same cfg as its use (or report upstream).
+- accept: Per-crate clippy for zephium-calendar passes.
+- note (2026-11-17, coordinator): added
+
+### T-070 · Load remote mail images through the system proxy
+- status: open
+- owner: —
+- priority: P3 · type: feature · area: desktop/src/mail.rs (mail_fetch_remote_images), autoconfig fetch
+- problem: The remote-image fetcher and the autoconfig lookup ignore system proxies (on purpose, to keep the public-address check exact), so on proxy-only networks 'Load images' and automatic server lookup fail.
+- fix: Support the system proxy while keeping the public-address and redirect checks meaningful (e.g. check the target host before sending to the proxy).
+- accept: Images load behind an HTTP proxy in a test setup; the private-address refusal tests still pass.
+- note (2026-11-17, coordinator): added
+
+### T-071 · Optional: POP3 accounts and Zephium as the Windows default mail app
+- status: open
+- owner: —
+- priority: P3 · type: feature · area: crates/zephium-mail, desktop
+- problem: POP3 is not implemented (the engine is IMAP-only), and Zephium cannot be registered as the system mailto: handler; only mailto: links inside Zephium open its compose (T-0036).
+- fix: POP3 only if a real need appears; default-app registration needs an installer/registry change and the user's consent (system setting).
+- accept: Decision recorded; if done, mailto: from other apps opens Zephium's compose.
+- note (2026-11-17, coordinator): added
+
 ## Done
 
 ### T-0006 · Remove macOS-specific code (Windows-only fork)
